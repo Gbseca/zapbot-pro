@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZapBot Pro — Automação WhatsApp</title>
+  <meta name="description" content="Envio automatizado de mensagens WhatsApp com imagens. Custo zero, 100% local e gratuito.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- ── Sidebar ───────────────────────────────────────── -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-icon">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="10" fill="url(#grad)"/>
+            <path d="M16 6C10.48 6 6 10.48 6 16c0 1.96.56 3.78 1.52 5.32L6 26l4.82-1.48C12.28 25.46 14.1 26 16 26c5.52 0 10-4.48 10-10S21.52 6 16 6z" fill="white" fill-opacity="0.9"/>
+            <path d="M21 18.5c-.3.8-1.5 1.5-2.1 1.6-.6.1-1.3.1-4.1-1.6-2.4-1.5-4-4.1-4.1-4.3-.1-.2-.9-1.3-.9-2.4 0-1.1.6-1.7.8-1.9.2-.2.5-.3.7-.3h.5c.2 0 .4.1.5.4.2.5.7 1.7.8 1.8.1.2.1.4 0 .6-.1.2-.2.3-.3.5-.1.1-.2.3-.1.5.3.5.8 1.2 1.4 1.7.6.5 1.2.9 1.8 1.1.2.1.4 0 .5-.1l.5-.6c.1-.2.3-.2.5-.1.2.1 1.4.6 1.6.7.2.1.3.2.3.3 0 .2 0 .8-.3 1.6z" fill="#128C7E"/>
+            <defs>
+              <linearGradient id="grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#7c3aed"/>
+                <stop offset="1" stop-color="#a855f7"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="logo-text">
+          <span class="logo-name">ZapBot Pro</span>
+          <span class="logo-sub">WhatsApp Automation</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="connection" id="nav-connection">
+          <span class="nav-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg>
+          </span>
+          <span class="nav-label">Conexão</span>
+          <span class="nav-badge" id="badge-connection"></span>
+        </button>
+        <button class="nav-item" data-tab="contacts" id="nav-contacts">
+          <span class="nav-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 7a4 4 0 100 8 4 4 0 000-8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+          </span>
+          <span class="nav-label">Contatos</span>
+          <span class="nav-badge" id="badge-contacts"></span>
+        </button>
+        <button class="nav-item" data-tab="message" id="nav-message">
+          <span class="nav-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          </span>
+          <span class="nav-label">Mensagem</span>
+          <span class="nav-badge" id="badge-message"></span>
+        </button>
+        <button class="nav-item" data-tab="schedule" id="nav-schedule">
+          <span class="nav-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          </span>
+          <span class="nav-label">Agendamento</span>
+          <span class="nav-badge" id="badge-schedule"></span>
+        </button>
+        <button class="nav-item" data-tab="campaign" id="nav-campaign">
+          <span class="nav-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 19-7z"/></svg>
+          </span>
+          <span class="nav-label">Campanha</span>
+          <span class="nav-badge" id="badge-campaign"></span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="connection-pill" id="connection-pill">
+          <span class="pill-dot" id="pill-dot"></span>
+          <span class="pill-text" id="pill-text">Desconectado</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Main Content ──────────────────────────────────── -->
+    <main class="main-content">
+
+      <!-- ── Tab: Connection ────────────── -->
+      <section id="tab-connection" class="tab-pane active">
+        <div class="page-header">
+          <h1 class="page-title">Conexão WhatsApp</h1>
+          <p class="page-sub">Escaneie o QR Code com seu WhatsApp para começar</p>
+        </div>
+        <div class="content-grid two-col">
+          <div class="card qr-card">
+            <div class="card-header">
+              <span class="card-icon">📱</span>
+              <h2 class="card-title">QR Code</h2>
+            </div>
+            <div class="qr-container" id="qr-container">
+              <div class="qr-placeholder" id="qr-placeholder">
+                <div class="qr-spinner-ring"></div>
+                <p>Gerando QR Code...</p>
+              </div>
+              <img id="qr-image" src="" alt="QR Code WhatsApp" class="qr-image hidden">
+              <div class="qr-connected hidden" id="qr-connected">
+                <div class="connected-anim">
+                  <div class="connected-circle">✅</div>
+                </div>
+                <p class="connected-text">WhatsApp Conectado!</p>
+                <p class="connected-sub">Pronto para enviar mensagens</p>
+              </div>
+            </div>
+            <div class="qr-actions">
+              <button class="btn btn-outline btn-sm" id="btn-disconnect" onclick="disconnectWhatsApp()">
+                🔄 Trocar Conta / Reconectar
+              </button>
+            </div>
+            <div class="qr-instructions">
+              <h3>Como conectar:</h3>
+              <ol>
+                <li>Abra o <strong>WhatsApp</strong> no celular</li>
+                <li>Toque nos <strong>3 pontinhos</strong> → <strong>Dispositivos conectados</strong></li>
+                <li>Toque em <strong>Conectar um dispositivo</strong></li>
+                <li>Aponte a câmera para o QR Code</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">ℹ️</span>
+              <h2 class="card-title">Status da Conexão</h2>
+            </div>
+            <div class="status-info">
+              <div class="status-row">
+                <span class="status-label">Estado:</span>
+                <span id="status-text" class="status-value status-disconnected">● Desconectado</span>
+              </div>
+            </div>
+            <div class="info-box">
+              <h3>⚡ Como funciona</h3>
+              <p>O ZapBot Pro usa a mesma tecnologia do <strong>WhatsApp Web</strong> para enviar mensagens. Suas credenciais são salvas <strong>localmente</strong> e nunca compartilhadas com servidores externos.</p>
+            </div>
+            <div class="warning-box">
+              <h3>⚠️ Aviso Importante</h3>
+              <p>O uso de automação pode violar os <strong>Termos de Uso do WhatsApp</strong>. Use com responsabilidade e prefira um <strong>número secundário</strong> para campanhas em massa.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Tab: Contacts ──────────────── -->
+      <section id="tab-contacts" class="tab-pane">
+        <div class="page-header">
+          <h1 class="page-title">Lista de Contatos</h1>
+          <p class="page-sub">Formato: DDD + número (ex: 11999990000) — apenas Brasil</p>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">👥</span>
+            <h2 class="card-title">Números Alvo</h2>
+            <div class="card-actions">
+              <button class="btn btn-outline btn-sm" onclick="clearContacts()">🗑️ Limpar</button>
+              <button class="btn btn-outline btn-sm" onclick="importExample()">📋 Exemplo</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Números de telefone <span class="label-hint">— um por linha</span></label>
+            <textarea
+              id="contacts-textarea"
+              class="form-textarea mono"
+              placeholder="11999990000&#10;21988887777&#10;31977776666&#10;41966665555&#10;..."
+              rows="16"
+              oninput="validateContactsList()"
+            ></textarea>
+          </div>
+          <div class="validation-summary" id="validation-summary">
+            <div class="val-item">
+              <span class="val-num" id="val-total">0</span>
+              <span class="val-label">Total</span>
+            </div>
+            <div class="val-item val-valid">
+              <span class="val-num" id="val-valid">0</span>
+              <span class="val-label">✅ Válidos</span>
+            </div>
+            <div class="val-item val-invalid">
+              <span class="val-num" id="val-invalid">0</span>
+              <span class="val-label">❌ Inválidos</span>
+            </div>
+          </div>
+          <div id="invalid-list" class="invalid-numbers hidden">
+            <h4>⚠️ Números com formato inválido:</h4>
+            <div id="invalid-items" class="invalid-items-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Tab: Message ───────────────── -->
+      <section id="tab-message" class="tab-pane">
+        <div class="page-header">
+          <h1 class="page-title">Mensagem</h1>
+          <p class="page-sub">Compose sua mensagem com emojis, image e opções de resposta</p>
+        </div>
+        <div class="content-grid two-col">
+
+          <!-- Compositor -->
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <div class="card">
+              <div class="card-header">
+                <span class="card-icon">✍️</span>
+                <h2 class="card-title">Compositor</h2>
+              </div>
+
+              <div class="form-group">
+                <div class="textarea-header">
+                  <label class="form-label">Texto da mensagem</label>
+                  <div class="textarea-tools">
+                    <button class="tool-btn" id="emoji-btn" onclick="toggleEmojiPicker(event)" title="Inserir emoji">😀</button>
+                    <button class="tool-btn" onclick="wrapSelection('*')" title="Negrito WhatsApp">*B*</button>
+                    <button class="tool-btn" onclick="wrapSelection('_')" title="Itálico WhatsApp">_I_</button>
+                    <button class="tool-btn" onclick="wrapSelection('~')" title="Tachado">~S~</button>
+                  </div>
+                </div>
+                <div class="message-editor-wrapper" style="position:relative;">
+                  <textarea
+                    id="message-textarea"
+                    class="form-textarea"
+                    placeholder="sua mensagem aqui...&#10;&#10;💡 Use {{numero}} para inserir o número do contato automaticamente."
+                    rows="7"
+                    oninput="updateMessagePreview(); updateCharCount();"
+                  ></textarea>
+                  <!-- Emoji Picker -->
+                  <div id="emoji-picker" class="emoji-picker hidden">
+                    <div class="emoji-search">
+                      <input type="text" id="emoji-search-input" placeholder="Buscar emoji..." oninput="filterEmojis(this.value)">
+                    </div>
+                    <div class="emoji-tabs" id="emoji-tabs">
+                      <button class="emoji-tab active" onclick="switchEmojiCat('smileys', this)" title="Rostos">😀</button>
+                      <button class="emoji-tab" onclick="switchEmojiCat('gestures', this)" title="Gestos">👍</button>
+                      <button class="emoji-tab" onclick="switchEmojiCat('hearts', this)" title="Corações">❤️</button>
+                      <button class="emoji-tab" onclick="switchEmojiCat('objects', this)" title="Objetos">🔥</button>
+                      <button class="emoji-tab" onclick="switchEmojiCat('symbols', this)" title="Símbolos">✅</button>
+                      <button class="emoji-tab" onclick="switchEmojiCat('numbers', this)" title="Números">1️⃣</button>
+                    </div>
+                    <div id="emoji-grid" class="emoji-grid"></div>
+                  </div>
+                </div>
+                <div class="char-counter"><span id="char-count">0</span> caracteres</div>
+              </div>
+            </div>
+
+            <!-- Reaction Builder -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-icon">1️⃣</span>
+                <h2 class="card-title">Opções de Resposta</h2>
+              </div>
+              <p class="hint-text" style="margin-bottom:12px;">Adicione opções numeradas para o contato responder:</p>
+              <div id="reactions-list"></div>
+              <div class="reactions-actions">
+                <button class="btn btn-outline btn-sm" onclick="addReaction()">➕ Adicionar opção</button>
+                <button class="btn btn-purple btn-sm" onclick="insertReactionsInMessage()">↓ Inserir na mensagem</button>
+                <button class="btn btn-outline btn-sm" onclick="clearReactions()">🗑️ Limpar</button>
+              </div>
+            </div>
+
+            <!-- Image Upload -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-icon">🖼️</span>
+                <h2 class="card-title">Imagem (opcional)</h2>
+              </div>
+              <div class="upload-area" id="upload-area"
+                   onclick="document.getElementById('image-input').click()"
+                   ondrop="handleImageDrop(event)"
+                   ondragover="handleDragOver(event)"
+                   ondragleave="handleDragLeave(event)">
+                <input type="file" id="image-input" accept="image/*" hidden onchange="handleImageSelect(event)">
+                <div class="upload-placeholder" id="upload-placeholder">
+                  <span class="upload-icon">🖼️</span>
+                  <p>Clique ou arraste uma imagem aqui</p>
+                  <span class="upload-hint">JPG, PNG, GIF, WebP • máx. 16MB</span>
+                </div>
+                <div class="upload-preview hidden" id="upload-preview">
+                  <img id="preview-img" src="" alt="Preview da imagem">
+                  <div class="preview-overlay">
+                    <button class="preview-remove-btn" onclick="removeImage(event)">✕ Remover imagem</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div><!-- /left col -->
+
+          <!-- Preview Phone -->
+          <div class="card preview-card" style="align-self:start;position:sticky;top:20px;">
+            <div class="card-header">
+              <span class="card-icon">👁️</span>
+              <h2 class="card-title">Preview da Mensagem</h2>
+            </div>
+            <div class="phone-frame">
+              <div class="phone-notch"></div>
+              <div class="phone-screen">
+                <div class="chat-header-bar">
+                  <div class="chat-avatar-circle">G</div>
+                  <div class="chat-contact-info">
+                    <span class="chat-contact-name">Contato</span>
+                    <span class="chat-contact-status">online</span>
+                  </div>
+                </div>
+                <div class="chat-body-area">
+                  <div class="chat-date-divider">Hoje</div>
+                  <div class="message-bubble-out" id="message-preview">
+                    <div class="bubble-image-preview hidden" id="preview-image-bubble">
+                      <img id="bubble-img" src="" alt="">
+                    </div>
+                    <div class="bubble-text-preview" id="preview-text">
+                      <em style="color:#666">Sua mensagem aparecerá aqui...</em>
+                    </div>
+                    <div class="bubble-meta">
+                      <span>agora</span>
+                      <span class="bubble-ticks">✓✓</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /content-grid -->
+      </section>
+
+      <!-- ── Tab: Schedule ──────────────── -->
+      <section id="tab-schedule" class="tab-pane">
+        <div class="page-header">
+          <h1 class="page-title">Agendamento</h1>
+          <p class="page-sub">Configure intervalos, janela de horário e proteções anti-banimento</p>
+        </div>
+        <div class="content-grid two-col">
+
+          <!-- Interval -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">⏱️</span>
+              <h2 class="card-title">Intervalo entre Mensagens</h2>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Modo de intervalo</label>
+              <div class="radio-group">
+                <label class="radio-card">
+                  <input type="radio" name="interval-mode" value="fixed" checked onchange="updateIntervalMode()">
+                  <div class="radio-content">
+                    <span class="radio-icon">📏</span>
+                    <span class="radio-label">Fixo</span>
+                    <span class="radio-desc">Sempre o mesmo tempo</span>
+                  </div>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="interval-mode" value="random" onchange="updateIntervalMode()">
+                  <div class="radio-content">
+                    <span class="radio-icon">🎲</span>
+                    <span class="radio-label">Aleatório</span>
+                    <span class="radio-desc">Mais seguro (recomendado)</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+            <div id="interval-fixed-group" class="form-group">
+              <label class="form-label">Intervalo (segundos)</label>
+              <div class="input-with-unit">
+                <input type="number" id="interval-fixed-val" class="form-input" value="45" min="5" max="3600" oninput="updateEstimate()">
+                <span class="input-unit">seg</span>
+              </div>
+            </div>
+            <div id="interval-random-group" class="form-group hidden">
+              <label class="form-label">Intervalo aleatório entre</label>
+              <div class="range-row">
+                <div class="input-with-unit">
+                  <input type="number" id="interval-min" class="form-input" value="20" min="5" max="3600" oninput="updateEstimate()">
+                  <span class="input-unit">mín</span>
+                </div>
+                <span class="range-sep">até</span>
+                <div class="input-with-unit">
+                  <input type="number" id="interval-max" class="form-input" value="90" min="5" max="3600" oninput="updateEstimate()">
+                  <span class="input-unit">máx</span>
+                </div>
+              </div>
+              <p class="hint-text">Segundos. Recomendado: entre 20s e 90s</p>
+            </div>
+          </div>
+
+          <!-- Time Window -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">🕐</span>
+              <h2 class="card-title">Janela de Horário</h2>
+            </div>
+            <div class="form-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="use-window" onchange="toggleTimeWindow()">
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                <span>Restringir horário de envio</span>
+              </label>
+              <p class="hint-text">Mensagens só serão enviadas no horário definido abaixo.</p>
+            </div>
+            <div id="time-window-settings" class="hidden">
+              <div class="form-group">
+                <label class="form-label">Horário de início</label>
+                <input type="time" id="window-start" class="form-input" value="08:00">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Horário de término</label>
+                <input type="time" id="window-end" class="form-input" value="20:00">
+              </div>
+            </div>
+          </div>
+
+          <!-- Anti-restriction -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">🛡️</span>
+              <h2 class="card-title">Proteção Anti-Restrição</h2>
+            </div>
+            <div class="form-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="anti-typing" checked>
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                <span>Simular digitação antes de enviar</span>
+              </label>
+              <p class="hint-text">Envia indicador "digitando..." por ~2.5s antes da mensagem.</p>
+            </div>
+            <div class="form-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="anti-variation" checked>
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                <span>Variação de mensagem (anti-spam)</span>
+              </label>
+              <p class="hint-text">Adiciona um caractere invisível único em cada mensagem para evitar detecção de padrão.</p>
+            </div>
+            <div class="form-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="anti-limit" onchange="toggleDailyLimit()">
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                <span>Limite diário de envios</span>
+              </label>
+            </div>
+            <div id="limit-settings" class="hidden form-group">
+              <label class="form-label">Máximo por dia</label>
+              <div class="input-with-unit">
+                <input type="number" id="daily-limit" class="form-input" value="50" min="1" max="1000">
+                <span class="input-unit">msg/dia</span>
+              </div>
+            </div>
+            <div class="warning-box compact">
+              <p>⚠️ Para contas novas recomendamos máximo de <strong>30–50 mensagens/dia</strong>.</p>
+            </div>
+          </div>
+
+          <!-- Estimate -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">📊</span>
+              <h2 class="card-title">Estimativa de Campanha</h2>
+            </div>
+            <div class="estimate-grid">
+              <div class="estimate-item">
+                <span class="est-value" id="est-contacts">0</span>
+                <span class="est-label">Contatos</span>
+              </div>
+              <div class="estimate-item">
+                <span class="est-value" id="est-interval">45s</span>
+                <span class="est-label">Intervalo médio</span>
+              </div>
+              <div class="estimate-item">
+                <span class="est-value" id="est-duration">—</span>
+                <span class="est-label">Duração total</span>
+              </div>
+              <div class="estimate-item">
+                <span class="est-value" id="est-end">—</span>
+                <span class="est-label">Término estimado</span>
+              </div>
+            </div>
+            <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px;" onclick="updateEstimate()">🔄 Recalcular</button>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ── Tab: Campaign ──────────────── -->
+      <section id="tab-campaign" class="tab-pane">
+        <div class="page-header">
+          <h1 class="page-title">Campanha</h1>
+          <p class="page-sub">Gerencie e monitore o envio em tempo real</p>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-icon">📤</div>
+            <div class="stat-value" id="stat-total">0</div>
+            <div class="stat-label">Total</div>
+          </div>
+          <div class="stat-card stat-success">
+            <div class="stat-icon">✅</div>
+            <div class="stat-value" id="stat-sent">0</div>
+            <div class="stat-label">Enviadas</div>
+          </div>
+          <div class="stat-card stat-error">
+            <div class="stat-icon">❌</div>
+            <div class="stat-value" id="stat-failed">0</div>
+            <div class="stat-label">Falhas</div>
+          </div>
+          <div class="stat-card stat-pending">
+            <div class="stat-icon">⏳</div>
+            <div class="stat-value" id="stat-pending">0</div>
+            <div class="stat-label">Pendentes</div>
+          </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="card progress-card">
+          <div class="progress-header">
+            <span id="campaign-status-label" class="campaign-status-badge status-idle">💤 Aguardando</span>
+            <span id="progress-pct" class="progress-pct">0%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="card controls-card">
+          <div class="controls-row">
+            <button class="btn btn-primary btn-lg" id="btn-start" onclick="startCampaign()">
+              🚀 Iniciar Campanha
+            </button>
+            <button class="btn btn-warning btn-lg hidden" id="btn-pause" onclick="pauseCampaign()">
+              ⏸️ Pausar
+            </button>
+            <button class="btn btn-success btn-lg hidden" id="btn-resume" onclick="resumeCampaign()">
+              ▶️ Retomar
+            </button>
+            <button class="btn btn-danger btn-lg hidden" id="btn-stop" onclick="stopCampaign()">
+              🛑 Parar
+            </button>
+          </div>
+          <p class="controls-hint" id="controls-hint">Configure os contatos, mensagem e agendamento nas abas anteriores.</p>
+        </div>
+
+        <!-- Queue + Log -->
+        <div class="content-grid two-col">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">📋</span>
+              <h2 class="card-title">Fila de Envio</h2>
+            </div>
+            <div class="queue-list" id="queue-list">
+              <div class="queue-empty">Nenhuma campanha carregada ainda</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">💻</span>
+              <h2 class="card-title">Log em Tempo Real</h2>
+              <div class="card-actions">
+                <button class="btn btn-outline btn-sm" onclick="clearLog()">🗑️ Limpar</button>
+              </div>
+            </div>
+            <div class="log-console" id="log-console">
+              <div class="log-line log-info">[Sistema] ZapBot Pro iniciado. Aguardando conexão WhatsApp...</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </main><!-- /main-content -->
+  </div><!-- /app -->
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

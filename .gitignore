@@ -1,0 +1,8 @@
+# ZapBot Pro
+
+node_modules/
+backend/node_modules/
+backend/auth_info/
+*.log
+.env
+.DS_Store
