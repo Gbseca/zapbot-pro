@@ -1,16 +1,19 @@
-const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
-const cors = require('cors');
-const multer = require('multer');
-const path = require('path');
+import express from 'express';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import cors from 'cors';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import WhatsAppManager from './whatsapp.js';
+import MessageQueue from './queue.js';
 
-const WhatsAppManager = require('./whatsapp');
-const MessageQueue = require('./queue');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocketServer({ server });
 
 // Middleware
 app.use(cors());
@@ -31,14 +34,12 @@ wa.connect();
 
 // Send current state to newly connected WebSocket clients
 wss.on('connection', (ws) => {
-    // Current WhatsApp state
     const waStatus = wa.getStatus();
     ws.send(JSON.stringify({ type: 'status', status: waStatus.status }));
     if (waStatus.qrCode) {
         ws.send(JSON.stringify({ type: 'qr', qr: waStatus.qrCode }));
     }
 
-    // Current campaign state
     const progress = queue.getProgress();
     ws.send(JSON.stringify({ type: 'campaign_status', status: progress.status }));
     ws.send(JSON.stringify({ type: 'stats', stats: progress.stats }));
@@ -56,12 +57,10 @@ wss.on('connection', (ws) => {
 
 // ── REST API ──────────────────────────────────────────────────────────────────
 
-// WhatsApp status
 app.get('/api/status', (req, res) => {
     res.json(wa.getStatus());
 });
 
-// Disconnect / reset session
 app.post('/api/disconnect', async (req, res) => {
     try {
         await wa.clearSession();
@@ -72,7 +71,6 @@ app.post('/api/disconnect', async (req, res) => {
     }
 });
 
-// Start campaign — accepts multipart/form-data with optional image
 app.post('/api/campaign/start', upload.single('image'), (req, res) => {
     try {
         const data = JSON.parse(req.body.data);
@@ -101,7 +99,6 @@ app.post('/api/campaign/start', upload.single('image'), (req, res) => {
     }
 });
 
-// Campaign controls
 app.post('/api/campaign/pause', (req, res) => {
     queue.pause();
     res.json({ success: true });
@@ -117,7 +114,6 @@ app.post('/api/campaign/stop', (req, res) => {
     res.json({ success: true });
 });
 
-// Campaign progress
 app.get('/api/campaign/progress', (req, res) => {
     res.json(queue.getProgress());
 });

@@ -9,7 +9,6 @@ class MessageQueue {
         this.timer = null;
         this.stats = { total: 0, sent: 0, failed: 0, pending: 0 };
         this.dailySent = 0;
-        this.dailyReset = null;
     }
 
     broadcast(data) {
@@ -26,7 +25,6 @@ class MessageQueue {
     }
 
     initCampaign({ numbers, message, imageBuffer, scheduleConfig, antiRestriction }) {
-        // Reset state
         this.status = 'idle';
         this.currentIndex = 0;
         this.dailySent = 0;
@@ -75,9 +73,9 @@ class MessageQueue {
     }
 
     isDailyLimitReached() {
-        const sc = this.config?.antiRestriction;
-        if (!sc?.useLimit) return false;
-        return this.dailySent >= (parseInt(sc.dailyLimit) || 50);
+        const ar = this.config?.antiRestriction;
+        if (!ar?.useLimit) return false;
+        return this.dailySent >= (parseInt(ar.dailyLimit) || 50);
     }
 
     addVariation(text) {
@@ -136,16 +134,14 @@ class MessageQueue {
             return;
         }
 
-        // Check time window
         if (!this.isInTimeWindow()) {
             this.log('warning', '⏰ Fora da janela de horário. Verificando novamente em 60s...');
             this.timer = setTimeout(() => this.processNext(), 60000);
             return;
         }
 
-        // Check daily limit
         if (this.isDailyLimitReached()) {
-            this.log('warning', `⚠️ Limite diário de ${this.config.antiRestriction.dailyLimit} mensagens atingido. Retomando amanhã.`);
+            this.log('warning', `⚠️ Limite diário atingido. Campanha pausada.`);
             this.status = 'paused';
             this.broadcast({ type: 'campaign_status', status: 'paused' });
             return;
@@ -158,12 +154,10 @@ class MessageQueue {
         try {
             let text = this.personalize(item.message, item.number);
 
-            // Anti-restriction: message variation
             if (this.config?.antiRestriction?.variation) {
                 text = this.addVariation(text);
             }
 
-            // Anti-restriction: simulate typing
             if (this.config?.antiRestriction?.typing) {
                 this.log('info', `✍️ Simulando digitação para ${item.number}...`);
                 await this.wa.sendTyping(item.number);
@@ -208,7 +202,7 @@ class MessageQueue {
                 delay = this.getFixedDelay(sc.intervalFixed);
             }
 
-            this.log('info', `⏳ Aguardando ${(delay / 1000).toFixed(0)}s antes da próxima mensagem...`);
+            this.log('info', `⏳ Aguardando ${(delay / 1000).toFixed(0)}s...`);
             this.timer = setTimeout(() => this.processNext(), delay);
         }
     }
@@ -228,4 +222,4 @@ class MessageQueue {
     }
 }
 
-module.exports = MessageQueue;
+export default MessageQueue;

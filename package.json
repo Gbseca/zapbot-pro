@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "ZapBot Pro - Automação de WhatsApp custo zero",
   "main": "backend/server.js",
+  "type": "module",
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node backend/server.js"

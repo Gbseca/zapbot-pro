@@ -1,8 +1,12 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode');
-const path = require('path');
-const fs = require('fs');
-const pino = require('pino');
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import qrcode from 'qrcode';
+import path from 'path';
+import fs from 'fs';
+import pino from 'pino';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class WhatsAppManager {
     constructor(wss) {
@@ -70,7 +74,7 @@ class WhatsAppManager {
                         setTimeout(() => this.connect(), 3000);
                     } else {
                         console.log('[WhatsApp] Sessão encerrada (logout).');
-                        this.broadcast({ type: 'log', level: 'warning', message: '⚠️ Sessão do WhatsApp encerrada. Reconecte escaneando o QR.' });
+                        this.broadcast({ type: 'log', level: 'warning', message: '⚠️ Sessão encerrada. Reconecte escaneando o QR.' });
                     }
                 }
 
@@ -118,9 +122,7 @@ class WhatsAppManager {
             await this.sock.sendPresenceUpdate('composing', jid);
             await new Promise(r => setTimeout(r, duration));
             await this.sock.sendPresenceUpdate('paused', jid);
-        } catch (e) {
-            // Ignora erros de typing silenciosamente
-        }
+        } catch (e) { /* ignora */ }
     }
 
     getStatus() {
@@ -143,4 +145,4 @@ class WhatsAppManager {
     }
 }
 
-module.exports = WhatsAppManager;
+export default WhatsAppManager;
