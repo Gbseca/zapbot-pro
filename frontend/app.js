@@ -9,9 +9,10 @@ const state = {
   waStatus: 'disconnected',
   campaignStatus: 'idle',
   validNumbers: [],
-  selectedImage: null,   // File object
+  selectedImage: null,
   emojiCategory: 'smileys',
   reactionCount: 1,
+  pollMode: false,
   queue: [],
   stats: { total: 0, sent: 0, failed: 0, pending: 0 },
 };
@@ -82,6 +83,13 @@ function handleWsMessage(data) {
     case 'queue_update': updateQueueItem(data.index, data.status, data.sentAt, data.error); break;
     case 'campaign_status': handleCampaignStatus(data.status); break;
     case 'campaign_loaded': handleCampaignLoaded(data); break;
+    case 'campaign_cleared':
+      state.queue = [];
+      state.stats = { total: 0, sent: 0, failed: 0, pending: 0 };
+      renderQueueList();
+      updateStats(state.stats);
+      handleCampaignStatus('idle');
+      break;
   }
 }
 
@@ -338,6 +346,18 @@ function clearReactions() {
   renderReactions();
 }
 
+// Ativa/desativa modo enquete nativa
+function togglePollMode() {
+  state.pollMode = document.getElementById('poll-mode').checked;
+  const group = document.getElementById('poll-question-group');
+  if (state.pollMode) {
+    group.classList.remove('hidden');
+    showToast('📊 Modo enquete ativo! As opções serão enviadas como enquete nativa.', 'info');
+  } else {
+    group.classList.add('hidden');
+  }
+}
+
 function collectReactionValues() {
   const vals = [];
   for (let i = 0; i < state.reactionCount; i++) {
@@ -349,18 +369,18 @@ function collectReactionValues() {
 
 function insertReactionsInMessage() {
   const vals = collectReactionValues();
-  const hasContent = vals.some(v => v.trim());
-  if (!hasContent) { showToast('Preencha ao menos uma opção de resposta.', 'warning'); return; }
+  // Usa valor preenchido ou texto padrão para campos vazios
+  const options = vals.map((v, i) => v.trim() || `Opção ${i + 1}`);
 
   const block = '\n\n*Selecione uma opção:*\n' +
-    vals.map((v, i) => `${REACTION_EMOJIS[i]} ${v || `Opção ${i+1}`}`).join('\n') +
+    options.map((v, i) => `${REACTION_EMOJIS[i]} ${v}`).join('\n') +
     '\n\n*Responda com o número da sua escolha.*';
 
   const ta = document.getElementById('message-textarea');
   ta.value += block;
   updateMessagePreview();
   updateCharCount();
-  showToast('Reações inseridas na mensagem!', 'success');
+  showToast('Opções inseridas na mensagem!', 'success');
 }
 
 // ── Image Upload ───────────────────────────────────────────
@@ -519,6 +539,20 @@ async function startCampaign() {
     return;
   }
 
+  // Coletar dados de enquete (se modo poll ativo)
+  const pollMode = document.getElementById('poll-mode')?.checked || false;
+  let pollOptions = [];
+  let pollQuestion = '';
+  if (pollMode) {
+    const vals = collectReactionValues();
+    pollOptions = vals.map((v, i) => v.trim() || `Opção ${i + 1}`);
+    pollQuestion = document.getElementById('poll-question')?.value?.trim() || '';
+    if (pollOptions.length < 2) {
+      showToast('A enquete precisa de pelo menos 2 opções!', 'error');
+      return;
+    }
+  }
+
   const mode = document.querySelector('input[name="interval-mode"]:checked').value;
   const scheduleConfig = {
     intervalMode: mode,
@@ -540,6 +574,9 @@ async function startCampaign() {
   const payload = {
     numbers: state.validNumbers,
     message,
+    pollEnabled: pollMode,
+    pollOptions,
+    pollQuestion,
     scheduleConfig,
     antiRestriction,
   };
@@ -560,6 +597,7 @@ async function startCampaign() {
 
     if (r.ok) {
       showToast(d.message || 'Campanha iniciada!', 'success');
+      switchTab('campaign');
     } else {
       showToast(d.error || 'Erro ao iniciar.', 'error');
     }
@@ -581,6 +619,25 @@ async function resumeCampaign() {
 async function stopCampaign() {
   if (!confirm('Tem certeza que deseja parar a campanha?')) return;
   await fetch('/api/campaign/stop', { method: 'POST' });
+}
+
+async function clearQueue() {
+  if (state.campaignStatus === 'running') {
+    showToast('Pause ou pare a campanha antes de limpar.', 'warning');
+    return;
+  }
+  if (!confirm('Limpar todo o histórico da fila?')) return;
+  try {
+    const r = await fetch('/api/campaign/clear', { method: 'POST' });
+    const d = await r.json();
+    if (r.ok) {
+      showToast('Histórico limpo!', 'success');
+    } else {
+      showToast(d.error || 'Erro ao limpar.', 'error');
+    }
+  } catch (err) {
+    showToast('Erro: ' + err.message, 'error');
+  }
 }
 
 // ── Campaign Status Updates ────────────────────────────────

@@ -3,7 +3,7 @@ class MessageQueue {
         this.wa = wa;
         this.wss = wss;
         this.queue = [];
-        this.status = 'idle'; // idle | running | paused | stopped | completed
+        this.status = 'idle';
         this.currentIndex = 0;
         this.config = null;
         this.timer = null;
@@ -24,7 +24,8 @@ class MessageQueue {
         console.log(`[${level.toUpperCase()}] ${message}`);
     }
 
-    initCampaign({ numbers, message, imageBuffer, scheduleConfig, antiRestriction }) {
+    // Inicializa a campanha com suporte a enquetes nativas
+    initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction }) {
         this.status = 'idle';
         this.currentIndex = 0;
         this.dailySent = 0;
@@ -34,6 +35,9 @@ class MessageQueue {
             number: n,
             message,
             imageBuffer: imageBuffer || null,
+            pollEnabled: pollEnabled || false,
+            pollOptions: pollOptions || [],
+            pollQuestion: pollQuestion || '',
             status: 'pending',
             sentAt: null,
             error: null
@@ -49,7 +53,24 @@ class MessageQueue {
             queue: this.queue.map(q => ({ number: q.number, status: q.status }))
         });
 
-        this.log('info', `📋 Campanha carregada com ${total} contatos.`);
+        const pollInfo = pollEnabled ? ' + enquete nativa' : '';
+        this.log('info', `📋 Campanha carregada com ${total} contatos${pollInfo}.`);
+    }
+
+    // Limpa toda a fila e redefine estado
+    clear() {
+        if (this.status === 'running') {
+            this.log('warning', '⛔ Pare a campanha antes de limpar o histórico.');
+            return false;
+        }
+        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        this.queue = [];
+        this.currentIndex = 0;
+        this.stats = { total: 0, sent: 0, failed: 0, pending: 0 };
+        this.status = 'idle';
+        this.broadcast({ type: 'campaign_cleared' });
+        this.log('info', '🗑️ Histórico da fila limpo.');
+        return true;
     }
 
     getRandomDelay(minSec, maxSec) {
@@ -130,18 +151,18 @@ class MessageQueue {
         if (this.currentIndex >= this.queue.length) {
             this.status = 'completed';
             this.broadcast({ type: 'campaign_status', status: 'completed' });
-            this.log('success', `🎉 Campanha concluída! ✅ ${this.stats.sent} enviadas | ❌ ${this.stats.failed} falhas`);
+            this.log('success', `🎉 Concluída! ✅ ${this.stats.sent} enviadas | ❌ ${this.stats.failed} falhas`);
             return;
         }
 
         if (!this.isInTimeWindow()) {
-            this.log('warning', '⏰ Fora da janela de horário. Verificando novamente em 60s...');
+            this.log('warning', '⏰ Fora da janela de horário. Verificando em 60s...');
             this.timer = setTimeout(() => this.processNext(), 60000);
             return;
         }
 
         if (this.isDailyLimitReached()) {
-            this.log('warning', `⚠️ Limite diário atingido. Campanha pausada.`);
+            this.log('warning', '⚠️ Limite diário atingido. Campanha pausada.');
             this.status = 'paused';
             this.broadcast({ type: 'campaign_status', status: 'paused' });
             return;
@@ -154,7 +175,7 @@ class MessageQueue {
         try {
             let text = this.personalize(item.message, item.number);
 
-            if (this.config?.antiRestriction?.variation) {
+            if (this.config?.antiRestriction?.variation && text) {
                 text = this.addVariation(text);
             }
 
@@ -163,7 +184,25 @@ class MessageQueue {
                 await this.wa.sendTyping(item.number);
             }
 
-            await this.wa.sendMessage(item.number, text, item.imageBuffer);
+            const hasPoll = item.pollEnabled && item.pollOptions && item.pollOptions.length >= 2;
+
+            if (hasPoll) {
+                // 1. Envia imagem ou texto primeiro (contexto)
+                if (item.imageBuffer) {
+                    await this.wa.sendMessage(item.number, text, item.imageBuffer);
+                } else if (text && text.trim()) {
+                    await this.wa.sendMessage(item.number, text, null);
+                }
+                // 2. Envia a enquete nativa do WhatsApp
+                const pollQ = (item.pollQuestion && item.pollQuestion.trim())
+                    ? item.pollQuestion.trim()
+                    : (text.substring(0, 100) || 'Selecione uma opção:');
+                await this.wa.sendPoll(item.number, pollQ, item.pollOptions);
+                this.log('info', `📊 Enquete enviada para ${item.number}`);
+            } else {
+                // Envio normal (texto / imagem)
+                await this.wa.sendMessage(item.number, text, item.imageBuffer);
+            }
 
             item.status = 'sent';
             item.sentAt = new Date().toISOString();
@@ -194,13 +233,9 @@ class MessageQueue {
 
         if (this.status === 'running') {
             const sc = this.config.scheduleConfig;
-            let delay;
-
-            if (sc.intervalMode === 'random') {
-                delay = this.getRandomDelay(sc.intervalMin, sc.intervalMax);
-            } else {
-                delay = this.getFixedDelay(sc.intervalFixed);
-            }
+            const delay = sc.intervalMode === 'random'
+                ? this.getRandomDelay(sc.intervalMin, sc.intervalMax)
+                : this.getFixedDelay(sc.intervalFixed);
 
             this.log('info', `⏳ Aguardando ${(delay / 1000).toFixed(0)}s...`);
             this.timer = setTimeout(() => this.processNext(), delay);

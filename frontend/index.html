@@ -261,6 +261,21 @@
                 <button class="btn btn-purple btn-sm" onclick="insertReactionsInMessage()">↓ Inserir na mensagem</button>
                 <button class="btn btn-outline btn-sm" onclick="clearReactions()">🗑️ Limpar</button>
               </div>
+
+              <!-- Enquete WhatsApp Nativa -->
+              <div class="form-group" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+                <label class="toggle-label">
+                  <input type="checkbox" id="poll-mode" onchange="togglePollMode()">
+                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                  <span>📊 Enviar como Enquete WhatsApp (nativa)</span>
+                </label>
+                <p class="hint-text">Quando ativo, envia uma enquete interativa que o contato pode <strong>tocar para votar</strong> — em vez de texto formatado.</p>
+              </div>
+              <div id="poll-question-group" class="form-group hidden">
+                <label class="form-label">Pergunta da enquete</label>
+                <input type="text" id="poll-question" class="form-input" placeholder="Ex: Você tem interesse em saber mais?" maxlength="255">
+                <p class="hint-text">Deixe vazio para usar o início da mensagem como pergunta.</p>
+              </div>
             </div>
 
             <!-- Image Upload -->
@@ -551,6 +566,9 @@
             <div class="card-header">
               <span class="card-icon">📋</span>
               <h2 class="card-title">Fila de Envio</h2>
+              <div class="card-actions">
+                <button class="btn btn-outline btn-sm" onclick="clearQueue()" id="btn-clear-queue">🗑️ Limpar</button>
+              </div>
             </div>
             <div class="queue-list" id="queue-list">
               <div class="queue-empty">Nenhuma campanha carregada ainda</div>

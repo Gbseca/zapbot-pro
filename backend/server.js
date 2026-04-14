@@ -74,7 +74,7 @@ app.post('/api/disconnect', async (req, res) => {
 app.post('/api/campaign/start', upload.single('image'), (req, res) => {
     try {
         const data = JSON.parse(req.body.data);
-        const { numbers, message, scheduleConfig, antiRestriction } = data;
+        const { numbers, message, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction } = data;
 
         if (!numbers || numbers.length === 0) {
             return res.status(400).json({ error: 'Lista de contatos vazia' });
@@ -88,7 +88,7 @@ app.post('/api/campaign/start', upload.single('image'), (req, res) => {
 
         const imageBuffer = req.file ? req.file.buffer : null;
 
-        queue.initCampaign({ numbers, message, imageBuffer, scheduleConfig, antiRestriction });
+        queue.initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction });
         queue.start();
 
         res.json({ success: true, message: `Campanha iniciada com ${numbers.length} contato(s)` });
@@ -116,6 +116,16 @@ app.post('/api/campaign/stop', (req, res) => {
 
 app.get('/api/campaign/progress', (req, res) => {
     res.json(queue.getProgress());
+});
+
+// Limpa histórico da fila
+app.post('/api/campaign/clear', (req, res) => {
+    const success = queue.clear();
+    if (success) {
+        res.json({ success: true, message: 'Histórico limpo.' });
+    } else {
+        res.status(400).json({ error: 'Pare a campanha antes de limpar.' });
+    }
 });
 
 // ── Start Server ──────────────────────────────────────────────────────────────

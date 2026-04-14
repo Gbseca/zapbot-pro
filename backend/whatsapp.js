@@ -12,7 +12,7 @@ class WhatsAppManager {
     constructor(wss) {
         this.sock = null;
         this.qrCode = null;
-        this.status = 'disconnected'; // disconnected | qr_ready | connected
+        this.status = 'disconnected';
         this.wss = wss;
         this.authPath = path.join(__dirname, 'auth_info');
         this.reconnecting = false;
@@ -22,16 +22,13 @@ class WhatsAppManager {
     broadcast(data) {
         if (!this.wss) return;
         this.wss.clients.forEach(client => {
-            if (client.readyState === 1) {
-                client.send(JSON.stringify(data));
-            }
+            if (client.readyState === 1) client.send(JSON.stringify(data));
         });
     }
 
     async connect() {
         if (this.reconnecting) return;
         this.reconnecting = true;
-
         try {
             const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
             const { version } = await fetchLatestBaileysVersion();
@@ -68,12 +65,10 @@ class WhatsAppManager {
                     this.sock = null;
                     this.reconnecting = false;
                     this.broadcast({ type: 'status', status: 'disconnected' });
-
                     if (shouldReconnect) {
-                        console.log('[WhatsApp] Conexão perdida. Reconectando em 3s...');
+                        console.log('[WhatsApp] Reconectando em 3s...');
                         setTimeout(() => this.connect(), 3000);
                     } else {
-                        console.log('[WhatsApp] Sessão encerrada (logout).');
                         this.broadcast({ type: 'log', level: 'warning', message: '⚠️ Sessão encerrada. Reconecte escaneando o QR.' });
                     }
                 }
@@ -102,9 +97,7 @@ class WhatsAppManager {
         if (!this.sock || this.status !== 'connected') {
             throw new Error('WhatsApp não está conectado');
         }
-
         const jid = `55${number}@s.whatsapp.net`;
-
         if (imageBuffer) {
             await this.sock.sendMessage(jid, {
                 image: Buffer.isBuffer(imageBuffer) ? imageBuffer : Buffer.from(imageBuffer),
@@ -113,6 +106,24 @@ class WhatsAppManager {
         } else {
             await this.sock.sendMessage(jid, { text });
         }
+    }
+
+    // Envia enquete nativa do WhatsApp (usuário toca para votar)
+    async sendPoll(number, question, options) {
+        if (!this.sock || this.status !== 'connected') {
+            throw new Error('WhatsApp não está conectado');
+        }
+        const jid = `55${number}@s.whatsapp.net`;
+        const cleanOptions = options.filter(o => o && o.trim()).slice(0, 12); // max 12 opções
+        if (cleanOptions.length < 2) throw new Error('Enquete precisa de pelo menos 2 opções');
+
+        await this.sock.sendMessage(jid, {
+            poll: {
+                name: question.substring(0, 255),
+                values: cleanOptions,
+                selectableCount: 1
+            }
+        });
     }
 
     async sendTyping(number, duration = 2500) {
