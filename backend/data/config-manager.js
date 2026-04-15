@@ -7,12 +7,14 @@ const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 const defaultConfig = {
   aiEnabled: false,
-  geminiKey: '',
+  aiProvider: 'groq',       // 'groq' (recommended, always free) | 'gemini'
+  groqKey: '',              // from console.groq.com — free, no billing
+  geminiKey: '',            // from aistudio.google.com — free tier
   agentName: 'Júlia',
   companyName: '',
   companyInfo: '',
   consultors: [],
-  consultorDistribution: 'alternated', // alternated | first | second
+  consultorDistribution: 'alternated',
   businessHoursStart: '08:00',
   businessHoursEnd: '22:00',
   followUpEnabled: true,

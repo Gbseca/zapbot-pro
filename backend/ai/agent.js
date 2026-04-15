@@ -1,7 +1,7 @@
 import { loadConfig } from '../data/config-manager.js';
 import { getLead, saveLead } from '../data/leads-manager.js';
 import { buildContext } from './context-builder.js';
-import { callGemini } from './gemini.js';
+import { callAI } from './gemini.js';
 import { sendHumanized } from './humanizer.js';
 import { detectAndExtract } from './lead-detector.js';
 import { executeHandoff } from './handoff.js';
@@ -134,10 +134,9 @@ async function processConversation(wa, number, texts, pushName, config) {
   const context = await buildContext(config, lead);
   let aiResponse;
   try {
-    aiResponse = await callGemini(config.geminiKey, context);
+    aiResponse = await callAI(config, context);
   } catch (err) {
-    console.error('[Agent] Gemini error:', err.message);
-    // Graceful degradation — don't crash
+    console.error('[Agent] AI error:', err.message);
     return;
   }
 

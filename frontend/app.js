@@ -793,9 +793,17 @@ async function loadAIConfig() {
     const r = await fetch('/api/ai/config');
     aiConfig = await r.json();
 
-    // Fill in fields
-    document.getElementById('ai-enabled').checked = aiConfig.aiEnabled || false;
+    // Provider
+    const provider = aiConfig.aiProvider || 'groq';
+    const radios = document.querySelectorAll('input[name="ai-provider"]');
+    radios.forEach(r => { r.checked = r.value === provider; });
+    switchAIProvider(provider, false);
+
+    // Keys
+    document.getElementById('ai-groq-key').value = aiConfig.groqKey || '';
     document.getElementById('ai-gemini-key').value = aiConfig.geminiKey || '';
+
+    // Rest of fields
     document.getElementById('ai-agent-name').value = aiConfig.agentName || '';
     document.getElementById('ai-company-name').value = aiConfig.companyName || '';
     document.getElementById('ai-company-info').value = aiConfig.companyInfo || '';
@@ -816,6 +824,18 @@ async function loadAIConfig() {
     await updateAIStats();
   } catch (err) {
     console.error('Failed to load AI config:', err);
+  }
+}
+
+function switchAIProvider(provider, save = true) {
+  const groqGroup = document.getElementById('groq-key-group');
+  const geminiGroup = document.getElementById('gemini-key-group');
+  if (provider === 'gemini') {
+    groqGroup.classList.add('hidden');
+    geminiGroup.classList.remove('hidden');
+  } else {
+    groqGroup.classList.remove('hidden');
+    geminiGroup.classList.add('hidden');
   }
 }
 
@@ -847,8 +867,12 @@ function collectAIFormData() {
     if (number) consultors.push({ name: name || 'Consultor', number });
   });
 
+  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
+
   return {
     aiEnabled: document.getElementById('ai-enabled').checked,
+    aiProvider: provider,
+    groqKey: document.getElementById('ai-groq-key').value.trim(),
     geminiKey: document.getElementById('ai-gemini-key').value.trim(),
     agentName: document.getElementById('ai-agent-name').value.trim(),
     companyName: document.getElementById('ai-company-name').value.trim(),
@@ -869,8 +893,9 @@ function collectAIFormData() {
 
 async function saveAIConfig() {
   const data = collectAIFormData();
-  if (!data.geminiKey) {
-    showToast('Informe a API Key do Gemini antes de salvar.', 'warning');
+  const hasKey = data.aiProvider === 'groq' ? !!data.groqKey : !!data.geminiKey;
+  if (!hasKey) {
+    showToast('Informe a API Key antes de salvar.', 'warning');
     return;
   }
   try {
@@ -890,23 +915,24 @@ async function saveAIConfig() {
 }
 
 async function testGeminiKey() {
-  const key = document.getElementById('ai-gemini-key').value.trim();
+  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
+  const key = provider === 'gemini'
+    ? document.getElementById('ai-gemini-key').value.trim()
+    : document.getElementById('ai-groq-key').value.trim();
   if (!key) { showToast('Informe uma API Key primeiro.', 'warning'); return; }
-  const btn = document.getElementById('btn-test-key');
-  btn.textContent = '...';
-  btn.disabled = true;
+  const btn = document.getElementById(provider === 'gemini' ? 'btn-test-key-gem' : 'btn-test-key');
+  if (btn) { btn.textContent = '...'; btn.disabled = true; }
   try {
     const r = await fetch('/api/ai/test-key', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key }),
+      body: JSON.stringify({ key, provider }),
     });
     const d = await r.json();
-    showToast(d.ok ? '✅ ' + d.message : '❌ ' + d.message, d.ok ? 'success' : 'error');
+    showToast(d.ok ? '\u2705 ' + d.message : '\u274c ' + d.message, d.ok ? 'success' : 'error');
   } catch (err) {
-    showToast('Erro de conexão.', 'error');
+    showToast('Erro de conex\u00e3o.', 'error');
   } finally {
-    btn.textContent = 'Testar';
-    btn.disabled = false;
+    if (btn) { btn.textContent = 'Testar'; btn.disabled = false; }
   }
 }
 

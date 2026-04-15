@@ -13,7 +13,7 @@ import { startDailyReportCron } from './ai/daily-report.js';
 import { loadConfig, saveConfig } from './data/config-manager.js';
 import { getAllLeads, getLead, updateLead, deleteLead, clearAllLeads, exportLeadsCSV, getLeadStats } from './data/leads-manager.js';
 import { extractAndSavePDF, getUploadedDocs, removePDF } from './knowledge/pdf-loader.js';
-import { testGeminiKey } from './ai/gemini.js';
+import { testAPIKey } from './ai/gemini.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -133,9 +133,9 @@ app.post('/api/ai/config', (req, res) => {
 });
 
 app.post('/api/ai/test-key', async (req, res) => {
-  const { key } = req.body;
+  const { key, provider } = req.body;
   if (!key) return res.status(400).json({ error: 'Chave não fornecida' });
-  const result = await testGeminiKey(key);
+  const result = await testAPIKey(provider || 'groq', key);
   res.json(result);
 });
 

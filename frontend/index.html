@@ -639,14 +639,50 @@
           <!-- Config -->
           <div class="card">
             <div class="card-header"><span class="card-icon">🔑</span><h2 class="card-title">Configuração da IA</h2></div>
+
+            <!-- Provider selector -->
             <div class="form-group">
+              <label class="form-label">Provedor de IA</label>
+              <div class="radio-group" style="grid-template-columns:1fr 1fr;">
+                <label class="radio-card" id="radio-groq">
+                  <input type="radio" name="ai-provider" value="groq" checked onchange="switchAIProvider('groq')">
+                  <div class="radio-content">
+                    <span class="radio-icon">⚡</span>
+                    <span class="radio-label">Groq <span style="font-size:10px;color:var(--green);font-weight:700;">RECOMENDADO</span></span>
+                    <span class="radio-desc">Llama 3.3 70B — limite generoso</span>
+                  </div>
+                </label>
+                <label class="radio-card" id="radio-gemini">
+                  <input type="radio" name="ai-provider" value="gemini" onchange="switchAIProvider('gemini')">
+                  <div class="radio-content">
+                    <span class="radio-icon">🔮</span>
+                    <span class="radio-label">Gemini</span>
+                    <span class="radio-desc">Google — requer projeto ativo</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Groq key (shown by default) -->
+            <div class="form-group" id="groq-key-group">
+              <label class="form-label">API Key do Groq <span class="label-hint">(gratuita, sem cartão)</span></label>
+              <div class="input-with-unit">
+                <input type="password" id="ai-groq-key" class="form-input" placeholder="gsk_..." autocomplete="off">
+                <button class="btn btn-purple btn-sm" onclick="testGeminiKey()" id="btn-test-key">Testar</button>
+              </div>
+              <p class="hint-text">Obtenha grátis em <a href="https://console.groq.com" target="_blank" style="color:var(--accent-green)">console.groq.com</a> → API Keys → Create (30 segundos)</p>
+            </div>
+
+            <!-- Gemini key (hidden by default) -->
+            <div class="form-group hidden" id="gemini-key-group">
               <label class="form-label">API Key do Gemini <span class="label-hint">(gratuita)</span></label>
               <div class="input-with-unit">
                 <input type="password" id="ai-gemini-key" class="form-input" placeholder="AIza..." autocomplete="off">
-                <button class="btn btn-purple btn-sm" onclick="testGeminiKey()" id="btn-test-key">Testar</button>
+                <button class="btn btn-purple btn-sm" onclick="testGeminiKey()" id="btn-test-key-gem">Testar</button>
               </div>
-              <p class="hint-text">Obtenha grátis em <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent-green)">aistudio.google.com</a> (sem cartão)</p>
+              <p class="hint-text">Obtenha em <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent-green)">aistudio.google.com</a> — precisa de projeto ativo com billing</p>
             </div>
+
             <div class="form-group">
               <label class="form-label">Nome do agente</label>
               <input type="text" id="ai-agent-name" class="form-input" placeholder="Ex: Júlia">
@@ -661,6 +697,7 @@
               <textarea id="ai-company-info" class="form-textarea" rows="4" placeholder="Ex: Atendemos de segunda a sexta das 8h às 18h. Trabalhamos com proteção veicular para carros de passeio e comerciais..."></textarea>
             </div>
           </div>
+
 
           <!-- Consultors + Hours -->
           <div style="display:flex;flex-direction:column;gap:16px;">
