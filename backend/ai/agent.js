@@ -46,12 +46,25 @@ export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
 
   const config = loadConfig();
-  if (!config.aiEnabled || !config.geminiKey) return;
+
+  // Check AI is enabled and has a key for the configured provider
+  if (!config.aiEnabled) {
+    console.log('[Agent] AI disabled, ignoring message.');
+    return;
+  }
+
+  const provider = config.aiProvider || 'groq';
+  const hasKey = provider === 'gemini' ? !!config.geminiKey : !!config.groqKey;
+  if (!hasKey) {
+    console.warn(`[Agent] No API key for provider "${provider}" — configure it in the AI panel.`);
+    return;
+  }
 
   const jid = rawMsg.key.remoteJid;
   const number = jid.split('@')[0];
   const text = extractText(rawMsg);
-  if (!text) return; // No text content
+  console.log(`[Agent] Incoming from ${number}: "${text.slice(0, 60)}"`);
+  if (!text) return;
 
   // Check lead status
   const existingLead = getLead(number);
