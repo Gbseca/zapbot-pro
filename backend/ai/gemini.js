@@ -22,7 +22,7 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.1-8b-instant',
       messages,
       temperature: 0.85,
       max_tokens: 1024,
@@ -45,7 +45,7 @@ async function testGroqKey(apiKey) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'llama-3.1-8b-instant',
         messages: [{ role: 'user', content: 'Responda apenas: OK' }],
         max_tokens: 10,
       }),
@@ -67,7 +67,7 @@ async function callGemini(apiKey, { systemPrompt, history = [], userMessage }) {
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash-preview-04-17',
+    model: 'gemini-2.0-flash',
     systemInstruction: systemPrompt,
     generationConfig: { temperature: 0.85, topP: 0.95, maxOutputTokens: 1024 },
   });
@@ -89,7 +89,7 @@ async function testGeminiKey(apiKey) {
   try {
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-04-17' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const result = await model.generateContent('Responda só com: OK');
     return { ok: true, message: 'Gemini OK! ' + result.response.text().trim() };
   } catch (err) {
