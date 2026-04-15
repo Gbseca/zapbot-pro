@@ -1,4 +1,4 @@
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -19,7 +19,6 @@ class WhatsAppManager {
         this.logger = pino({ level: 'silent' });
         this.onMessage = null; // AI agent callback — set externally
         this._contactMap = new Map(); // lid-number → real phone number
-        this._store = makeInMemoryStore({ logger: this.logger }); // Baileys contact store
     }
 
     // Build the correct WhatsApp JID from a number or full JID
@@ -36,29 +35,15 @@ class WhatsAppManager {
 
     /**
      * Resolves the best display phone number from a Baileys JID or LID.
-     * Priority: manual map → store contacts → valid BR number as-is → raw id
+     * Priority: manual map → valid BR number as-is → raw id
      */
     resolvePhone(jid) {
         const baseId = String(jid).split('@')[0].split(':')[0];
-
-        // 1. Manual map (built from contacts.upsert and messages)
+        // Manual map (built from contacts.upsert events)
         if (this._contactMap.has(baseId)) return this._contactMap.get(baseId);
-
-        // 2. Search Baileys store: look for a contact whose LID matches
-        const storeContacts = this._store?.contacts || {};
-        for (const [id, contact] of Object.entries(storeContacts)) {
-            const contactLid = (contact.lid || '').split('@')[0];
-            const contactPhone = id.split('@')[0];
-            if (contactLid === baseId && /^55\d{10,11}$/.test(contactPhone)) {
-                this._contactMap.set(baseId, contactPhone); // cache
-                return contactPhone;
-            }
-        }
-
-        // 3. Already a valid BR number (e.g. "5521972969475")
+        // Already a valid BR number (e.g. "5521972969475")
         if (/^55\d{10,11}$/.test(baseId)) return baseId;
-
-        // 4. Last resort: return as-is (LID)
+        // Last resort: return as-is (LID)
         return baseId;
     }
 
@@ -127,9 +112,6 @@ class WhatsAppManager {
             });
 
             this.sock.ev.on('creds.update', saveCreds);
-
-            // Bind the in-memory store to all socket events (handles LID→phone internally)
-            this._store.bind(this.sock.ev);
 
             // ── Build LID → real phone map from contact events ───────────
             this.sock.ev.on('contacts.upsert', (contacts) => {
