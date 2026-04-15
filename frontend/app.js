@@ -1218,3 +1218,22 @@ function escapeHtml(text) {
   return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Knowledge base word counter ──────────────────────────────
+function updateKnowledgeCounter(textarea) {
+  const words = textarea.value.trim() ? textarea.value.trim().split(/\s+/).length : 0;
+  const counter = document.getElementById('knowledge-counter');
+  if (!counter) return;
+  let color = 'var(--text-muted)';
+  let label = `${words.toLocaleString()} palavras`;
+  if (words < 50)       { color = '#ef4444'; label += ' — escreva mais'; }
+  else if (words < 200) { color = '#f59e0b'; label += ' — mais detalhes ajudam'; }
+  else                  { color = '#22c55e'; label += ' ✓ ótimo!'; }
+  counter.style.color = color;
+  counter.textContent = label;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const ta = document.getElementById('ai-company-info');
+  if (ta) updateKnowledgeCounter(ta);
+});
+

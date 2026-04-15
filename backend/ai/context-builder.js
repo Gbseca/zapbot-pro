@@ -1,8 +1,7 @@
-import { loadExtractedPDFs } from '../knowledge/pdf-loader.js';
+// context-builder.js — no PDF injection; knowledge comes from companyInfo text field
 
 export async function buildContext(config, lead, alreadyTransferred = false) {
-  const pdfContent = await loadExtractedPDFs();
-  const systemPrompt = buildSystemPrompt(config, pdfContent, lead, alreadyTransferred);
+  const systemPrompt = buildSystemPrompt(config, lead, alreadyTransferred);
 
   // Keep last 12 messages (6 exchanges) — balances context vs token cost for Groq free tier
   const history = (lead.history || []).slice(-12);
@@ -13,7 +12,7 @@ export async function buildContext(config, lead, alreadyTransferred = false) {
   return { systemPrompt, history, userMessage: lastUserMsg };
 }
 
-function buildSystemPrompt(config, pdfContent, lead, alreadyTransferred) {
+function buildSystemPrompt(config, lead, alreadyTransferred) {
   const agentName  = config.agentName  || 'Júlia';
   const company    = config.companyName || 'Moove Proteção Veicular';
   const companyInfo = config.companyInfo || '';
@@ -126,10 +125,7 @@ Exemplos corretos:
 ${postHandoffInstruction}
 
 ━━━━━━━━━━━ INFORMAÇÕES DA EMPRESA ━━━━━━━━━━━
-${companyInfo || 'Empresa de proteção veicular. Ofereça informações gerais sobre proteção veicular.'}
-
-━━━━━━━━━━━ DOCUMENTAÇÃO COMPLETA ━━━━━━━━━━━
-${pdfContent || 'Nenhum documento carregado ainda. Responda de forma geral sobre proteção veicular e diga que um consultor pode dar mais detalhes.'}
+${companyInfo || 'Empresa de proteção veicular. Responda de forma geral e encaminhe dúvidas específicas para o consultor.'}
 
 ${leadStatus}`;
 }
