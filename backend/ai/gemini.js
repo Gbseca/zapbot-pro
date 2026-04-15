@@ -67,7 +67,7 @@ async function callGemini(apiKey, { systemPrompt, history = [], userMessage }) {
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash-latest',
+    model: 'gemini-3.1-flash-lite',
     systemInstruction: systemPrompt,
     generationConfig: { temperature: 0.85, topP: 0.95, maxOutputTokens: 1024 },
   });
@@ -89,7 +89,7 @@ async function testGeminiKey(apiKey) {
   try {
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
     const result = await model.generateContent('Responda só com: OK');
     return { ok: true, message: 'Gemini OK! ' + result.response.text().trim() };
   } catch (err) {

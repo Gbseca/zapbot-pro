@@ -3,7 +3,7 @@ import { getLead, saveLead } from '../data/leads-manager.js';
 import { buildContext } from './context-builder.js';
 import { callAI } from './gemini.js';
 import { sendHumanized } from './humanizer.js';
-import { detectAndExtract } from './lead-detector.js';
+import { detectAndExtract, tryExtractPhone } from './lead-detector.js';
 import { executeHandoff } from './handoff.js';
 
 // Anti-flood: buffer messages per number (by JID-id, not phone)
@@ -112,6 +112,7 @@ function createNewLead(jidId, displayNum, pushName) {
   return {
     number: jidId,
     displayNumber: displayNum,
+    phone: null,        // real phone captured from client during conversation
     name: pushName || null,
     status: 'new',
     history: [],
@@ -150,8 +151,19 @@ async function processConversation(wa, fullJid, jidId, displayNum, texts, pushNa
   lead.history = lead.history || [];
   lead.history.push({ role: 'user', content: combinedText, ts: Date.now() });
   lead.lastInteraction = new Date().toISOString();
-  lead.followUp1Sent = false; // reset follow-up timers when client replies
+  lead.followUp1Sent = false;
   lead.followUp2Sent = false;
+
+  // Backup phone extraction: if client typed a phone number, capture it immediately
+  if (!lead.phone) {
+    const extractedPhone = tryExtractPhone(combinedText);
+    if (extractedPhone) {
+      lead.phone = extractedPhone;
+      lead.displayNumber = extractedPhone; // update what shows on the website
+      console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
+    }
+  }
+
   saveLead(jidId, lead);
 
   // Build context and call AI
@@ -164,14 +176,19 @@ async function processConversation(wa, fullJid, jidId, displayNum, texts, pushNa
     return;
   }
 
-  // Check for qualification marker (only act on it if not already transferred)
-  const { qualified, plate, model, name, profileCaptured, cleanResponse } = detectAndExtract(aiResponse, lead);
+  // Check for qualification marker
+  const { qualified, plate, model, name, phone, profileCaptured, cleanResponse } = detectAndExtract(aiResponse, lead);
 
   // Update lead info from AI extraction
   if (plate) lead.plate = plate;
   if (model) lead.model = model;
   if (name && name.length > 1) lead.name = name;
   if (profileCaptured) lead.profileCaptured = true;
+  if (phone) {
+    lead.phone = phone;
+    lead.displayNumber = phone; // also update what shows on the website
+    console.log(`[Agent] Phone from marker: ${phone}`);
+  }
 
   // Send humanized response
   console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);

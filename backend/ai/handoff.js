@@ -54,17 +54,19 @@ export async function executeHandoff(wa, lead, config) {
   // 2. Notify consultor
   if (consultor) {
     const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    // Use phone provided by client (most reliable), then displayNumber, then raw number
+    const contactPhone = lead.phone || lead.displayNumber || lead.number;
     const consultorMsg =
       `🔔 *NOVO LEAD QUALIFICADO — ZapBot Pro*\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `👤 *Nome:* ${lead.name || 'Não informado'}\n` +
-      `📱 *WhatsApp:* ${formatNumber(lead.displayNumber || lead.number)}\n` +
+      `📱 *WhatsApp:* ${formatNumber(contactPhone)}\n` +
       `🚗 *Veículo:* ${lead.model || 'Não informado'}\n` +
       `🔑 *Placa:* ${lead.plate || 'Não informada'}\n` +
       `\n💬 *Resumo da conversa:*\n${buildSummary(lead)}\n` +
       `\n⏰ Qualificado em: ${now}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `👆 Abrir conversa:\nhttps://wa.me/${lead.displayNumber || lead.number}`;
+      `👆 Abrir conversa:\nhttps://wa.me/${contactPhone}`;
 
     // Normalize consultor number
     const cNum = String(consultor.number).replace(/\D/g, '');

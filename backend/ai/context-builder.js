@@ -23,6 +23,7 @@ function buildSystemPrompt(config, pdfContent, lead, alreadyTransferred) {
   const hasModel   = !!(lead.model);
   const hasPlate   = !!(lead.plate);
   const hasProfile = !!(lead.profileCaptured);
+  const hasPhone   = !!(lead.phone);
   const msgCount   = (lead.history || []).filter(h => h.role === 'user').length;
 
   const leadStatus = `
@@ -30,6 +31,7 @@ function buildSystemPrompt(config, pdfContent, lead, alreadyTransferred) {
 Nome capturado: ${hasName  ? lead.name  : 'NÃO'}
 Veículo: ${hasModel ? lead.model : 'NÃO'}
 Placa:   ${hasPlate ? lead.plate : 'NÃO'}
+Telefone de contato: ${hasPhone ? lead.phone : 'NÃO — PRECISA PEDIR'}
 Perfil coletado (histórico/uso do carro): ${hasProfile ? 'SIM' : 'NÃO'}
 Mensagens trocadas: ${msgCount}
 Já transferido para consultor: ${alreadyTransferred ? 'SIM' : 'NÃO'}`;
@@ -99,6 +101,11 @@ FASE 3 — Dados do veículo:
 • Modelo e ano: "Me conta, qual é o seu carro?"
 • Placa: "E a placa? É rapidinho pra eu fazer a consulta aqui"
 
+FASE 4 — Contato (OBRIGATÓRIO antes de qualificar):
+• Número de WhatsApp: "Para o consultor entrar em contato com você, pode me passar seu número de WhatsApp? 📱"
+• Aceite qualquer formato: (21) 99999-9999, 21999999999, etc.
+• Se o cliente mandar o número, confirme: "Perfeito! Anotado aqui 😊"
+
 REGRAS CRUCIAIS:
 • Faça as perguntas UMA DE CADA VEZ, de forma natural — não parece um formulário
 • Se o cliente mandar tudo de uma vez (nome + carro + placa), AINDA ASSIM faça pelo menos UMA pergunta de perfil (histórico ou uso do carro) antes de qualificar
@@ -114,17 +121,20 @@ Use o marcador SOMENTE quando tiver TODOS estes dados REAIS fornecidos pelo clie
 
 ⛔ PROIBIDO ABSOLUTO — não qualifique se:
 • A placa NÃO foi informada pelo cliente (não invente, não use PLACA_AQUI ou qualquer placeholder)
+• O número de WhatsApp NÃO foi informado pelo cliente (não invente, use exatamente o que ele disse)
 • Você está PEDINDO a placa na mesma mensagem — espere o cliente RESPONDER com a placa primeiro
+• Você está PEDINDO o número — espere o cliente RESPONDER com o número primeiro
 • O cliente ainda não respondeu perguntas de perfil
 • Você tem dúvida se o dado é real
 
 QUANDO TIVER TODOS OS DADOS REAIS, adicione EXATAMENTE ao FINAL (sem linha em branco após):
-[QUALIFICADO|placa=PLACA_REAL|modelo=MODELO_REAL|nome=NOME_REAL|perfil=sim]
+[QUALIFICADO|placa=PLACA_REAL|modelo=MODELO_REAL|nome=NOME_REAL|phone=NUMERO_WHATSAPP|perfil=sim]
 
 Exemplos corretos:
-✅ [QUALIFICADO|placa=BRA0S19|modelo=Onix Hatch|nome=Gabriel|perfil=sim]
-❌ [QUALIFICADO|placa=PLACA_AQUI|modelo=Onix Hatch|nome=Gabriel|perfil=sim]  ← NUNCA faça isso!
-❌ [QUALIFICADO|placa=|modelo=Onix Hatch|nome=Gabriel|perfil=sim]  ← NUNCA!
+✅ [QUALIFICADO|placa=BRA0S19|modelo=Onix Hatch|nome=Gabriel|phone=5521972969475|perfil=sim]
+✅ [QUALIFICADO|placa=ABC1234|modelo=HB20|nome=Maria|phone=5511987654321|perfil=sim]
+❌ [QUALIFICADO|placa=PLACA_AQUI|modelo=Onix|nome=Gabriel|phone=|perfil=sim]  ← NUNCA!
+❌ [QUALIFICADO|placa=BRA0S19|modelo=Onix|nome=Gabriel|phone=NUMERO_AQUI|perfil=sim]  ← NUNCA!
 
 ${postHandoffInstruction}
 
