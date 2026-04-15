@@ -17,6 +17,7 @@ class WhatsAppManager {
         this.authPath = path.join(__dirname, 'auth_info');
         this.reconnecting = false;
         this.logger = pino({ level: 'silent' });
+        this.onMessage = null; // AI agent callback — set externally
     }
 
     broadcast(data) {
@@ -84,6 +85,20 @@ class WhatsAppManager {
             });
 
             this.sock.ev.on('creds.update', saveCreds);
+
+            // ── Incoming message listener (AI Agent) ─────────────────────
+            this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
+                if (type !== 'notify') return;
+                for (const msg of messages) {
+                    if (this.onMessage) {
+                        try {
+                            await this.onMessage(this, msg);
+                        } catch (err) {
+                            console.error('[WhatsApp] onMessage error:', err.message);
+                        }
+                    }
+                }
+            });
 
         } catch (error) {
             this.reconnecting = false;

@@ -90,6 +90,10 @@ function handleWsMessage(data) {
       updateStats(state.stats);
       handleCampaignStatus('idle');
       break;
+    case 'ai_status':
+      updateAIStatusUI(data.enabled);
+      updateBadge('ai-agent', data.enabled ? '●' : null);
+      break;
   }
 }
 
@@ -170,6 +174,8 @@ function switchTab(tabId) {
   document.getElementById(`nav-${tabId}`)?.classList.add('active');
 
   if (tabId === 'schedule') updateEstimate();
+  if (tabId === 'ai-agent') loadAIConfig();
+  if (tabId === 'leads') loadLeads();
 }
 
 function updateBadge(tabId, text) {
@@ -774,3 +780,415 @@ function showToast(message, type = 'info') {
     setTimeout(() => toast.remove(), 300);
   }, 3500);
 }
+
+// ════════════════════════════════════════════════════════════
+// ── AI AGENT TAB ───────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+
+let aiConfig = {};
+let consultorCount = 0;
+
+async function loadAIConfig() {
+  try {
+    const r = await fetch('/api/ai/config');
+    aiConfig = await r.json();
+
+    // Fill in fields
+    document.getElementById('ai-enabled').checked = aiConfig.aiEnabled || false;
+    document.getElementById('ai-gemini-key').value = aiConfig.geminiKey || '';
+    document.getElementById('ai-agent-name').value = aiConfig.agentName || '';
+    document.getElementById('ai-company-name').value = aiConfig.companyName || '';
+    document.getElementById('ai-company-info').value = aiConfig.companyInfo || '';
+    document.getElementById('ai-consultor-dist').value = aiConfig.consultorDistribution || 'alternated';
+    document.getElementById('ai-hours-start').value = aiConfig.businessHoursStart || '08:00';
+    document.getElementById('ai-hours-end').value = aiConfig.businessHoursEnd || '22:00';
+    document.getElementById('ai-report-hour').value = aiConfig.reportHour || '18:00';
+    document.getElementById('followup-enabled').checked = aiConfig.followUpEnabled !== false;
+    document.getElementById('followup-h1').value = aiConfig.followUp1Hours || 4;
+    document.getElementById('followup-h2').value = aiConfig.followUp2Hours || 24;
+    document.getElementById('followup-cold').value = aiConfig.followUpColdHours || 48;
+    document.getElementById('campaign-loop-enabled').checked = aiConfig.campaignLoopEnabled !== false;
+    document.getElementById('report-enabled').checked = aiConfig.reportEnabled !== false;
+
+    updateAIStatusUI(aiConfig.aiEnabled);
+    renderConsultors(aiConfig.consultors || []);
+    await loadDocs();
+    await updateAIStats();
+  } catch (err) {
+    console.error('Failed to load AI config:', err);
+  }
+}
+
+function updateAIStatusUI(enabled) {
+  const toggle = document.getElementById('ai-enabled');
+  const text = document.getElementById('ai-status-text');
+  const icon = document.getElementById('ai-status-icon');
+  toggle.checked = enabled;
+  text.textContent = enabled ? '✅ Ativo' : 'Desativado';
+  icon.textContent = enabled ? '🟢' : '⚡';
+}
+
+function toggleAIEnabled() {
+  const enabled = document.getElementById('ai-enabled').checked;
+  updateAIStatusUI(enabled);
+  // Auto-save just the enabled flag
+  fetch('/api/ai/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...collectAIFormData(), aiEnabled: enabled })
+  });
+  showToast(enabled ? '🤖 Agente IA ativado!' : 'Agente IA desativado', enabled ? 'success' : 'info');
+}
+
+function collectAIFormData() {
+  const consultors = [];
+  document.querySelectorAll('.consultor-item').forEach(el => {
+    const name = el.querySelector('input[data-role="name"]')?.value?.trim();
+    const number = el.querySelector('input[data-role="number"]')?.value?.trim();
+    if (number) consultors.push({ name: name || 'Consultor', number });
+  });
+
+  return {
+    aiEnabled: document.getElementById('ai-enabled').checked,
+    geminiKey: document.getElementById('ai-gemini-key').value.trim(),
+    agentName: document.getElementById('ai-agent-name').value.trim(),
+    companyName: document.getElementById('ai-company-name').value.trim(),
+    companyInfo: document.getElementById('ai-company-info').value.trim(),
+    consultors,
+    consultorDistribution: document.getElementById('ai-consultor-dist').value,
+    businessHoursStart: document.getElementById('ai-hours-start').value,
+    businessHoursEnd: document.getElementById('ai-hours-end').value,
+    reportHour: document.getElementById('ai-report-hour').value,
+    followUpEnabled: document.getElementById('followup-enabled').checked,
+    followUp1Hours: parseInt(document.getElementById('followup-h1').value),
+    followUp2Hours: parseInt(document.getElementById('followup-h2').value),
+    followUpColdHours: parseInt(document.getElementById('followup-cold').value),
+    campaignLoopEnabled: document.getElementById('campaign-loop-enabled').checked,
+    reportEnabled: document.getElementById('report-enabled').checked,
+  };
+}
+
+async function saveAIConfig() {
+  const data = collectAIFormData();
+  if (!data.geminiKey) {
+    showToast('Informe a API Key do Gemini antes de salvar.', 'warning');
+    return;
+  }
+  try {
+    const r = await fetch('/api/ai/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (r.ok) {
+      showToast('✅ Configurações salvas com sucesso!', 'success');
+      aiConfig = data;
+    } else {
+      showToast('Erro ao salvar.', 'error');
+    }
+  } catch (err) {
+    showToast('Erro: ' + err.message, 'error');
+  }
+}
+
+async function testGeminiKey() {
+  const key = document.getElementById('ai-gemini-key').value.trim();
+  if (!key) { showToast('Informe uma API Key primeiro.', 'warning'); return; }
+  const btn = document.getElementById('btn-test-key');
+  btn.textContent = '...';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/ai/test-key', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    const d = await r.json();
+    showToast(d.ok ? '✅ ' + d.message : '❌ ' + d.message, d.ok ? 'success' : 'error');
+  } catch (err) {
+    showToast('Erro de conexão.', 'error');
+  } finally {
+    btn.textContent = 'Testar';
+    btn.disabled = false;
+  }
+}
+
+// Consultors
+function renderConsultors(consultors) {
+  const list = document.getElementById('consultors-list');
+  list.innerHTML = '';
+  consultors.forEach((c, i) => addConsultorRow(c.name, c.number));
+}
+
+function addConsultor() {
+  addConsultorRow('', '');
+}
+
+function addConsultorRow(name, number) {
+  const list = document.getElementById('consultors-list');
+  const idx = list.children.length;
+  const div = document.createElement('div');
+  div.className = 'consultor-item';
+  div.innerHTML = `
+    <span style="font-size:16px">👤</span>
+    <input type="text" data-role="name" placeholder="Nome (ex: Gabriel)" value="${name || ''}" style="width:35%">
+    <input type="text" data-role="number" placeholder="DDD+Número (11999990000)" value="${number || ''}" style="flex:1;font-family:var(--mono)">
+    <button class="consultor-remove" onclick="this.parentElement.remove()">✕</button>
+  `;
+  list.appendChild(div);
+}
+
+// PDFs
+async function loadDocs() {
+  try {
+    const r = await fetch('/api/ai/docs');
+    const docs = await r.json();
+    renderDocs(docs);
+  } catch {}
+}
+
+function renderDocs(docs) {
+  const list = document.getElementById('docs-list');
+  if (!docs || docs.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:8px 0;">Nenhum documento carregado ainda.</div>';
+    return;
+  }
+  list.innerHTML = docs.map(d => `
+    <div class="doc-item">
+      <span class="doc-icon">📄</span>
+      <div class="doc-info">
+        <div class="doc-name">${d.filename}</div>
+        <div class="doc-meta">${d.pages} páginas · ${(d.wordCount || 0).toLocaleString()} palavras · Importado em ${new Date(d.extractedAt).toLocaleDateString('pt-BR')}</div>
+      </div>
+      <button class="doc-remove" onclick="removePDF('${d.filename}')">🗑️</button>
+    </div>
+  `).join('');
+}
+
+async function handlePDFUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  await uploadPDF(file);
+  event.target.value = '';
+}
+
+async function handlePDFDrop(event) {
+  event.preventDefault();
+  const file = event.dataTransfer.files[0];
+  if (file && file.type === 'application/pdf') await uploadPDF(file);
+}
+
+async function uploadPDF(file) {
+  const area = document.getElementById('pdf-upload-area');
+  area.innerHTML = '<span class="upload-icon">⏳</span><p>Extraindo texto...</p>';
+  const formData = new FormData();
+  formData.append('pdf', file);
+  try {
+    const r = await fetch('/api/ai/docs', { method: 'POST', body: formData });
+    const d = await r.json();
+    if (r.ok) {
+      showToast(`✅ ${d.filename} — ${d.pages} páginas, ${(d.wordCount||0).toLocaleString()} palavras`, 'success');
+      await loadDocs();
+    } else {
+      showToast('Erro: ' + d.error, 'error');
+    }
+  } catch (err) {
+    showToast('Erro ao fazer upload: ' + err.message, 'error');
+  } finally {
+    area.innerHTML = '<input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)"><span class="upload-icon">📄</span><p>Clique ou arraste o PDF aqui</p><span class="upload-hint">Apenas arquivos PDF · máx. 32MB</span>';
+  }
+}
+
+async function removePDF(filename) {
+  if (!confirm(`Remover "${filename}"?`)) return;
+  await fetch(`/api/ai/docs/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+  await loadDocs();
+  showToast('PDF removido.', 'info');
+}
+
+async function updateAIStats() {
+  try {
+    const r = await fetch('/api/leads/stats');
+    const s = await r.json();
+    document.getElementById('ai-pill-leads').innerHTML = `<span>${s.todayTotal || 0}</span> leads hoje`;
+    document.getElementById('ai-pill-qualified').innerHTML = `<span>${s.todayQualified || 0}</span> qualificados`;
+    document.getElementById('ai-pill-talking').innerHTML = `<span>${s.talking || 0}</span> em conversa`;
+    document.getElementById('ai-pill-rate').innerHTML = `<span>${s.conversationRate || 0}%</span> conversão`;
+  } catch {}
+}
+
+// ════════════════════════════════════════════════════════════
+// ── LEADS TAB ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+
+let allLeads = [];
+let currentFilter = 'all';
+
+async function loadLeads() {
+  try {
+    const r = await fetch('/api/leads');
+    allLeads = await r.json();
+    renderLeadsStats();
+    renderLeadsList(currentFilter);
+    updateLeadBadge();
+  } catch {}
+}
+
+function renderLeadsStats() {
+  const talking = allLeads.filter(l => l.status === 'talking').length;
+  const qualified = allLeads.filter(l => l.status === 'qualified' || l.status === 'transferred').length;
+  const cold = allLeads.filter(l => l.status === 'cold').length;
+  const today = new Date().toDateString();
+  const todayLeads = allLeads.filter(l => new Date(l.createdAt).toDateString() === today);
+  const rate = todayLeads.length > 0 ? Math.round((todayLeads.filter(l => l.status === 'qualified' || l.status === 'transferred').length / todayLeads.length) * 100) : 0;
+
+  document.getElementById('ls-total').textContent = allLeads.length;
+  document.getElementById('ls-talking').textContent = talking;
+  document.getElementById('ls-qualified').textContent = qualified;
+  document.getElementById('ls-cold').textContent = cold;
+  document.getElementById('ls-rate').textContent = rate + '%';
+}
+
+function renderLeadsList(filter) {
+  const list = document.getElementById('leads-list');
+  let leads = filter === 'all' ? allLeads : allLeads.filter(l => l.status === filter);
+
+  if (leads.length === 0) {
+    list.innerHTML = '<div class="queue-empty">Nenhum lead encontrado para este filtro.</div>';
+    return;
+  }
+
+  list.innerHTML = leads.map(lead => {
+    const dotClass = `status-dot-${lead.status || 'new'}`;
+    const timeAgo = timeSince(lead.updatedAt || lead.createdAt);
+    return `
+      <div class="lead-card" onclick="openLeadModal('${lead.number}')">
+        <div class="lead-status-dot ${dotClass}"></div>
+        <div class="lead-info">
+          <div class="lead-name">${lead.name || 'Desconhecido'}</div>
+          <div class="lead-number">+55 ${formatPhone(lead.number)}</div>
+        </div>
+        <div class="lead-vehicle">
+          ${lead.model ? `<div class="lead-model">🚗 ${lead.model}</div>` : ''}
+          ${lead.plate ? `<span class="lead-plate">${lead.plate}</span>` : ''}
+        </div>
+        <div class="lead-since">${timeAgo}</div>
+        <div class="lead-actions-mini" onclick="event.stopPropagation()">
+          ${lead.status === 'talking' ? `<button class="lead-btn" onclick="blockLead('${lead.number}')">⛔</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function filterLeads(filter, btn) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderLeadsList(filter);
+}
+
+async function refreshLeads() {
+  await loadLeads();
+  await updateAIStats();
+  showToast('Leads atualizados!', 'success');
+}
+
+async function exportLeadsCSV() {
+  window.open('/api/leads/export', '_blank');
+}
+
+async function blockLead(number) {
+  if (!confirm('Parar o bot para este número?')) return;
+  await fetch(`/api/leads/${number}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'blocked' }) });
+  await loadLeads();
+  showToast('Bot pausado para esse número.', 'info');
+}
+
+function updateLeadBadge() {
+  const talking = allLeads.filter(l => l.status === 'talking').length;
+  updateBadge('leads', talking > 0 ? talking : null);
+}
+
+// Lead Modal
+function openLeadModal(number) {
+  const lead = allLeads.find(l => l.number === number);
+  if (!lead) return;
+
+  document.getElementById('modal-lead-name').textContent = lead.name || 'Desconhecido';
+  document.getElementById('modal-lead-number').textContent = `+55 ${formatPhone(number)} · ${statusLabel(lead.status)}`;
+
+  const vehicle = document.getElementById('modal-vehicle');
+  vehicle.innerHTML = lead.model || lead.plate
+    ? `<div class="modal-vehicle-item">🚗 <strong>${lead.model || '?'}</strong></div>
+       <div class="modal-vehicle-item">🔑 <strong>${lead.plate || '?'}</strong></div>
+       <div class="modal-vehicle-item" style="margin-left:auto">📅 ${new Date(lead.createdAt).toLocaleDateString('pt-BR')}</div>`
+    : `<div class="modal-vehicle-item" style="color:var(--text-3)">Veículo não capturado ainda</div>`;
+
+  const actions = document.getElementById('modal-actions');
+  actions.innerHTML = `
+    <a href="https://wa.me/55${number}" target="_blank" class="btn btn-primary btn-sm">💬 Abrir no WhatsApp</a>
+    ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">⛔ Pausar bot</button>` : ''}
+    <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">🗑️ Excluir lead</button>
+  `;
+
+  const chat = document.getElementById('modal-chat');
+  const history = lead.history || [];
+  if (history.length === 0) {
+    chat.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:20px;">Sem histórico de conversa.</div>';
+  } else {
+    chat.innerHTML = history.map(msg => {
+      const isUser = msg.role === 'user';
+      const time = msg.ts ? new Date(msg.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+      return `
+        <div class="chat-bubble-wrap ${isUser ? '' : 'outgoing'}">
+          <div class="chat-bubble">${escapeHtml(msg.content)}</div>
+          <div class="chat-ts">${isUser ? '👤' : '🤖'} ${time}</div>
+        </div>
+      `;
+    }).join('');
+    setTimeout(() => { chat.scrollTop = chat.scrollHeight; }, 50);
+  }
+
+  document.getElementById('lead-modal').classList.remove('hidden');
+}
+
+function closeLeadModal(event) {
+  if (!event || event.target === document.getElementById('lead-modal')) {
+    document.getElementById('lead-modal').classList.add('hidden');
+  }
+}
+
+async function deleteLead(number) {
+  if (!confirm('Excluir este lead permanentemente?')) return;
+  await fetch(`/api/leads/${number}`, { method: 'DELETE' });
+  closeLeadModal();
+  await loadLeads();
+  showToast('Lead excluído.', 'info');
+}
+
+// ── Helpers ────────────────────────────────────────────────
+function timeSince(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return `${min}min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+function formatPhone(number) {
+  const d = String(number).replace(/\D/g, '');
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+  return d;
+}
+
+function statusLabel(status) {
+  const m = { new:'Novo', talking:'Em conversa', qualified:'Qualificado', transferred:'Transferido', cold:'Frio', blocked:'Bloqueado' };
+  return m[status] || status;
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
