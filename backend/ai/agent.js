@@ -162,7 +162,13 @@ async function processConversation(wa, number, texts, pushName, config) {
   if (name && name.length > 1) lead.name = name;
 
   // Send humanized response
-  await sendHumanized(wa, number, cleanResponse, combinedText);
+  console.log(`[Agent] Sending AI response to ${number}: "${cleanResponse.slice(0, 60)}..."`);
+  try {
+    await sendHumanized(wa, number, cleanResponse, combinedText);
+  } catch (err) {
+    console.error(`[Agent] Failed to send message to ${number}:`, err.message);
+    return;
+  }
 
   // Save bot response to history
   lead.history.push({ role: 'assistant', content: cleanResponse, ts: Date.now() });

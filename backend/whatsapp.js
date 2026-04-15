@@ -20,6 +20,18 @@ class WhatsAppManager {
         this.onMessage = null; // AI agent callback — set externally
     }
 
+    // Build the correct WhatsApp JID from a number or full JID
+    // Handles: "21999990000" → "5521999990000@s.whatsapp.net"
+    //          "5521999990000" → "5521999990000@s.whatsapp.net" (no double 55)
+    //          "5521999990000@s.whatsapp.net" → unchanged
+    static buildJid(number) {
+        const s = String(number);
+        if (s.includes('@')) return s; // Already a full JID
+        const clean = s.replace(/\D/g, '');
+        if (clean.startsWith('55')) return `${clean}@s.whatsapp.net`;
+        return `55${clean}@s.whatsapp.net`;
+    }
+
     broadcast(data) {
         if (!this.wss) return;
         this.wss.clients.forEach(client => {
@@ -112,7 +124,8 @@ class WhatsAppManager {
         if (!this.sock || this.status !== 'connected') {
             throw new Error('WhatsApp não está conectado');
         }
-        const jid = `55${number}@s.whatsapp.net`;
+        const jid = WhatsAppManager.buildJid(number);
+        console.log(`[WA] Sending to ${jid}`);
         if (imageBuffer) {
             await this.sock.sendMessage(jid, {
                 image: Buffer.isBuffer(imageBuffer) ? imageBuffer : Buffer.from(imageBuffer),
@@ -128,8 +141,8 @@ class WhatsAppManager {
         if (!this.sock || this.status !== 'connected') {
             throw new Error('WhatsApp não está conectado');
         }
-        const jid = `55${number}@s.whatsapp.net`;
-        const cleanOptions = options.filter(o => o && o.trim()).slice(0, 12); // max 12 opções
+        const jid = WhatsAppManager.buildJid(number);
+        const cleanOptions = options.filter(o => o && o.trim()).slice(0, 12);
         if (cleanOptions.length < 2) throw new Error('Enquete precisa de pelo menos 2 opções');
 
         await this.sock.sendMessage(jid, {
@@ -143,7 +156,7 @@ class WhatsAppManager {
 
     async sendTyping(number, duration = 2500) {
         if (!this.sock || this.status !== 'connected') return;
-        const jid = `55${number}@s.whatsapp.net`;
+        const jid = WhatsAppManager.buildJid(number);
         try {
             await this.sock.sendPresenceUpdate('composing', jid);
             await new Promise(r => setTimeout(r, duration));
