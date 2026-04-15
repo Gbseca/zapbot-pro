@@ -1,7 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import pdfParse from 'pdf-parse/lib/pdf-parse.js';
+import { createRequire } from 'module';
+
+// pdf-parse is CommonJS — use createRequire for ESM compatibility
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = path.join(__dirname, 'docs');
