@@ -47,14 +47,37 @@ export async function extractAndSavePDF(buffer, filename) {
   return { text, pages: data.numpages, wordCount: cache[filename].wordCount };
 }
 
+// Max chars injected into the prompt per PDF and total
+// Groq free tier: 12K TPM — prompt must stay well under ~6K tokens (~8K chars)
+const MAX_CHARS_PER_PDF = 6000;
+const MAX_CHARS_TOTAL   = 12000;
+
 export async function loadExtractedPDFs() {
   const cache = loadCache();
   const entries = Object.entries(cache);
   if (entries.length === 0) return '';
 
-  return entries
-    .map(([filename, data]) => `=== ${filename.toUpperCase().replace('.PDF', '').replace(/_/g, ' ')} ===\n${data.text}`)
-    .join('\n\n');
+  let totalChars = 0;
+  const sections = [];
+
+  for (const [filename, data] of entries) {
+    if (totalChars >= MAX_CHARS_TOTAL) {
+      sections.push('(demais documentos omitidos por limite de espaço)');
+      break;
+    }
+    const available = Math.min(MAX_CHARS_PER_PDF, MAX_CHARS_TOTAL - totalChars);
+    let text = data.text || '';
+    let truncated = false;
+    if (text.length > available) {
+      text = text.slice(0, available);
+      truncated = true;
+    }
+    const label = filename.toUpperCase().replace('.PDF', '').replace(/_/g, ' ');
+    sections.push(`=== ${label} ===\n${text}${truncated ? '\n[... conteúdo truncado por limite de tamanho ...]' : ''}`);
+    totalChars += text.length;
+  }
+
+  return sections.join('\n\n');
 }
 
 export function getUploadedDocs() {
