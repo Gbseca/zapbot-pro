@@ -14,10 +14,10 @@ function getClient(apiKey) {
 export async function callGemini(apiKey, { systemPrompt, history = [], userMessage }) {
   const genAI = getClient(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash',
     systemInstruction: systemPrompt,
     generationConfig: {
-      temperature: 0.85,      // Criativo mas controlado
+      temperature: 0.85,
       topP: 0.95,
       maxOutputTokens: 1024,
     },
@@ -25,7 +25,7 @@ export async function callGemini(apiKey, { systemPrompt, history = [], userMessa
 
   // Convert to Gemini format (skip last user message, it goes as sendMessage)
   const gcHistory = history
-    .filter((_, i) => i < history.length - 1) // All but last
+    .filter((_, i) => i < history.length - 1)
     .map(h => ({
       role: h.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: h.content }],
@@ -39,7 +39,7 @@ export async function callGemini(apiKey, { systemPrompt, history = [], userMessa
 export async function testGeminiKey(apiKey) {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const result = await model.generateContent('Responda só com: OK');
     const text = result.response.text();
     return { ok: true, message: 'API Key válida! ' + text.trim() };
@@ -47,3 +47,4 @@ export async function testGeminiKey(apiKey) {
     return { ok: false, message: err.message };
   }
 }
+
