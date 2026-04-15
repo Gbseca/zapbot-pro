@@ -18,6 +18,7 @@ class WhatsAppManager {
         this.reconnecting = false;
         this.logger = pino({ level: 'silent' });
         this.onMessage = null; // AI agent callback — set externally
+        this._contactMap = new Map(); // lid/jid-number → real phone number
     }
 
     // Build the correct WhatsApp JID from a number or full JID
@@ -30,6 +31,17 @@ class WhatsAppManager {
         const clean = s.replace(/\D/g, '');
         if (clean.startsWith('55')) return `${clean}@s.whatsapp.net`;
         return `55${clean}@s.whatsapp.net`;
+    }
+
+    /**
+     * Resolves the best display phone number from a Baileys JID or LID.
+     * Example: "193768103915763@s.whatsapp.net" → "5521972969475" (if known)
+     */
+    resolvePhone(jid) {
+        const baseId = String(jid).split('@')[0].split(':')[0];
+        if (this._contactMap.has(baseId)) return this._contactMap.get(baseId);
+        if (/^55\d{10,11}$/.test(baseId)) return baseId; // Already a valid BR number
+        return baseId; // Fallback to LID
     }
 
     broadcast(data) {
@@ -98,10 +110,37 @@ class WhatsAppManager {
 
             this.sock.ev.on('creds.update', saveCreds);
 
+            // ── Build LID → real phone map from contact events ───────────
+            this.sock.ev.on('contacts.upsert', (contacts) => {
+                for (const contact of contacts) {
+                    // contact.id is usually the LID (e.g. "193768103915763@lid")
+                    // contact.notify is the display name, not useful for phone
+                    // contact.jid (when present) is the real JID "5521xxx@s.whatsapp.net"
+                    const lid = (contact.id || '').split('@')[0].split(':')[0];
+                    const realJid = contact.jid || contact.phone || '';
+                    const phone = realJid.split('@')[0].split(':')[0];
+                    if (lid && phone && phone !== lid && /^55\d{10,11}$/.test(phone)) {
+                        this._contactMap.set(lid, phone);
+                        console.log(`[WA] Resolved LID ${lid} → ${phone}`);
+                    }
+                }
+            });
+
             // ── Incoming message listener (AI Agent) ─────────────────────
             this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
                 if (type !== 'notify') return;
                 for (const msg of messages) {
+                    // Try to extract real phone from message metadata
+                    const remoteJid = msg.key?.remoteJid || '';
+                    const lid = remoteJid.split('@')[0].split(':')[0];
+                    // Some message events include the real verifiedJid
+                    const verifiedPhone = msg.key?.participant?.split('@')[0]
+                        || msg.verifiedBizName
+                        || null;
+                    if (verifiedPhone && /^55\d{10,11}$/.test(verifiedPhone)) {
+                        this._contactMap.set(lid, verifiedPhone);
+                    }
+
                     if (this.onMessage) {
                         try {
                             await this.onMessage(this, msg);

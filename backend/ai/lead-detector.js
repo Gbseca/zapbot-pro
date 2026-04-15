@@ -1,10 +1,15 @@
-// Detects the [QUALIFICADO|...] marker injected by the AI when lead is fully captured
+/**
+ * Detects the [QUALIFICADO|...] marker injected by the AI.
+ * Required format: [QUALIFICADO|placa=X|modelo=Y|nome=Z|perfil=sim]
+ * The "perfil=sim" field is mandatory — prevents premature qualification
+ * before the AI has asked at least one profile question.
+ */
 
-const MARKER_REGEX = /\[QUALIFICADO\|placa=([^|]+)\|modelo=([^|]+)\|nome=([^\]]*)\]/i;
+const MARKER_REGEX = /\[QUALIFICADO\|placa=([^|]+)\|modelo=([^|]+)\|nome=([^|]*)\|perfil=(sim|nao|não)\]/i;
 
 /**
  * Extracts lead info from AI response if qualification marker is present.
- * @returns { qualified, plate, model, name, cleanResponse }
+ * @returns { qualified, plate, model, name, profileCaptured, cleanResponse }
  */
 export function detectAndExtract(aiResponse, currentLead = {}) {
   const match = aiResponse.match(MARKER_REGEX);
@@ -14,24 +19,33 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
       qualified: false,
       plate: currentLead.plate || null,
       model: currentLead.model || null,
-      name: currentLead.name || null,
+      name: currentLead.name  || null,
+      profileCaptured: currentLead.profileCaptured || false,
       cleanResponse: aiResponse.trim(),
     };
   }
 
-  const plate = (match[1] || '').trim() || currentLead.plate;
-  const model = (match[2] || '').trim() || currentLead.model;
-  const name = (match[3] || '').trim() || currentLead.name;
+  const plate          = (match[1] || '').trim() || currentLead.plate;
+  const model          = (match[2] || '').trim() || currentLead.model;
+  const name           = (match[3] || '').trim() || currentLead.name;
+  const profileField   = (match[4] || '').toLowerCase();
+  const profileCaptured = profileField === 'sim';
 
   // Remove the marker from the response sent to the client
-  const cleanResponse = aiResponse.replace(MARKER_REGEX, '').trim();
+  const cleanResponse = aiResponse.replace(MARKER_REGEX, '').replace(/\n+$/, '').trim();
 
-  return { qualified: !!(plate && model), plate, model, name, cleanResponse };
+  // Only qualify if plate + model present AND profile was captured
+  const qualified = !!(plate && model && profileCaptured);
+
+  if (!profileCaptured) {
+    console.warn('[Detector] Qualification marker found but perfil=sim missing — not qualifying yet.');
+  }
+
+  return { qualified, plate, model, name, profileCaptured, cleanResponse };
 }
 
 /**
- * Tries to extract name from a message using simple heuristics.
- * (Backup: AI should handle this, but just in case)
+ * Simple heuristic name extractor (backup — AI handles this mainly).
  */
 export function tryExtractName(message) {
   const patterns = [

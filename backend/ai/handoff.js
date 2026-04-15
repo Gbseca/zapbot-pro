@@ -58,13 +58,13 @@ export async function executeHandoff(wa, lead, config) {
       `🔔 *NOVO LEAD QUALIFICADO — ZapBot Pro*\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `👤 *Nome:* ${lead.name || 'Não informado'}\n` +
-      `📱 *WhatsApp:* ${formatNumber(lead.number)}\n` +
+      `📱 *WhatsApp:* ${formatNumber(lead.displayNumber || lead.number)}\n` +
       `🚗 *Veículo:* ${lead.model || 'Não informado'}\n` +
       `🔑 *Placa:* ${lead.plate || 'Não informada'}\n` +
       `\n💬 *Resumo da conversa:*\n${buildSummary(lead)}\n` +
       `\n⏰ Qualificado em: ${now}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `👆 Abrir conversa:\nhttps://wa.me/55${lead.number}`;
+      `👆 Abrir conversa:\nhttps://wa.me/${lead.displayNumber || lead.number}`;
 
     // Normalize consultor number
     const cNum = String(consultor.number).replace(/\D/g, '');
