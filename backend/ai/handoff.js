@@ -47,7 +47,9 @@ export async function executeHandoff(wa, lead, config) {
   // 1. Farewell to client (humanized — wait a bit before this one)
   await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
   const farewellMsg = `Perfeito${lead.name ? `, ${lead.name}` : ''}! 🙌\n\nJá anotei tudo aqui. Um dos nossos consultores vai entrar em contato com você em breve com as melhores opções${lead.model ? ` pra o seu ${lead.model}` : ''}.\n\nQualquer dúvida é só falar! 😊`;
-  await wa.sendMessage(lead.number, farewellMsg, null);
+  // Use stored fullJid if available (handles non-standard WhatsApp JIDs)
+  const clientTarget = lead.jid || lead.number;
+  await wa.sendMessage(clientTarget, farewellMsg, null);
 
   // 2. Notify consultor
   if (consultor) {

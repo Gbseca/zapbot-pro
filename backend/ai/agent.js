@@ -47,9 +47,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
 
   const config = loadConfig();
 
-  // Check AI is enabled and has a key for the configured provider
   if (!config.aiEnabled) {
-    console.log('[Agent] AI disabled, ignoring message.');
     return;
   }
 
@@ -60,50 +58,49 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  const jid = rawMsg.key.remoteJid;
-  const number = jid.split('@')[0];
-  const text = extractText(rawMsg);
-  console.log(`[Agent] Incoming from ${number}: "${text.slice(0, 60)}"`);
+  const fullJid = rawMsg.key.remoteJid;                  // e.g. "5521972969475@s.whatsapp.net"
+  const number  = fullJid.split('@')[0].split(':')[0];  // e.g. "5521972969475" (lead ID)
+  const text    = extractText(rawMsg);
+
+  console.log(`[Agent] Incoming from ${number} (jid: ${fullJid}): "${text.slice(0, 60)}"`);
   if (!text) return;
 
-  // Check lead status
   const existingLead = getLead(number);
   if (existingLead?.status === 'transferred') return;
   if (existingLead?.status === 'blocked') return;
 
-  // Check business hours
   if (!isBusinessHours(config)) {
-    // Send out-of-hours message (only once per day)
     const today = new Date().toDateString();
     if (existingLead?.lastOutOfHoursMsg !== today) {
       const [sh] = (config.businessHoursStart || '08:00').split(':');
       const [eh] = (config.businessHoursEnd || '22:00').split(':');
       const msg = `Oi! 😊 Nosso horário de atendimento é das ${sh}h às ${eh}h. Estarei aqui para te ajudar quando voltar! Até logo 👋`;
-      await wa.sendMessage(number, msg, null);
+      await wa.sendMessage(fullJid, msg, null);  // reply to full JID
       const lead = existingLead || createNewLead(number, rawMsg.pushName);
       saveLead(number, { ...lead, lastOutOfHoursMsg: today });
     }
     return;
   }
 
-  // Anti-flood: accumulate messages for 12s before processing
-  accumulate(wa, number, text, rawMsg.pushName, config);
+  accumulate(wa, fullJid, number, text, rawMsg.pushName, config);
 }
 
-function accumulate(wa, number, text, pushName, config) {
+function accumulate(wa, fullJid, number, text, pushName, config) {
   if (!messageBuffers.has(number)) {
-    messageBuffers.set(number, { texts: [], pushName, timer: null });
+    messageBuffers.set(number, { texts: [], pushName, fullJid, timer: null });
   }
   const buf = messageBuffers.get(number);
   buf.texts.push(text);
   buf.pushName = buf.pushName || pushName;
+  buf.fullJid  = fullJid; // always keep latest JID
 
   if (buf.timer) clearTimeout(buf.timer);
   buf.timer = setTimeout(async () => {
-    const texts = [...buf.texts];
+    const texts   = [...buf.texts];
+    const jid     = buf.fullJid;
     messageBuffers.delete(number);
     try {
-      await processConversation(wa, number, texts, buf.pushName, config);
+      await processConversation(wa, jid, number, texts, buf.pushName, config);
     } catch (err) {
       console.error(`[Agent] Error processing ${number}:`, err.message);
     }
@@ -125,12 +122,15 @@ function createNewLead(number, pushName) {
   };
 }
 
-async function processConversation(wa, number, texts, pushName, config) {
+async function processConversation(wa, fullJid, number, texts, pushName, config) {
   const combinedText = texts.join('\n');
 
   // Load or create lead
   let lead = getLead(number) || createNewLead(number, pushName);
   if (lead.status === 'new') lead.status = 'talking';
+
+  // Always persist the full JID so handoff/follow-up can reply correctly
+  lead.jid = fullJid;
 
   // Update name from WhatsApp push name if not yet captured
   if (!lead.name && pushName) lead.name = pushName;
@@ -142,6 +142,7 @@ async function processConversation(wa, number, texts, pushName, config) {
   lead.followUp1Sent = false; // Reset follow-up since they replied
   lead.followUp2Sent = false;
   saveLead(number, lead);
+
 
   // Build context and call AI
   const context = await buildContext(config, lead);
@@ -162,11 +163,11 @@ async function processConversation(wa, number, texts, pushName, config) {
   if (name && name.length > 1) lead.name = name;
 
   // Send humanized response
-  console.log(`[Agent] Sending AI response to ${number}: "${cleanResponse.slice(0, 60)}..."`);
+  console.log(`[Agent] Sending AI response to JID ${fullJid}`);
   try {
-    await sendHumanized(wa, number, cleanResponse, combinedText);
+    await sendHumanized(wa, fullJid, cleanResponse, combinedText);
   } catch (err) {
-    console.error(`[Agent] Failed to send message to ${number}:`, err.message);
+    console.error(`[Agent] Failed to send to ${fullJid}:`, err.message);
     return;
   }
 
