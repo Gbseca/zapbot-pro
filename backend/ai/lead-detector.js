@@ -1,11 +1,26 @@
 /**
  * Detects the [QUALIFICADO|...] marker injected by the AI.
  * Required format: [QUALIFICADO|placa=X|modelo=Y|nome=Z|perfil=sim]
- * The "perfil=sim" field is mandatory — prevents premature qualification
- * before the AI has asked at least one profile question.
+ * The "perfil=sim" field is mandatory — prevents premature qualification.
+ * Plate must also pass validation (no placeholder values).
  */
 
 const MARKER_REGEX = /\[QUALIFICADO\|placa=([^|]+)\|modelo=([^|]+)\|nome=([^|]*)\|perfil=(sim|nao|não)\]/i;
+
+// Plate values that obviously are not real plates (AI placeholder usage)
+const FAKE_PLATE_VALUES = [
+  'placa_aqui', 'placa', 'não informada', 'nao informada',
+  'sem placa', 'nenhuma', 'n/a', 'na', 'x', '?', '??', '???',
+];
+
+function isRealPlate(plate) {
+  if (!plate) return false;
+  const p = plate.trim().toLowerCase();
+  if (p.length < 5) return false;
+  if (FAKE_PLATE_VALUES.includes(p)) return false;
+  if (p.includes('_aqui') || p.includes('placa')) return false;
+  return true;
+}
 
 /**
  * Extracts lead info from AI response if qualification marker is present.
@@ -34,11 +49,14 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
   // Remove the marker from the response sent to the client
   const cleanResponse = aiResponse.replace(MARKER_REGEX, '').replace(/\n+$/, '').trim();
 
-  // Only qualify if plate + model present AND profile was captured
-  const qualified = !!(plate && model && profileCaptured);
+  // Only qualify if ALL required fields are real values
+  const qualified = !!(isRealPlate(plate) && model && profileCaptured);
 
+  if (!isRealPlate(plate)) {
+    console.warn(`[Detector] Qualification rejected — plate "${plate}" is not a real plate value.`);
+  }
   if (!profileCaptured) {
-    console.warn('[Detector] Qualification marker found but perfil=sim missing — not qualifying yet.');
+    console.warn('[Detector] Qualification rejected — perfil=sim missing.');
   }
 
   return { qualified, plate, model, name, profileCaptured, cleanResponse };

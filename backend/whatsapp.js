@@ -1,4 +1,4 @@
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -18,7 +18,8 @@ class WhatsAppManager {
         this.reconnecting = false;
         this.logger = pino({ level: 'silent' });
         this.onMessage = null; // AI agent callback — set externally
-        this._contactMap = new Map(); // lid/jid-number → real phone number
+        this._contactMap = new Map(); // lid-number → real phone number
+        this._store = makeInMemoryStore({ logger: this.logger }); // Baileys contact store
     }
 
     // Build the correct WhatsApp JID from a number or full JID
@@ -35,13 +36,30 @@ class WhatsAppManager {
 
     /**
      * Resolves the best display phone number from a Baileys JID or LID.
-     * Example: "193768103915763@s.whatsapp.net" → "5521972969475" (if known)
+     * Priority: manual map → store contacts → valid BR number as-is → raw id
      */
     resolvePhone(jid) {
         const baseId = String(jid).split('@')[0].split(':')[0];
+
+        // 1. Manual map (built from contacts.upsert and messages)
         if (this._contactMap.has(baseId)) return this._contactMap.get(baseId);
-        if (/^55\d{10,11}$/.test(baseId)) return baseId; // Already a valid BR number
-        return baseId; // Fallback to LID
+
+        // 2. Search Baileys store: look for a contact whose LID matches
+        const storeContacts = this._store?.contacts || {};
+        for (const [id, contact] of Object.entries(storeContacts)) {
+            const contactLid = (contact.lid || '').split('@')[0];
+            const contactPhone = id.split('@')[0];
+            if (contactLid === baseId && /^55\d{10,11}$/.test(contactPhone)) {
+                this._contactMap.set(baseId, contactPhone); // cache
+                return contactPhone;
+            }
+        }
+
+        // 3. Already a valid BR number (e.g. "5521972969475")
+        if (/^55\d{10,11}$/.test(baseId)) return baseId;
+
+        // 4. Last resort: return as-is (LID)
+        return baseId;
     }
 
     broadcast(data) {
@@ -110,18 +128,28 @@ class WhatsAppManager {
 
             this.sock.ev.on('creds.update', saveCreds);
 
+            // Bind the in-memory store to all socket events (handles LID→phone internally)
+            this._store.bind(this.sock.ev);
+
             // ── Build LID → real phone map from contact events ───────────
             this.sock.ev.on('contacts.upsert', (contacts) => {
                 for (const contact of contacts) {
-                    // contact.id is usually the LID (e.g. "193768103915763@lid")
-                    // contact.notify is the display name, not useful for phone
-                    // contact.jid (when present) is the real JID "5521xxx@s.whatsapp.net"
-                    const lid = (contact.id || '').split('@')[0].split(':')[0];
-                    const realJid = contact.jid || contact.phone || '';
-                    const phone = realJid.split('@')[0].split(':')[0];
-                    if (lid && phone && phone !== lid && /^55\d{10,11}$/.test(phone)) {
-                        this._contactMap.set(lid, phone);
-                        console.log(`[WA] Resolved LID ${lid} → ${phone}`);
+                    // In Baileys new format:
+                    //   contact.id  = phone JID  e.g. "5521972969475@s.whatsapp.net"
+                    //   contact.lid = LID JID    e.g. "193768103915763@lid"
+                    const phoneJid = (contact.id  || '');
+                    const lidJid   = (contact.lid || '');
+                    const phone = phoneJid.split('@')[0].split(':')[0]; // e.g. "5521972969475"
+                    const lid   = lidJid.split('@')[0].split(':')[0];   // e.g. "193768103915763"
+
+                    if (phone && /^55\d{10,11}$/.test(phone)) {
+                        // Map lid → phone
+                        if (lid && lid !== phone) {
+                            this._contactMap.set(lid, phone);
+                            console.log(`[WA] Contact mapped: LID ${lid} → Phone ${phone}`);
+                        }
+                        // Also map phone → phone (self-mapping for quick lookups)
+                        this._contactMap.set(phone, phone);
                     }
                 }
             });
