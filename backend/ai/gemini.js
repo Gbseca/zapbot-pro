@@ -24,9 +24,9 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }) {
     body: JSON.stringify({
       model: 'llama-3.1-8b-instant',
       messages,
-      temperature: 0.85,
+      temperature: 0.95,
       max_tokens: 1024,
-      top_p: 0.95,
+      top_p: 0.88,
     }),
   });
 

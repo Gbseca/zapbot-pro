@@ -693,42 +693,18 @@
               <input type="text" id="ai-company-name" class="form-input" placeholder="Ex: Moove Proteção Veicular">
             </div>
             <div class="form-group">
-              <label class="form-label">Base de conhecimento da IA <span class="label-hint">— o que a Júlia sabe sobre a empresa</span></label>
-              <textarea id="ai-company-info" class="form-textarea" rows="16" oninput="updateKnowledgeCounter(this)" placeholder="Escreva aqui tudo que a IA precisa saber. Quanto mais detalhado, melhor. Exemplo:
+              <label class="form-label">Informações operacionais <span class="label-hint">— horário, contatos, dados da regional (regulamento e coberturas já estão na IA)</span></label>
+              <textarea id="ai-company-info" class="form-textarea" rows="8" maxlength="4000" oninput="updateKnowledgeCounter(this)" placeholder="Escreva informações operacionais da sua regional. Exemplos:
 
-🏢 SOBRE A EMPRESA
-A Moove Proteção Veicular oferece proteção para veículos com cobertura ampla e mensalidades acessíveis. Trabalhamos com associados em todo o Brasil.
+Horário de atendimento: seg-sex 8h-20h, sáb 9h-14h
+Regional: Rio de Janeiro
+Contato direto: (21) 99999-9999
+Responsável: João da Silva
 
-📋 PLANOS DISPONÍVEIS
-• Plano Basic — R$89/mês: cobre roubo/furto e colisão
-• Plano Premium — R$149/mês: Basic + vidros + guincho 24h
-• Plano Total — R$199/mês: tudo incluso + carro reserva
-
-✅ O QUE COBRE
-Roubo, furto, colisão, incêndio, alagamento. Guincho incluso nos planos Premium e Total.
-
-❌ O QUE NÃO COBRE
-Danos mecânicos, multas, pneus, danos intencionais.
-
-💳 PAGAMENTO
-Boleto ou cartão de crédito. Vencimento todo dia 5 do mês.
-
-⚠️ INADIMPLÊNCIA
-Após 30 dias de atraso, a proteção é suspensa. Para reativar, pagar o débito + taxa de R$50.
-O cliente deve entrar em contato com um consultor para regularizar.
-
-🔧 COMO ACIONAR
-1. Ligar para (21) 9999-9999
-2. Fornecer nome, CPF e placa
-3. Aguardar o guincho em até 60 min
-
-❓ PERGUNTAS FREQUENTES
-Tem carência? Sim, 30 dias para sinistro por colisão. Roubo tem carência de 60 dias.
-Atende caminhão/moto? Não, apenas carros de passeio.
-Posso cancelar? Sim, a qualquer momento sem multa."></textarea>
+Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados automaticamente na IA."></textarea>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-                <p class="hint-text" style="margin:0">A IA usa APENAS este texto para responder clientes. Seja específico e completo.</p>
-                <span id="knowledge-counter" style="font-size:11px;color:var(--text-muted);font-family:monospace;">0 / ~3000 palavras recomendadas</span>
+                <p class="hint-text" style="margin:0">Use para dados específicos da sua regional. Coberturas e regulamento já estão na IA.</p>
+                <span id="knowledge-counter" style="font-size:11px;color:var(--text-muted);font-family:monospace;">0 / 4000 caracteres</span>
               </div>
             </div>
           </div>

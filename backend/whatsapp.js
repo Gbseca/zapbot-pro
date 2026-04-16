@@ -115,24 +115,23 @@ class WhatsAppManager {
 
             // ── Build LID → real phone map from contact events ───────────
             this.sock.ev.on('contacts.upsert', (contacts) => {
+                let mapped = 0;
                 for (const contact of contacts) {
-                    // In Baileys new format:
-                    //   contact.id  = phone JID  e.g. "5521972969475@s.whatsapp.net"
-                    //   contact.lid = LID JID    e.g. "193768103915763@lid"
                     const phoneJid = (contact.id  || '');
                     const lidJid   = (contact.lid || '');
-                    const phone = phoneJid.split('@')[0].split(':')[0]; // e.g. "5521972969475"
-                    const lid   = lidJid.split('@')[0].split(':')[0];   // e.g. "193768103915763"
+                    const phone = phoneJid.split('@')[0].split(':')[0];
+                    const lid   = lidJid.split('@')[0].split(':')[0];
 
                     if (phone && /^55\d{10,11}$/.test(phone)) {
-                        // Map lid → phone
                         if (lid && lid !== phone) {
                             this._contactMap.set(lid, phone);
-                            console.log(`[WA] Contact mapped: LID ${lid} → Phone ${phone}`);
+                            mapped++;
                         }
-                        // Also map phone → phone (self-mapping for quick lookups)
                         this._contactMap.set(phone, phone);
                     }
+                }
+                if (mapped > 0) {
+                    console.log(`[WA] Contacts synced: ${mapped} mapped (total in map: ${this._contactMap.size})`);
                 }
             });
 
