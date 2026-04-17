@@ -818,6 +818,16 @@ async function loadAIConfig() {
     document.getElementById('campaign-loop-enabled').checked = aiConfig.campaignLoopEnabled !== false;
     document.getElementById('report-enabled').checked = aiConfig.reportEnabled !== false;
 
+    // Phase 3: personality + aggression
+    const personality = aiConfig.aiPersonality || 'human';
+    const aggression  = aiConfig.aiAggression  || 'balanced';
+    const pRadio = document.querySelector(`input[name="ai-personality"][value="${personality}"]`);
+    if (pRadio) pRadio.checked = true;
+    const aRadio = document.querySelector(`input[name="ai-aggression"][value="${aggression}"]`);
+    if (aRadio) aRadio.checked = true;
+    const sessionTimeoutEl = document.getElementById('ai-session-timeout');
+    if (sessionTimeoutEl) sessionTimeoutEl.value = aiConfig.sessionTimeoutMinutes || 30;
+
     updateAIStatusUI(aiConfig.aiEnabled);
     renderConsultors(aiConfig.consultors || []);
     await loadDocs();
@@ -868,6 +878,9 @@ function collectAIFormData() {
   });
 
   const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
+  const personality = document.querySelector('input[name="ai-personality"]:checked')?.value || 'human';
+  const aggression  = document.querySelector('input[name="ai-aggression"]:checked')?.value  || 'balanced';
+  const sessionTimeout = parseInt(document.getElementById('ai-session-timeout')?.value) || 30;
 
   return {
     aiEnabled: document.getElementById('ai-enabled').checked,
@@ -888,7 +901,16 @@ function collectAIFormData() {
     followUpColdHours: parseInt(document.getElementById('followup-cold').value),
     campaignLoopEnabled: document.getElementById('campaign-loop-enabled').checked,
     reportEnabled: document.getElementById('report-enabled').checked,
+    aiPersonality: personality,
+    aiAggression: aggression,
+    sessionTimeoutMinutes: sessionTimeout,
   };
+}
+
+// Visual feedback for behavior card selection
+function selectBehaviorCard(group, radioEl) {
+  // No extra logic needed — CSS handles :checked state automatically
+  // This function exists as an onchange hook for future analytics or validation
 }
 
 async function saveAIConfig() {

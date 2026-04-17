@@ -709,8 +709,84 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
             </div>
           </div>
 
+          <!-- Personality + Aggression Controls -->
+          <div class="card" style="margin-top:0;">
+            <div class="card-header"><span class="card-icon">🎭</span><h2 class="card-title">Comportamento da IA</h2></div>
+
+            <div class="form-group">
+              <label class="form-label">Personalidade <span class="label-hint">— como a IA fala com o cliente</span></label>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px;">
+                <label class="behavior-card" id="card-personality-human">
+                  <input type="radio" name="ai-personality" value="human" checked onchange="selectBehaviorCard('personality',this)">
+                  <div class="behavior-card-inner">
+                    <span class="behavior-icon">🧠</span>
+                    <span class="behavior-title">Humano</span>
+                    <span class="behavior-desc">Natural, empático, usa gírias. Parece uma pessoa real.</span>
+                    <span class="behavior-badge">Padrão</span>
+                  </div>
+                </label>
+                <label class="behavior-card" id="card-personality-balanced">
+                  <input type="radio" name="ai-personality" value="balanced" onchange="selectBehaviorCard('personality',this)">
+                  <div class="behavior-card-inner">
+                    <span class="behavior-icon">⚖️</span>
+                    <span class="behavior-title">Equilibrado</span>
+                    <span class="behavior-desc">Simpático e profissional. Tom leve mas focado.</span>
+                  </div>
+                </label>
+                <label class="behavior-card" id="card-personality-robot">
+                  <input type="radio" name="ai-personality" value="robot" onchange="selectBehaviorCard('personality',this)">
+                  <div class="behavior-card-inner">
+                    <span class="behavior-icon">🤖</span>
+                    <span class="behavior-title">Direto</span>
+                    <span class="behavior-desc">Objetivo e sem rodeios. Respeita o tempo do cliente.</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top:18px;">
+              <label class="form-label">Estilo de Vendas <span class="label-hint">— agressividade comercial</span></label>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px;">
+                <label class="behavior-card" id="card-aggression-aggressive">
+                  <input type="radio" name="ai-aggression" value="aggressive" onchange="selectBehaviorCard('aggression',this)">
+                  <div class="behavior-card-inner">
+                    <span class="behavior-icon">🔥</span>
+                    <span class="behavior-title">Agressivo</span>
+                    <span class="behavior-desc">Urgência, prova social, fecha na hora. Máxima conversão.</span>
+                  </div>
+                </label>
+                <label class="behavior-card" id="card-aggression-balanced">
+                  <input type="radio" name="ai-aggression" value="balanced" checked onchange="selectBehaviorCard('aggression',this)">
+                  <div class="behavior-card-inner">
+                    <span class="behavior-icon">⚖️</span>
+                    <span class="behavior-title">Consultivo</span>
+                    <span class="behavior-desc">Ouve, apresenta benefícios e conduz sem pressão.</span>
+                    <span class="behavior-badge">Padrão</span>
+                  </div>
+                </label>
+                <label class="behavior-card" id="card-aggression-soft">
+                  <input type="radio" name="ai-aggression" value="soft" onchange="selectBehaviorCard('aggression',this)">
+                  <div class="behavior-card-inner">
+                    <span class="behavior-icon">🌿</span>
+                    <span class="behavior-title">Educativo</span>
+                    <span class="behavior-desc">Tira dúvidas sem empurrar. Ideal para clientes sensíveis.</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top:18px;">
+              <label class="form-label">Tempo de silêncio para esquecer conversa <span class="label-hint">— só ativo se follow-up estiver desligado</span></label>
+              <div class="input-with-unit">
+                <input type="number" id="ai-session-timeout" class="form-input" value="30" min="5" max="240">
+                <span class="input-unit">minutos</span>
+              </div>
+              <p class="hint-text">Se o cliente ficar em silêncio por este tempo, o histórico da conversa é apagado e ela começa do zero.</p>
+            </div>
+          </div>
 
           <!-- Consultors + Hours -->
+
           <div style="display:flex;flex-direction:column;gap:16px;">
             <div class="card">
               <div class="card-header"><span class="card-icon">👥</span><h2 class="card-title">Consultores</h2></div>

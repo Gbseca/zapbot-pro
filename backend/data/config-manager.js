@@ -1,3 +1,4 @@
+// config-manager.js — v3 — added personality, aggression, sessionTimeout
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -7,9 +8,9 @@ const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 const defaultConfig = {
   aiEnabled: false,
-  aiProvider: 'groq',       // 'groq' (recommended, always free) | 'gemini'
-  groqKey: '',              // from console.groq.com — free, no billing
-  geminiKey: '',            // from aistudio.google.com — free tier
+  aiProvider: 'groq',           // 'groq' (recommended) | 'gemini'
+  groqKey: '',
+  geminiKey: '',
   agentName: 'Júlia',
   companyName: '',
   companyInfo: '',
@@ -24,6 +25,10 @@ const defaultConfig = {
   reportEnabled: true,
   reportHour: '18:00',
   campaignLoopEnabled: true,
+  // ── Phase 3: new personality/behavior controls ──
+  aiPersonality: 'human',       // 'human' | 'balanced' | 'robot'
+  aiAggression: 'balanced',     // 'aggressive' | 'balanced' | 'soft'
+  sessionTimeoutMinutes: 30,    // minutes of inactivity before session history is cleared
 };
 
 export function loadConfig() {

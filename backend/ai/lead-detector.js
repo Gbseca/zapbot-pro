@@ -1,12 +1,11 @@
 /**
- * Detects the [QUALIFICADO|...] marker injected by the AI.
- * Required format: [QUALIFICADO|placa=X|modelo=Y|nome=Z|phone=N|perfil=sim]
- * All fields must be real values — placeholder text is rejected.
+ * lead-detector.js — v3
+ * Detects [QUALIFICADO|...] marker injected by the AI.
+ * PHASE 3: profile is no longer mandatory — plate + model + phone is enough to qualify.
  */
 
 const MARKER_REGEX = /\[QUALIFICADO\|placa=([^|]+)\|modelo=([^|]+)\|nome=([^|]*)\|phone=([^|]*)\|perfil=(sim|nao|não)\]/i;
 
-// Plate values that are obviously placeholders (AI didn't have the real value)
 const FAKE_PLATE_VALUES = [
   'placa_aqui', 'placa_real', 'placa', 'não informada', 'nao informada',
   'sem placa', 'nenhuma', 'n/a', 'na', 'x', '?', '??', '???',
@@ -21,28 +20,31 @@ function isRealPlate(plate) {
   return true;
 }
 
+function isRealPhone(phone) {
+  if (!phone) return false;
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.length >= 10; // at least DDD + number
+}
+
 /**
- * Normalizes a raw phone string to the format "5521972969475".
- * Accepts: "(21) 97296-9475", "21 97296 9475", "21972969475", etc.
- * Returns null if it doesn't look like a real phone.
+ * Normalizes a raw phone string to "5521972969475" format.
  */
 export function normalizePhone(raw) {
   if (!raw) return null;
   const digits = String(raw).replace(/\D/g, '');
-  if (digits.length < 10) return null; // too short
-
-  // Already has country code 55
+  if (digits.length < 10) return null;
   if (digits.startsWith('55') && digits.length >= 12) return digits;
-
-  // Add Brazil country code
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-
-  return null; // Unknown format
+  return null;
 }
 
 /**
  * Extracts lead info from AI response if qualification marker is present.
- * @returns { qualified, plate, model, name, phone, profileCaptured, cleanResponse }
+ *
+ * QUALIFICATION RULES (Phase 3):
+ *   ✅ plate (real) + model + phone → ALWAYS qualifies (fastest path — client was direct)
+ *   ✅ plate (real) + model + profile=sim → qualifies (classic path, phone optional in marker)
+ *   ❌ missing plate or model → never qualifies
  */
 export function detectAndExtract(aiResponse, currentLead = {}) {
   const match = aiResponse.match(MARKER_REGEX);
@@ -71,29 +73,39 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
   // Remove the marker from the response sent to the client
   const cleanResponse = aiResponse.replace(MARKER_REGEX, '').replace(/\n+$/, '').trim();
 
-  // Only qualify if ALL required fields are real values
-  const qualified = !!(isRealPlate(plate) && model && profileCaptured);
+  const hasRealPlate  = isRealPlate(plate);
+  const hasRealModel  = !!(model && model.length > 1);
+  const hasRealPhone  = isRealPhone(phone);
 
-  if (!isRealPlate(plate)) {
+  // Fast path: client gave plate + model + phone → qualify immediately, no profile needed
+  const fastQualify = hasRealPlate && hasRealModel && hasRealPhone;
+
+  // Classic path: plate + model + profile collected (phone preferred but not blocking)
+  const classicQualify = hasRealPlate && hasRealModel && profileCaptured;
+
+  const qualified = fastQualify || classicQualify;
+
+  if (!hasRealPlate) {
     console.warn(`[Detector] Qualification rejected — plate "${plate}" is not a real plate value.`);
+  } else if (!hasRealModel) {
+    console.warn('[Detector] Qualification rejected — model missing.');
+  } else if (!fastQualify && !classicQualify) {
+    console.warn('[Detector] Qualification rejected — need phone OR profile=sim.');
+  } else {
+    const path = fastQualify ? 'fast (plate+model+phone)' : 'classic (plate+model+profile)';
+    console.log(`[Detector] ✅ Qualified via ${path} — plate=${plate} model=${model} phone=${phone}`);
   }
-  if (!profileCaptured) {
-    console.warn('[Detector] Qualification rejected — perfil=sim missing.');
-  }
-  if (phone) {
-    console.log(`[Detector] Phone captured: ${phone}`);
-  }
+
+  if (phone) console.log(`[Detector] Phone captured: ${phone}`);
 
   return { qualified, plate, model, name, phone, profileCaptured, cleanResponse };
 }
 
 /**
- * Tries to extract a phone number from a free-text message.
- * Used as a backup to capture phone when the client types it directly.
+ * Tries to extract a phone number from a free-text message (backup capture).
  */
 export function tryExtractPhone(message) {
   const digits = message.replace(/\D/g, '');
-  // Look for a standalone phone: 10-11 digits (without 55) or 12-13 digits (with 55)
   if ((digits.length === 10 || digits.length === 11) && /^[1-9]{2}9?\d{7,8}$/.test(digits)) {
     return `55${digits}`;
   }

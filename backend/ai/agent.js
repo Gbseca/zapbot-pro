@@ -6,9 +6,12 @@ import { sendHumanized } from './humanizer.js';
 import { detectAndExtract, tryExtractPhone } from './lead-detector.js';
 import { executeHandoff } from './handoff.js';
 
-// Anti-flood: buffer messages per number (by JID-id, not phone)
+// Anti-flood: accumulate messages per JID before processing
 const messageBuffers = new Map();
-const ANTIFLOOD_MS = 10000; // 10 seconds to accumulate
+const ANTIFLOOD_MS = 10000; // 10s to accumulate rapid messages
+
+// Session inactivity timers — clears history after N minutes of silence
+const sessionTimers = new Map();
 
 function isBusinessHours(config) {
   const now = new Date();
@@ -32,9 +35,40 @@ function isValidIncoming(msg) {
   if (!msg || !msg.message) return false;
   if (msg.key?.fromMe) return false;
   const jid = msg.key?.remoteJid || '';
-  if (jid.includes('@g.us'))        return false; // group
-  if (jid.includes('@broadcast'))   return false; // broadcast
+  if (jid.includes('@g.us'))      return false;
+  if (jid.includes('@broadcast')) return false;
   return true;
+}
+
+/**
+ * Resets the inactivity timer for a JID.
+ * If the client goes silent for sessionTimeoutMinutes, the conversation history is cleared.
+ */
+function resetSessionTimer(jidId, config) {
+  if (sessionTimers.has(jidId)) {
+    clearTimeout(sessionTimers.get(jidId));
+  }
+
+  // Don't set timer if follow-up is enabled (follow-up will handle re-engagement)
+  if (config.followUpEnabled) return;
+
+  const timeoutMs = ((config.sessionTimeoutMinutes || 30) * 60 * 1000);
+
+  const timer = setTimeout(() => {
+    sessionTimers.delete(jidId);
+    const lead = getLead(jidId);
+    if (!lead) return;
+
+    // Only clear if still in talking/new state (not transferred or blocked)
+    if (lead.status === 'talking' || lead.status === 'new') {
+      lead.history = [];
+      lead.status  = 'new';
+      saveLead(jidId, lead);
+      console.log(`[Agent] 🕐 Session expired for ${jidId} (${config.sessionTimeoutMinutes}min inactivity) — history cleared`);
+    }
+  }, timeoutMs);
+
+  sessionTimers.set(jidId, timer);
 }
 
 /**
@@ -54,22 +88,18 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  const fullJid     = rawMsg.key.remoteJid;
-  const jidId       = fullJid.split('@')[0].split(':')[0]; // internal ID (may be LID)
-  const displayNum  = wa.resolvePhone(fullJid);             // real phone if known, else LID
-  const text        = extractText(rawMsg);
-  const pushName    = rawMsg.pushName || null;
+  const fullJid    = rawMsg.key.remoteJid;
+  const jidId      = fullJid.split('@')[0].split(':')[0];
+  const displayNum = wa.resolvePhone(fullJid);
+  const text       = extractText(rawMsg);
+  const pushName   = rawMsg.pushName || null;
 
   console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}): "${text.slice(0, 60)}"`);
   if (!text) return;
 
-  // Lead is keyed by jidId (stable for this WhatsApp account)
   const existingLead = getLead(jidId);
-
-  // Blocked leads: ignore completely
   if (existingLead?.status === 'blocked') return;
 
-  // Out-of-hours handling
   if (!isBusinessHours(config)) {
     const today = new Date().toDateString();
     if (existingLead?.lastOutOfHoursMsg !== today) {
@@ -83,6 +113,9 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
+  // Reset inactivity timer every time client sends a message
+  resetSessionTimer(jidId, config);
+
   accumulate(wa, fullJid, jidId, displayNum, text, pushName, config);
 }
 
@@ -93,7 +126,7 @@ function accumulate(wa, fullJid, jidId, displayNum, text, pushName, config) {
   const buf = messageBuffers.get(jidId);
   buf.texts.push(text);
   buf.pushName   = buf.pushName   || pushName;
-  buf.fullJid    = fullJid;   // keep latest
+  buf.fullJid    = fullJid;
   buf.displayNum = displayNum;
 
   if (buf.timer) clearTimeout(buf.timer);
@@ -112,7 +145,7 @@ function createNewLead(jidId, displayNum, pushName) {
   return {
     number: jidId,
     displayNumber: displayNum,
-    phone: null,        // real phone captured from client during conversation
+    phone: null,
     name: pushName || null,
     status: 'new',
     history: [],
@@ -130,43 +163,36 @@ function createNewLead(jidId, displayNum, pushName) {
 async function processConversation(wa, fullJid, jidId, displayNum, texts, pushName, config) {
   const combinedText = texts.join('\n');
 
-  // Load or create lead
   let lead = getLead(jidId) || createNewLead(jidId, displayNum, pushName);
 
-  // Always update identifiers with the latest known values
   lead.jid           = fullJid;
   lead.displayNumber = displayNum;
   if (lead.status === 'new') lead.status = 'talking';
-
-  // If already transferred, still respond but skip the handoff
-  const alreadyTransferred = lead.status === 'transferred';
-
-  // Reset cold status when client writes again
   if (lead.status === 'cold') lead.status = 'talking';
-
-  // Update name from push name if not yet captured
   if (!lead.name && pushName) lead.name = pushName;
 
-  // Append user message to history
   lead.history = lead.history || [];
   lead.history.push({ role: 'user', content: combinedText, ts: Date.now() });
   lead.lastInteraction = new Date().toISOString();
   lead.followUp1Sent = false;
   lead.followUp2Sent = false;
 
-  // Backup phone extraction: if client typed a phone number, capture it immediately
+  // If already transferred, still respond but skip the handoff
+  const alreadyTransferred = lead.status === 'transferred';
+
+  // Backup phone capture from free text
   if (!lead.phone) {
     const extractedPhone = tryExtractPhone(combinedText);
     if (extractedPhone) {
       lead.phone = extractedPhone;
-      lead.displayNumber = extractedPhone; // update what shows on the website
-      console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
+      lead.displayNumber = extractedPhone;
+      console.log(`[Agent] Phone extracted from message text: ${extractedPhone}`);
     }
   }
 
   saveLead(jidId, lead);
 
-  // Build context and call AI
+  // Build AI context and call
   const context = await buildContext(config, lead, alreadyTransferred);
   let aiResponse;
   try {
@@ -176,21 +202,18 @@ async function processConversation(wa, fullJid, jidId, displayNum, texts, pushNa
     return;
   }
 
-  // Check for qualification marker
   const { qualified, plate, model, name, phone, profileCaptured, cleanResponse } = detectAndExtract(aiResponse, lead);
 
-  // Update lead info from AI extraction
   if (plate) lead.plate = plate;
   if (model) lead.model = model;
   if (name && name.length > 1) lead.name = name;
   if (profileCaptured) lead.profileCaptured = true;
   if (phone) {
     lead.phone = phone;
-    lead.displayNumber = phone; // also update what shows on the website
+    lead.displayNumber = phone;
     console.log(`[Agent] Phone from marker: ${phone}`);
   }
 
-  // Send humanized response
   console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);
   try {
     await sendHumanized(wa, fullJid, cleanResponse, combinedText);
@@ -199,10 +222,8 @@ async function processConversation(wa, fullJid, jidId, displayNum, texts, pushNa
     return;
   }
 
-  // Save bot response to history
   lead.history.push({ role: 'assistant', content: cleanResponse, ts: Date.now() });
 
-  // Execute handoff only if freshly qualified and not already done
   if (qualified && !alreadyTransferred) {
     lead.status      = 'transferred';
     lead.transferred = true;
