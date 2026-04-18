@@ -19,9 +19,20 @@ function selectConsultor(config) {
 }
 
 function formatNumber(raw) {
-  const digits = String(raw).replace(/\D/g, '');
+  let digits = String(raw).replace(/\D/g, '');
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
   if (digits.length === 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
   if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return digits;
+}
+
+function buildWaLinkNumber(raw) {
+  let digits = String(raw || '').replace(/\D/g, '');
+  if (!digits.startsWith('55') && (digits.length === 10 || digits.length === 11)) {
+    digits = `55${digits}`;
+  }
   return digits;
 }
 
@@ -55,6 +66,7 @@ export async function executeHandoff(wa, lead, config) {
   if (consultor) {
     const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     const contactPhone = lead.phone || lead.displayNumber || lead.number;
+    const waLinkNumber = buildWaLinkNumber(contactPhone);
     const consultorMsg =
       `🔔 *NOVO LEAD QUALIFICADO — ZapBot Pro*\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -65,7 +77,7 @@ export async function executeHandoff(wa, lead, config) {
       `\n💬 *Resumo da conversa:*\n${buildSummary(lead)}\n` +
       `\n⏰ Qualificado em: ${now}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `👆 Abrir conversa:\nhttps://wa.me/${contactPhone}`;
+      `👆 Abrir conversa:\nhttps://wa.me/${waLinkNumber}`;
 
     // Normalize consultor number: strip non-digits + remove leading zero if present
     let cNum = String(consultor.number).replace(/\D/g, '');

@@ -1,36 +1,28 @@
 import { loadConfig } from '../data/config-manager.js';
 import { getLead, saveLead } from '../data/leads-manager.js';
-import { buildContext } from './context-builder.js';
+import { buildContext, buildQualificationContext } from './context-builder.js';
 import { callAI } from './gemini.js';
 import { sendHumanized } from './humanizer.js';
-import { detectAndExtract, tryExtractPhone } from './lead-detector.js';
+import { detectAndExtract, normalizePhone, tryExtractPhone } from './lead-detector.js';
 import { executeHandoff } from './handoff.js';
 
-// Anti-flood buffer
 const messageBuffers = new Map();
-const ANTIFLOOD_MS = 5000; // reduced from 10s — still handles rapid multi-messages, but responds faster
+const ANTIFLOOD_MS = 3500;
 
-// Session inactivity timers
 const sessionTimers = new Map();
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// FIX [1][2]: DETERMINISTIC INTENT PRE-PROCESSOR
-// Runs BEFORE the AI — no LLM calls for these cases.
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function normalizeText(text) {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // strip accents
-    .replace(/[^\w\s]/g, ' ')         // strip punctuation
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// Strong refusal: should NEVER get a follow-up AI response
 const STRONG_REFUSAL_PATTERNS = [
-  /^n(a|ao|ão)?o?$/,                    // "não", "nao", "n", "nao"
+  /^n(a|ao|ão)?o?$/,
   /^nao\s*(quero|preciso|obrigad)/,
   /^não\s*(quero|preciso|obrigad)/,
   /sem\s*interesse/,
@@ -53,9 +45,6 @@ const STRONG_REFUSAL_PATTERNS = [
   /chega/,
 ];
 
-// Soft refusal: client has coverage or isn't looking — one gentle pitch, then respect.
-// FIX [1]: Removed bare /ja\s*tenho/ — too broad, matches "já tenho a placa", "já tenho o doc", etc.
-// Only match explicitly commercial/refusal contexts.
 const SOFT_REFUSAL_PATTERNS = [
   /ja\s*tenho\s*(seguro|protecao|proteção|proteção\s*veicular|cobertura)/,
   /já\s*tenho\s*(seguro|protecao|proteção|proteção\s*veicular|cobertura)/,
@@ -68,33 +57,26 @@ const SOFT_REFUSAL_PATTERNS = [
   /nao\s*to\s*procurando/,
   /não\s*to\s*procurando/,
   /meu\s*irmao\s*e\s*(meu\s*)?(corretor|agente)/,
-  /meu\s*irmao\s*e\s*(meu\s*)?(corretor|agente)/,
+  /meu\s*irmão\s*e\s*(meu\s*)?(corretor|agente)/,
 ];
 
-// Ambiguous regional interjections — not vehicle data, not commercial intent.
-// FIX [2]: Removed "sim", "oi", "ola", "opa", "ok", "okay", "certo", "entendi", "entendido", "nao", "n"
-// Those are normal conversational words and should reach the AI.
-// "não"/"nao" is already caught by STRONG_REFUSAL_PATTERNS above.
 const INTERJECTION_PATTERNS = [
   /^(oxi|ata|uai|eita|po|puts|ih|ué|ue|hm|hmm|hum|kkk+|haha|rsrs+|rs|noo+|eee+|aaa+)$/,
 ];
 
 function isStrongRefusal(normalizedText) {
-  return STRONG_REFUSAL_PATTERNS.some(p => p.test(normalizedText));
+  return STRONG_REFUSAL_PATTERNS.some(pattern => pattern.test(normalizedText));
 }
 
 function isSoftRefusal(normalizedText) {
-  return SOFT_REFUSAL_PATTERNS.some(p => p.test(normalizedText));
+  return SOFT_REFUSAL_PATTERNS.some(pattern => pattern.test(normalizedText));
 }
 
 function isAmbiguousInterjection(normalizedText) {
-  // FIX [2]: Only flag true regional interjections/laughter.
-  // Do NOT flag short but meaningful words ("sim", "oi", "ok", "certo", etc.).
   if (normalizedText.split(' ').length > 4) return false;
-  return INTERJECTION_PATTERNS.some(p => p.test(normalizedText));
+  return INTERJECTION_PATTERNS.some(pattern => pattern.test(normalizedText));
 }
 
-// FIX [3]: Re-engagement detection — leads that previously refused but now show clear intent
 const REENGAGEMENT_PATTERNS = [
   /quero\s*(cotar|saber|fazer|ver|entender|conhecer)/,
   /tenho\s*interesse/,
@@ -109,10 +91,9 @@ const REENGAGEMENT_PATTERNS = [
 ];
 
 function isReengagement(normalizedText) {
-  return REENGAGEMENT_PATTERNS.some(p => p.test(normalizedText));
+  return REENGAGEMENT_PATTERNS.some(pattern => pattern.test(normalizedText));
 }
 
-// Varied closing messages — so it doesn't feel robotic
 const REFUSAL_RESPONSES = [
   'Tudo bem! Fico à disposição caso mude de ideia. Até mais 😊',
   'Perfeito, sem problema. Não vou insistir. Se um dia quiser comparar, é só chamar.',
@@ -132,20 +113,16 @@ const CLARIFICATION_RESPONSES = [
   'Haha — pode falar! O que você precisava?',
 ];
 
-function randomFrom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+function randomFrom(items) {
+  return items[Math.floor(Math.random() * items.length)];
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BUSINESS HOURS + VALIDATION
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function isBusinessHours(config) {
   const now = new Date();
   const spTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
   const cur = spTime.getHours() * 60 + spTime.getMinutes();
   const [sh, sm] = (config.businessHoursStart || '08:00').split(':').map(Number);
-  const [eh, em] = (config.businessHoursEnd   || '22:00').split(':').map(Number);
+  const [eh, em] = (config.businessHoursEnd || '22:00').split(':').map(Number);
   return cur >= (sh * 60 + sm) && cur <= (eh * 60 + em);
 }
 
@@ -162,37 +139,80 @@ function isValidIncoming(msg) {
   if (!msg || !msg.message) return false;
   if (msg.key?.fromMe) return false;
   const jid = msg.key?.remoteJid || '';
-  if (jid.includes('@g.us'))      return false;
+  if (jid.includes('@g.us')) return false;
   if (jid.includes('@broadcast')) return false;
   return true;
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SESSION TIMEOUT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function resolveConversationPhone(displayNum, jidId) {
+  return normalizePhone(displayNum) || normalizePhone(jidId) || null;
+}
 
-function resetSessionTimer(jidId, config) {
-  if (sessionTimers.has(jidId)) clearTimeout(sessionTimers.get(jidId));
+function resolveLeadIdentity(jidId, conversationPhone) {
+  const preferredId = conversationPhone || jidId;
+  const preferredLead = getLead(preferredId);
+  if (preferredLead) return { leadId: preferredId, lead: preferredLead };
+
+  if (preferredId !== jidId) {
+    const legacyLead = getLead(jidId);
+    if (legacyLead) return { leadId: jidId, lead: legacyLead };
+  }
+
+  return { leadId: preferredId, lead: null };
+}
+
+function sanitizeReply(text) {
+  const reply = String(text || '').trim();
+  if (!reply) {
+    return 'Oi! Me conta um pouco mais sobre o seu veículo pra eu te ajudar melhor.';
+  }
+  return reply
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+}
+
+function resetSessionTimer(leadId, config) {
+  if (sessionTimers.has(leadId)) clearTimeout(sessionTimers.get(leadId));
   if (config.followUpEnabled) return;
 
   const timeoutMs = (config.sessionTimeoutMinutes || 30) * 60 * 1000;
   const timer = setTimeout(() => {
-    sessionTimers.delete(jidId);
-    const lead = getLead(jidId);
+    sessionTimers.delete(leadId);
+    const lead = getLead(leadId);
     if (!lead) return;
     if (lead.status === 'talking' || lead.status === 'new') {
       lead.history = [];
-      lead.status  = 'new';
-      saveLead(jidId, lead);
-      console.log(`[Agent] 🕐 Session expired for ${jidId} — history cleared`);
+      lead.status = 'new';
+      saveLead(leadId, lead);
+      console.log(`[Agent] 🕐 Session expired for ${leadId} — history cleared`);
     }
   }, timeoutMs);
-  sessionTimers.set(jidId, timer);
+
+  sessionTimers.set(leadId, timer);
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// MAIN ENTRY POINT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function createNewLead(leadId, displayNum, pushName, fallbackPhone = null) {
+  const phone = fallbackPhone || null;
+  return {
+    number: leadId,
+    displayNumber: phone || displayNum,
+    phone,
+    name: pushName || null,
+    status: 'new',
+    history: [],
+    plate: null,
+    model: null,
+    profileCaptured: false,
+    softRefusalSent: false,
+    jid: null,
+    createdAt: new Date().toISOString(),
+    lastInteraction: new Date().toISOString(),
+    followUp1Sent: false,
+    followUp2Sent: false,
+    campaignLoopHandled: false,
+  };
+}
 
 export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
@@ -207,166 +227,147 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  const fullJid    = rawMsg.key.remoteJid;
-  const jidId      = fullJid.split('@')[0].split(':')[0];
+  const fullJid = rawMsg.key.remoteJid;
+  const jidId = fullJid.split('@')[0].split(':')[0];
   const displayNum = wa.resolvePhone(fullJid);
-  const text       = extractText(rawMsg);
-  const pushName   = rawMsg.pushName || null;
+  const conversationPhone = resolveConversationPhone(displayNum, jidId);
+  const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone);
+  const text = extractText(rawMsg);
+  const pushName = rawMsg.pushName || null;
 
   console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}): "${text.slice(0, 60)}"`);
   if (!text) return;
 
-  const existingLead = getLead(jidId);
+  const existingLead = leadFromStore;
 
-  // campaignLoopEnabled: if false, AI does NOT take over campaign replies.
-  // A "campaign reply" = new lead with no prior AI conversation history.
-  // The user wants to handle those manually when this is off.
-  if (config.campaignLoopEnabled === false) {
-    const isCampaignReply = !existingLead || (existingLead.status === 'new' && (!existingLead.history || existingLead.history.length === 0));
-    if (isCampaignReply) {
-      console.log(`[Agent] 🔕 campaignLoopEnabled=false — skipping new lead ${jidId}`);
-      return;
-    }
-  }
-
-  // Blocked = total silence always
   if (existingLead?.status === 'blocked') return;
 
-  // FIX [3]: no_interest leads can re-engage if they send a clear intent phrase.
-  // Otherwise, keep silence (no follow-up spam, no AI calls).
+  if (existingLead?.campaignSentAt && !existingLead?.campaignLoopHandled && config.campaignLoopEnabled === false) {
+    console.log(`[Agent] Campaign loop disabled — ignoring reply from ${leadId}`);
+    return;
+  }
+
   if (existingLead?.status === 'no_interest') {
     const normForReeng = normalizeText(text);
     if (!isReengagement(normForReeng)) {
-      console.log(`[Agent] ⏭️ Silencing no_interest lead ${jidId}: "${text.slice(0, 40)}"`);
+      console.log(`[Agent] ⏭️ Silencing no_interest lead ${leadId}: "${text.slice(0, 40)}"`);
       return;
     }
-    // Re-engagement detected: reactivate and fall through to normal flow
-    console.log(`[Agent] 🔄 Re-engagement detected for ${jidId}: "${text.slice(0, 40)}"`);
+
+    console.log(`[Agent] 🔄 Re-engagement detected for ${leadId}: "${text.slice(0, 40)}"`);
     existingLead.status = 'talking';
     existingLead.softRefusalSent = false;
-    saveLead(jidId, existingLead);
+    if (conversationPhone && !existingLead.phone) {
+      existingLead.phone = conversationPhone;
+      existingLead.displayNumber = conversationPhone;
+    }
+    saveLead(leadId, existingLead);
   }
-
 
   if (!isBusinessHours(config)) {
     const today = new Date().toDateString();
     if (existingLead?.lastOutOfHoursMsg !== today) {
       const [sh] = (config.businessHoursStart || '08:00').split(':');
-      const [eh] = (config.businessHoursEnd   || '22:00').split(':');
+      const [eh] = (config.businessHoursEnd || '22:00').split(':');
       const msg = `Oi! 😊 Nosso horário de atendimento é das ${sh}h às ${eh}h. Estarei aqui quando voltar! Até logo 👋`;
       await wa.sendMessage(fullJid, msg, null);
-      const lead = existingLead || createNewLead(jidId, displayNum, pushName);
-      saveLead(jidId, { ...lead, lastOutOfHoursMsg: today });
+      const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
+      saveLead(leadId, { ...lead, lastOutOfHoursMsg: today });
     }
     return;
   }
 
-  resetSessionTimer(jidId, config);
+  resetSessionTimer(leadId, config);
 
-  // ── DETERMINISTIC INTENT LAYER (runs before AI) ──────────────
   const norm = normalizeText(text);
 
   if (isStrongRefusal(norm)) {
-    console.log(`[Agent] 🚫 Strong refusal detected from ${jidId}: "${text}"`);
-    const lead = existingLead || createNewLead(jidId, displayNum, pushName);
+    console.log(`[Agent] 🚫 Strong refusal detected from ${leadId}: "${text}"`);
+    const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.status = 'no_interest';
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    saveLead(jidId, lead);
-    // Single message, no splitting, no AI
+    saveLead(leadId, lead);
     await wa.sendMessage(fullJid, randomFrom(REFUSAL_RESPONSES), null);
     return;
   }
 
-  // Soft refusal: check if they already got the soft pitch (2nd refusal = close)
   if (isSoftRefusal(norm)) {
     const alreadyPitched = existingLead?.softRefusalSent;
     if (alreadyPitched) {
-      console.log(`[Agent] 🚫 2nd soft refusal — closing ${jidId}`);
+      console.log(`[Agent] 🚫 2nd soft refusal — closing ${leadId}`);
       const lead = existingLead;
       lead.status = 'no_interest';
-      saveLead(jidId, lead);
+      saveLead(leadId, lead);
       await wa.sendMessage(fullJid, randomFrom(REFUSAL_RESPONSES), null);
       return;
-    } else {
-      console.log(`[Agent] 💬 Soft refusal from ${jidId} — sending gentle pitch`);
-      const lead = existingLead || createNewLead(jidId, displayNum, pushName);
-      lead.softRefusalSent = true;
-      lead.history = lead.history || [];
-      lead.history.push({ role: 'user', content: text, ts: Date.now() });
-      saveLead(jidId, lead);
-      await wa.sendMessage(fullJid, randomFrom(SOFT_REFUSAL_RESPONSES), null);
-      return;
     }
-  }
 
-  // Ambiguous interjection: ask for clarification without AI qualification logic
-  if (isAmbiguousInterjection(norm)) {
-    console.log(`[Agent] ❓ Ambiguous interjection from ${jidId}: "${text}"`);
-    const lead = existingLead || createNewLead(jidId, displayNum, pushName);
+    console.log(`[Agent] 💬 Soft refusal from ${leadId} — sending gentle pitch`);
+    const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
+    lead.softRefusalSent = true;
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    saveLead(jidId, lead);
+    saveLead(leadId, lead);
+    await wa.sendMessage(fullJid, randomFrom(SOFT_REFUSAL_RESPONSES), null);
+    return;
+  }
+
+  if (isAmbiguousInterjection(norm)) {
+    console.log(`[Agent] ❓ Ambiguous interjection from ${leadId}: "${text}"`);
+    const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
+    lead.history = lead.history || [];
+    lead.history.push({ role: 'user', content: text, ts: Date.now() });
+    saveLead(leadId, lead);
     await wa.sendMessage(fullJid, randomFrom(CLARIFICATION_RESPONSES), null);
     return;
   }
-  // ── END DETERMINISTIC LAYER ──────────────────────────────────
 
-  accumulate(wa, fullJid, jidId, displayNum, text, pushName, config);
+  accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, config);
 }
 
-function accumulate(wa, fullJid, jidId, displayNum, text, pushName, config) {
-  if (!messageBuffers.has(jidId)) {
-    messageBuffers.set(jidId, { texts: [], pushName, fullJid, displayNum, timer: null });
+function accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, config) {
+  if (!messageBuffers.has(leadId)) {
+    messageBuffers.set(leadId, { texts: [], pushName, fullJid, displayNum, jidId, timer: null });
   }
-  const buf = messageBuffers.get(jidId);
-  buf.texts.push(text);
-  buf.pushName   = buf.pushName   || pushName;
-  buf.fullJid    = fullJid;
-  buf.displayNum = displayNum;
 
-  if (buf.timer) clearTimeout(buf.timer);
-  buf.timer = setTimeout(async () => {
-    const { texts, fullJid: jid, displayNum: phone, pushName: name } = buf;
-    messageBuffers.delete(jidId);
+  const buffer = messageBuffers.get(leadId);
+  buffer.texts.push(text);
+  buffer.pushName = buffer.pushName || pushName;
+  buffer.fullJid = fullJid;
+  buffer.displayNum = displayNum;
+  buffer.jidId = jidId;
+
+  if (buffer.timer) clearTimeout(buffer.timer);
+  buffer.timer = setTimeout(async () => {
+    const { texts, fullJid: jid, displayNum: phone, pushName: name, jidId: rawLeadId } = buffer;
+    messageBuffers.delete(leadId);
     try {
-      await processConversation(wa, jid, jidId, phone, texts, name, config);
+      await processConversation(wa, jid, leadId, rawLeadId, phone, texts, name, config);
     } catch (err) {
-      console.error(`[Agent] Error processing ${jidId}:`, err.message, err.stack);
+      console.error(`[Agent] Error processing ${leadId}:`, err.message, err.stack);
     }
   }, ANTIFLOOD_MS);
 }
 
-function createNewLead(jidId, displayNum, pushName) {
-  return {
-    number: jidId,
-    displayNumber: displayNum,
-    phone: null,
-    name: pushName || null,
-    status: 'new',
-    history: [],
-    plate: null,
-    model: null,
-    profileCaptured: false,
-    softRefusalSent: false,
-    jid: null,
-    createdAt: new Date().toISOString(),
-    lastInteraction: new Date().toISOString(),
-    followUp1Sent: false,
-    followUp2Sent: false,
-  };
-}
-
-async function processConversation(wa, fullJid, jidId, displayNum, texts, pushName, config) {
+async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts, pushName, config) {
   const combinedText = texts.join('\n');
+  const conversationPhone = resolveConversationPhone(displayNum, jidId);
 
-  let lead = getLead(jidId) || createNewLead(jidId, displayNum, pushName);
+  let lead = getLead(leadId) || createNewLead(leadId, displayNum, pushName, conversationPhone);
 
-  lead.jid           = fullJid;
-  lead.displayNumber = displayNum;
-  if (lead.status === 'new') lead.status = 'talking';
-  if (lead.status === 'cold') lead.status = 'talking';
+  lead.number = leadId;
+  lead.jid = fullJid;
+  if (conversationPhone) {
+    lead.phone = lead.phone || conversationPhone;
+    lead.displayNumber = conversationPhone;
+  } else {
+    lead.displayNumber = lead.displayNumber || displayNum;
+  }
+
+  if (lead.status === 'new' || lead.status === 'cold') lead.status = 'talking';
   if (!lead.name && pushName) lead.name = pushName;
+  if (lead.campaignSentAt && !lead.campaignLoopHandled) lead.campaignLoopHandled = true;
 
   const alreadyTransferred = lead.status === 'transferred';
 
@@ -376,37 +377,53 @@ async function processConversation(wa, fullJid, jidId, displayNum, texts, pushNa
   lead.followUp1Sent = false;
   lead.followUp2Sent = false;
 
-  // Backup phone capture — only if text looks like a phone number (not interjection)
-  if (!lead.phone) {
-    const extractedPhone = tryExtractPhone(combinedText);
-    if (extractedPhone) {
-      lead.phone = extractedPhone;
-      lead.displayNumber = extractedPhone;
-      console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
-    }
+  const extractedPhone = tryExtractPhone(combinedText);
+  if (extractedPhone) {
+    lead.phone = extractedPhone;
+    lead.displayNumber = extractedPhone;
+    console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
   }
 
-  saveLead(jidId, lead);
+  saveLead(leadId, lead);
 
-  const context = await buildContext(config, lead, alreadyTransferred);
-  let aiResponse;
-  try {
-    aiResponse = await callAI(config, context);
-  } catch (err) {
-    console.error('[Agent] AI error:', err.message);
+  const replyContext = await buildContext(config, lead, alreadyTransferred);
+  const qualificationContext = await buildQualificationContext(config, lead, combinedText);
+
+  const [replyResult, qualificationResult] = await Promise.allSettled([
+    callAI(config, replyContext, { purpose: 'reply' }),
+    callAI(config, qualificationContext, { purpose: 'qualification' }),
+  ]);
+
+  if (replyResult.status !== 'fulfilled') {
+    console.error('[Agent] AI reply error:', replyResult.reason?.message || replyResult.reason);
     return;
   }
 
-  const { qualified, plate, model, name, phone, profileCaptured, cleanResponse } = detectAndExtract(aiResponse, lead);
+  const cleanResponse = sanitizeReply(replyResult.value);
 
-  if (plate) lead.plate = plate;
-  if (model) lead.model = model;
-  if (name && name.length > 1) lead.name = name;
-  if (profileCaptured) lead.profileCaptured = true;
-  if (phone) {
-    lead.phone = phone;
-    lead.displayNumber = phone;
-    console.log(`[Agent] Phone from marker: ${phone}`);
+  let extraction = {
+    qualified: false,
+    plate: lead.plate || null,
+    model: lead.model || null,
+    name: lead.name || null,
+    phone: lead.phone || null,
+    profileCaptured: !!lead.profileCaptured,
+  };
+
+  if (qualificationResult.status === 'fulfilled') {
+    extraction = detectAndExtract(qualificationResult.value, lead);
+  } else {
+    console.warn('[Agent] Qualification extraction failed:', qualificationResult.reason?.message || qualificationResult.reason);
+  }
+
+  if (extraction.plate) lead.plate = extraction.plate;
+  if (extraction.model) lead.model = extraction.model;
+  if (extraction.name && extraction.name.length > 1) lead.name = extraction.name;
+  if (extraction.profileCaptured) lead.profileCaptured = true;
+  if (extraction.phone) {
+    lead.phone = extraction.phone;
+    lead.displayNumber = extraction.phone;
+    console.log(`[Agent] Phone from extraction: ${extraction.phone}`);
   }
 
   console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);
@@ -419,12 +436,12 @@ async function processConversation(wa, fullJid, jidId, displayNum, texts, pushNa
 
   lead.history.push({ role: 'assistant', content: cleanResponse, ts: Date.now() });
 
-  if (qualified && !alreadyTransferred) {
-    lead.status      = 'transferred';
-    lead.transferred = true;
-    saveLead(jidId, lead);
+  if (extraction.qualified && !alreadyTransferred) {
+    lead.status = 'qualified';
+    lead.qualifiedAt = new Date().toISOString();
+    saveLead(leadId, lead);
     await executeHandoff(wa, lead, config);
   } else {
-    saveLead(jidId, lead);
+    saveLead(leadId, lead);
   }
 }

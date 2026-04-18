@@ -668,8 +668,9 @@
               <label class="form-label">API Key do Groq <span class="label-hint">(gratuita, sem cartão)</span></label>
               <div class="input-with-unit">
                 <input type="password" id="ai-groq-key" class="form-input" placeholder="gsk_..." autocomplete="off">
-                <button class="btn btn-purple btn-sm" onclick="testGeminiKey()" id="btn-test-key">Testar</button>
+                <button class="btn btn-purple btn-sm" onclick="testAIKey()" id="btn-test-key">Testar</button>
               </div>
+              <p class="hint-text" id="groq-key-status">Nenhuma chave salva ainda.</p>
               <p class="hint-text">Obtenha grátis em <a href="https://console.groq.com" target="_blank" style="color:var(--accent-green)">console.groq.com</a> → API Keys → Create (30 segundos)</p>
             </div>
 
@@ -678,9 +679,22 @@
               <label class="form-label">API Key do Gemini <span class="label-hint">(gratuita)</span></label>
               <div class="input-with-unit">
                 <input type="password" id="ai-gemini-key" class="form-input" placeholder="AIza..." autocomplete="off">
-                <button class="btn btn-purple btn-sm" onclick="testGeminiKey()" id="btn-test-key-gem">Testar</button>
+                <button class="btn btn-purple btn-sm" onclick="testAIKey()" id="btn-test-key-gem">Testar</button>
               </div>
+              <p class="hint-text" id="gemini-key-status">Nenhuma chave salva ainda.</p>
               <p class="hint-text">Obtenha em <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent-green)">aistudio.google.com</a> — precisa de projeto ativo com billing</p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Modelo principal da IA</label>
+              <input type="text" id="ai-model" class="form-input" placeholder="llama-3.1-8b-instant" autocomplete="off">
+              <p class="hint-text" id="ai-model-hint">Se deixar no padrao, usamos o modelo recomendado do provedor.</p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Modelo para qualificacao <span class="label-hint">— opcional</span></label>
+              <input type="text" id="qualification-model" class="form-input" placeholder="Em branco = usar o modelo principal" autocomplete="off">
+              <p class="hint-text" id="qualification-model-hint">Use apenas se quiser separar resposta e extracao.</p>
             </div>
 
             <div class="form-group">
@@ -821,7 +835,34 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
           </div>
         </div>
 
-        <!-- PDF section disabled — knowledge via text field is more reliable and token-efficient -->
+        <div class="card">
+          <div class="card-header"><span class="card-icon">📚</span><h2 class="card-title">Documentos da IA</h2></div>
+          <div class="content-grid two-col">
+            <div>
+              <label class="form-label">Upload de PDFs</label>
+              <div
+                id="pdf-upload-area"
+                class="upload-area"
+                onclick="document.getElementById('pdf-input')?.click()"
+                ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                ondragleave="this.classList.remove('drag-over')"
+                ondrop="this.classList.remove('drag-over'); handlePDFDrop(event)"
+              >
+                <input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)">
+                <span class="upload-icon">📄</span>
+                <p>Clique ou arraste o PDF aqui</p>
+                <span class="upload-hint">Apenas arquivos PDF · max. 32MB</span>
+              </div>
+              <p class="hint-text">Os PDFs carregados entram no contexto da IA com limite reduzido para manter a resposta rapida e economizar tokens.</p>
+            </div>
+            <div>
+              <label class="form-label">Documentos carregados</label>
+              <div id="docs-list" class="docs-list">
+                <div style="color:var(--text-3);font-size:13px;padding:8px 0;">Nenhum documento carregado ainda.</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- Follow-up + Loop -->
         <div class="content-grid two-col">

@@ -4,19 +4,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /**
  * Calculates a realistic reading + typing delay based on message length.
- * Result: 2,000ms – 12,000ms
+ * Faster cadence for commercial WhatsApp chats.
  */
 function calcNaturalDelay(receivedText = '', responseText = '') {
   const wordsReceived = receivedText.trim().split(/\s+/).length;
   const wordsResponse = responseText.trim().split(/\s+/).length;
 
-  // Reduced caps: reading 2s max, typing 3s max (was 4s/6s)
-  // Commercial bots need consistency over simulation; 12s silence feels like a crash.
-  const readingTime = Math.min(wordsReceived * 150, 2000);
-  const typingTime  = Math.min(wordsResponse * 80,  3000);
-  const variation   = 0.75 + Math.random() * 0.50;
+  const readingTime = Math.min(wordsReceived * 90, 900);
+  const typingTime = Math.min(wordsResponse * 55, 2200);
+  const variation = 0.85 + Math.random() * 0.35;
 
-  return Math.round((readingTime + typingTime) * variation);
+  return Math.max(450, Math.round((readingTime + typingTime) * variation));
 }
 
 /**
@@ -26,10 +24,10 @@ function calcNaturalDelay(receivedText = '', responseText = '') {
 function splitIntoChunks(text, forceSingle = false) {
   const words = text.trim().split(/\s+/).length;
 
-  // FIX [8]: Never split if forced single, or if the response is short (≤15 words),
+  // FIX [8]: Never split if forced single, or if the response is short (≤18 words),
   // or if it looks like a closure/clarification (single question or short statement).
   if (forceSingle) return [text.trim()];
-  if (words <= 15) return [text.trim()];
+  if (words <= 18) return [text.trim()];
 
   // If it's a single question or ends with '?' — don't split
   const trimmed = text.trim();
@@ -80,10 +78,9 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
       delay = calcNaturalDelay(receivedText, chunk);
     } else {
       // Subsequent messages: just typing time + small pause
-      delay = Math.min(chunkWords * 110, 4000);
-      delay = Math.round(delay * (0.8 + Math.random() * 0.4));
-      // Minimum 0.6s pause between messages (was 1.2s)
-      await sleep(600 + Math.random() * 600);
+      delay = Math.min(chunkWords * 70, 1800);
+      delay = Math.round(delay * (0.9 + Math.random() * 0.25));
+      await sleep(280 + Math.random() * 320);
     }
 
     // Show "typing..." for the calculated duration

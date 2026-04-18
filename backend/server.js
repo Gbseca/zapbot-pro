@@ -63,7 +63,7 @@ wss.on('connection', (ws) => {
   ws.on('error', console.error);
 });
 
-// ── WhatsApp Routes ───────────────────────────────────────────────────────────
+// â”€â”€ WhatsApp Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get('/api/status', (req, res) => res.json(wa.getStatus()));
 
@@ -71,13 +71,13 @@ app.post('/api/disconnect', async (req, res) => {
   try {
     await wa.clearSession();
     setTimeout(() => wa.connect(), 1500);
-    res.json({ success: true, message: 'Sessão encerrada. Novo QR gerado em breve.' });
+    res.json({ success: true, message: 'SessÃ£o encerrada. Novo QR gerado em breve.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ── Campaign Routes ───────────────────────────────────────────────────────────
+// â”€â”€ Campaign Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.post('/api/campaign/start', upload.single('image'), (req, res) => {
   try {
@@ -85,8 +85,8 @@ app.post('/api/campaign/start', upload.single('image'), (req, res) => {
     const { numbers, message, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction } = data;
 
     if (!numbers || numbers.length === 0) return res.status(400).json({ error: 'Lista de contatos vazia' });
-    if (!message?.trim()) return res.status(400).json({ error: 'A mensagem não pode ser vazia' });
-    if (wa.getStatus().status !== 'connected') return res.status(400).json({ error: 'WhatsApp não está conectado.' });
+    if (!message?.trim()) return res.status(400).json({ error: 'A mensagem nÃ£o pode ser vazia' });
+    if (wa.getStatus().status !== 'connected') return res.status(400).json({ error: 'WhatsApp nÃ£o estÃ¡ conectado.' });
 
     const imageBuffer = req.file ? req.file.buffer : null;
     queue.initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction });
@@ -106,19 +106,22 @@ app.post('/api/campaign/clear', (req, res) => {
   success ? res.json({ success: true }) : res.status(400).json({ error: 'Pare a campanha antes de limpar.' });
 });
 
-// ── AI Config Routes ──────────────────────────────────────────────────────────
+// â”€â”€ AI Config Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get('/api/ai/config', (req, res) => {
   const config = loadConfig();
-  const safeConfig = { ...config };
-  // Mask both keys — never expose full API keys to the browser
-  if (safeConfig.groqKey && safeConfig.groqKey.length > 8) {
-    safeConfig.groqKeyMasked = safeConfig.groqKey.slice(0, 4) + '...' + safeConfig.groqKey.slice(-4);
-    delete safeConfig.groqKey;
+  const safeConfig = {
+    ...config,
+    groqKey: '',
+    geminiKey: '',
+    hasGroqKey: !!config.groqKey,
+    hasGeminiKey: !!config.geminiKey,
+  };
+  if (config.groqKey && config.groqKey.length > 8) {
+    safeConfig.groqKeyMasked = config.groqKey.slice(0, 4) + '...' + config.groqKey.slice(-4);
   }
-  if (safeConfig.geminiKey && safeConfig.geminiKey.length > 8) {
-    safeConfig.geminiKeyMasked = safeConfig.geminiKey.slice(0, 4) + '...' + safeConfig.geminiKey.slice(-4);
-    delete safeConfig.geminiKey;
+  if (config.geminiKey && config.geminiKey.length > 8) {
+    safeConfig.geminiKeyMasked = config.geminiKey.slice(0, 4) + '...' + config.geminiKey.slice(-4);
   }
   res.json(safeConfig);
 });
@@ -126,6 +129,8 @@ app.get('/api/ai/config', (req, res) => {
 app.post('/api/ai/config', (req, res) => {
   try {
     const updates = req.body;
+    if (typeof updates.groqKey === 'string' && !updates.groqKey.trim()) delete updates.groqKey;
+    if (typeof updates.geminiKey === 'string' && !updates.geminiKey.trim()) delete updates.geminiKey;
     saveConfig(updates);
     // Notify all clients about AI status change
     wss.clients.forEach(c => {
@@ -138,20 +143,24 @@ app.post('/api/ai/config', (req, res) => {
 });
 
 app.post('/api/ai/test-key', async (req, res) => {
-  const { key, provider } = req.body;
-  if (!key) return res.status(400).json({ error: 'Chave não fornecida' });
-  const result = await testAPIKey(provider || 'groq', key);
+  const { key, provider, model } = req.body;
+  const config = loadConfig();
+  const selectedProvider = provider || config.aiProvider || 'groq';
+  const resolvedKey = String(key || '').trim()
+    || (selectedProvider === 'gemini' ? config.geminiKey : config.groqKey);
+  if (!resolvedKey) return res.status(400).json({ error: 'Chave nÃ£o fornecida' });
+  const result = await testAPIKey(selectedProvider, resolvedKey, model);
   res.json(result);
 });
 
-// ── PDF/Document Routes ───────────────────────────────────────────────────────
+// â”€â”€ PDF/Document Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get('/api/ai/docs', (req, res) => res.json(getUploadedDocs()));
 
 app.post('/api/ai/docs', upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
-    if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'Somente PDFs são aceitos' });
+    if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'Somente PDFs sÃ£o aceitos' });
 
     const filename = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
     const result = await extractAndSavePDF(req.file.buffer, filename);
@@ -170,7 +179,7 @@ app.delete('/api/ai/docs/:filename', (req, res) => {
   }
 });
 
-// ── Leads Routes ──────────────────────────────────────────────────────────────
+// â”€â”€ Leads Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get('/api/leads', (req, res) => {
   const { status } = req.query;
@@ -189,13 +198,13 @@ app.get('/api/leads/export', (req, res) => {
 
 app.get('/api/leads/:number', (req, res) => {
   const lead = getLead(req.params.number);
-  if (!lead) return res.status(404).json({ error: 'Lead não encontrado' });
+  if (!lead) return res.status(404).json({ error: 'Lead nÃ£o encontrado' });
   res.json(lead);
 });
 
 app.patch('/api/leads/:number', (req, res) => {
   const updated = updateLead(req.params.number, req.body);
-  if (!updated) return res.status(404).json({ error: 'Lead não encontrado' });
+  if (!updated) return res.status(404).json({ error: 'Lead nÃ£o encontrado' });
   res.json(updated);
 });
 
@@ -209,14 +218,14 @@ app.post('/api/leads/clear', (req, res) => {
   res.json({ success: true });
 });
 
-// ── Start Server ──────────────────────────────────────────────────────────────
+// â”€â”€ Start Server â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log('\n╔═══════════════════════════════════╗');
-  console.log('║       🤖  ZapBot Pro v2.0         ║');
-  console.log('╚═══════════════════════════════════╝');
-  console.log(`\n🌐 Acesse: http://localhost:${PORT}`);
-  console.log('📱 Aguardando conexão WhatsApp...');
-  console.log('🤖 Módulo IA: pronto\n');
+  console.log('\nâ•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—');
+  console.log('â•‘       ðŸ¤–  ZapBot Pro v2.0         â•‘');
+  console.log('â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•');
+  console.log(`\nðŸŒ Acesse: http://localhost:${PORT}`);
+  console.log('ðŸ“± Aguardando conexÃ£o WhatsApp...');
+  console.log('ðŸ¤– MÃ³dulo IA: pronto\n');
 });

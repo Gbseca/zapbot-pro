@@ -1,26 +1,22 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+import { DOCS_DIR, PDF_CACHE_FILE } from '../storage/paths.js';
 
 // pdf-parse is CommonJS — use createRequire for ESM compatibility
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DOCS_DIR = path.join(__dirname, 'docs');
-const CACHE_FILE = path.join(__dirname, '..', 'data', 'pdf-cache.json');
-
 function loadCache() {
-  if (!fs.existsSync(CACHE_FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8')); }
+  if (!fs.existsSync(PDF_CACHE_FILE)) return {};
+  try { return JSON.parse(fs.readFileSync(PDF_CACHE_FILE, 'utf-8')); }
   catch { return {}; }
 }
 
 function saveCache(cache) {
-  const dir = path.dirname(CACHE_FILE);
+  const dir = path.dirname(PDF_CACHE_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
+  fs.writeFileSync(PDF_CACHE_FILE, JSON.stringify(cache, null, 2));
 }
 
 export async function extractAndSavePDF(buffer, filename) {
@@ -47,10 +43,10 @@ export async function extractAndSavePDF(buffer, filename) {
   return { text, pages: data.numpages, wordCount: cache[filename].wordCount };
 }
 
-// Max chars injected into the prompt per PDF and total
-// Groq free tier: 12K TPM — prompt must stay well under ~6K tokens (~8K chars)
-const MAX_CHARS_PER_PDF = 6000;
-const MAX_CHARS_TOTAL   = 12000;
+// Max chars injected into the prompt per PDF and total.
+// Keep the docs helpful without estourar o orçamento dos modelos gratuitos.
+const MAX_CHARS_PER_PDF = 3000;
+const MAX_CHARS_TOTAL   = 6000;
 
 export async function loadExtractedPDFs() {
   const cache = loadCache();

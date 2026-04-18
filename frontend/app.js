@@ -1,8 +1,8 @@
-/* ─────────────────────────────────────────────────────────
-   ZapBot Pro — Frontend Logic
-   ───────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ZapBot Pro â€” Frontend Logic
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-// ── State ──────────────────────────────────────────────────
+// â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const state = {
   ws: null,
   wsRetry: 0,
@@ -17,19 +17,19 @@ const state = {
   stats: { total: 0, sent: 0, failed: 0, pending: 0 },
 };
 
-// ── Emoji Data ─────────────────────────────────────────────
+// â”€â”€ Emoji Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const EMOJIS = {
-  smileys: ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','😊','😇','🥰','😍','🤩','😘','😚','😋','😛','😜','🤪','😝','🤑','🤗','🤔','🤐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','😪','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖'],
-  gestures: ['👍','👎','👊','✊','🤛','🤜','🤞','✌️','🤟','🤘','🤙','👈','👉','👆','👇','☝️','✋','🤚','🖐️','🖖','👋','🤝','🙌','👏','🤲','🙏','✍️','💅','🤳','💪','🦵','🦶','👂','🦻','👃','🫀','🫁','🧠','🦷','🦴','👀','👁️','👅','👄','💋','🫦'],
-  hearts: ['❤️','🧡','💛','💚','💙','💜','🤎','🖤','🤍','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','♥️','❤️‍🔥','❤️‍🩹','💌','🎁','🎀','🎊','🎉','🥂','🍾','🫶'],
-  objects: ['🔥','✨','🌟','💫','⭐','🌈','☀️','🌙','⚡','❄️','🌊','💎','🏆','🥇','🎯','🎮','🎵','🎶','🎸','🎹','📱','💻','📧','📞','☎️','⏰','📅','🔔','🔕','📢','📣','💡','🔮','🪄','🎬','📷','🤳','🎤','🎧','🎼','📚','✏️','🖊️','📝','🗒️','📌','🔑','🔒','🔓','💰','💵','💴','💶','💷','💸','🏠','🚀','🛸','✈️','🚗','🏍️'],
-  symbols: ['✅','❌','⚠️','🚨','ℹ️','❓','❗','‼️','⁉️','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🔶','🔷','🔸','🔹','💯','🆕','🆗','🆒','🆙','🔝','🔜','🔛','🔚','⭕','🔞','🈵','🈲','🆓','🆖','🅰️','🅱️','🆎','🆑','🅾️','🆘','🚫','⛔','📵','🔇','🔕','🚷','🚯','🚳','🚱','📶','🔈','🔉','🔊','📳','📴','♻️','🔃','🔄'],
-  numbers: ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟','💯','#️⃣','*️⃣','▶️','⏸️','⏹️','⏺️','⏭️','⏮️','⏩','⏪','⏫','⏬','🔀','🔁','🔂','🔼','🔽','➕','➖','➗','✖️','💲','💱','™️','©️','®️'],
+  smileys: ['ðŸ˜€','ðŸ˜ƒ','ðŸ˜„','ðŸ˜','ðŸ˜†','ðŸ˜…','ðŸ¤£','ðŸ˜‚','ðŸ™‚','ðŸ˜Š','ðŸ˜‡','ðŸ¥°','ðŸ˜','ðŸ¤©','ðŸ˜˜','ðŸ˜š','ðŸ˜‹','ðŸ˜›','ðŸ˜œ','ðŸ¤ª','ðŸ˜','ðŸ¤‘','ðŸ¤—','ðŸ¤”','ðŸ¤','ðŸ˜‘','ðŸ˜¶','ðŸ˜','ðŸ˜’','ðŸ™„','ðŸ˜¬','ðŸ¤¥','ðŸ˜Œ','ðŸ˜”','ðŸ˜ª','ðŸ˜´','ðŸ˜·','ðŸ¤’','ðŸ¤•','ðŸ¤¢','ðŸ¤®','ðŸ¤§','ðŸ¥µ','ðŸ¥¶','ðŸ˜µ','ðŸ¤¯','ðŸ¤ ','ðŸ¥³','ðŸ¥¸','ðŸ˜Ž','ðŸ¤“','ðŸ§','ðŸ˜£','ðŸ˜–','ðŸ˜«','ðŸ˜©','ðŸ¥º','ðŸ˜¢','ðŸ˜­','ðŸ˜¤','ðŸ˜ ','ðŸ˜¡','ðŸ¤¬','ðŸ˜ˆ','ðŸ‘¿','ðŸ’€','â˜ ï¸','ðŸ’©','ðŸ¤¡','ðŸ‘¹','ðŸ‘º','ðŸ‘»','ðŸ‘½','ðŸ‘¾','ðŸ¤–'],
+  gestures: ['ðŸ‘','ðŸ‘Ž','ðŸ‘Š','âœŠ','ðŸ¤›','ðŸ¤œ','ðŸ¤ž','âœŒï¸','ðŸ¤Ÿ','ðŸ¤˜','ðŸ¤™','ðŸ‘ˆ','ðŸ‘‰','ðŸ‘†','ðŸ‘‡','â˜ï¸','âœ‹','ðŸ¤š','ðŸ–ï¸','ðŸ––','ðŸ‘‹','ðŸ¤','ðŸ™Œ','ðŸ‘','ðŸ¤²','ðŸ™','âœï¸','ðŸ’…','ðŸ¤³','ðŸ’ª','ðŸ¦µ','ðŸ¦¶','ðŸ‘‚','ðŸ¦»','ðŸ‘ƒ','ðŸ«€','ðŸ«','ðŸ§ ','ðŸ¦·','ðŸ¦´','ðŸ‘€','ðŸ‘ï¸','ðŸ‘…','ðŸ‘„','ðŸ’‹','ðŸ«¦'],
+  hearts: ['â¤ï¸','ðŸ§¡','ðŸ’›','ðŸ’š','ðŸ’™','ðŸ’œ','ðŸ¤Ž','ðŸ–¤','ðŸ¤','ðŸ’”','â£ï¸','ðŸ’•','ðŸ’ž','ðŸ’“','ðŸ’—','ðŸ’–','ðŸ’˜','ðŸ’','ðŸ’Ÿ','â™¥ï¸','â¤ï¸â€ðŸ”¥','â¤ï¸â€ðŸ©¹','ðŸ’Œ','ðŸŽ','ðŸŽ€','ðŸŽŠ','ðŸŽ‰','ðŸ¥‚','ðŸ¾','ðŸ«¶'],
+  objects: ['ðŸ”¥','âœ¨','ðŸŒŸ','ðŸ’«','â­','ðŸŒˆ','â˜€ï¸','ðŸŒ™','âš¡','â„ï¸','ðŸŒŠ','ðŸ’Ž','ðŸ†','ðŸ¥‡','ðŸŽ¯','ðŸŽ®','ðŸŽµ','ðŸŽ¶','ðŸŽ¸','ðŸŽ¹','ðŸ“±','ðŸ’»','ðŸ“§','ðŸ“ž','â˜Žï¸','â°','ðŸ“…','ðŸ””','ðŸ”•','ðŸ“¢','ðŸ“£','ðŸ’¡','ðŸ”®','ðŸª„','ðŸŽ¬','ðŸ“·','ðŸ¤³','ðŸŽ¤','ðŸŽ§','ðŸŽ¼','ðŸ“š','âœï¸','ðŸ–Šï¸','ðŸ“','ðŸ—’ï¸','ðŸ“Œ','ðŸ”‘','ðŸ”’','ðŸ”“','ðŸ’°','ðŸ’µ','ðŸ’´','ðŸ’¶','ðŸ’·','ðŸ’¸','ðŸ ','ðŸš€','ðŸ›¸','âœˆï¸','ðŸš—','ðŸï¸'],
+  symbols: ['âœ…','âŒ','âš ï¸','ðŸš¨','â„¹ï¸','â“','â—','â€¼ï¸','â‰ï¸','ðŸ”´','ðŸŸ ','ðŸŸ¡','ðŸŸ¢','ðŸ”µ','ðŸŸ£','âš«','âšª','ðŸ”¶','ðŸ”·','ðŸ”¸','ðŸ”¹','ðŸ’¯','ðŸ†•','ðŸ†—','ðŸ†’','ðŸ†™','ðŸ”','ðŸ”œ','ðŸ”›','ðŸ”š','â­•','ðŸ”ž','ðŸˆµ','ðŸˆ²','ðŸ†“','ðŸ†–','ðŸ…°ï¸','ðŸ…±ï¸','ðŸ†Ž','ðŸ†‘','ðŸ…¾ï¸','ðŸ†˜','ðŸš«','â›”','ðŸ“µ','ðŸ”‡','ðŸ”•','ðŸš·','ðŸš¯','ðŸš³','ðŸš±','ðŸ“¶','ðŸ”ˆ','ðŸ”‰','ðŸ”Š','ðŸ“³','ðŸ“´','â™»ï¸','ðŸ”ƒ','ðŸ”„'],
+  numbers: ['0ï¸âƒ£','1ï¸âƒ£','2ï¸âƒ£','3ï¸âƒ£','4ï¸âƒ£','5ï¸âƒ£','6ï¸âƒ£','7ï¸âƒ£','8ï¸âƒ£','9ï¸âƒ£','ðŸ”Ÿ','ðŸ’¯','#ï¸âƒ£','*ï¸âƒ£','â–¶ï¸','â¸ï¸','â¹ï¸','âºï¸','â­ï¸','â®ï¸','â©','âª','â«','â¬','ðŸ”€','ðŸ”','ðŸ”‚','ðŸ”¼','ðŸ”½','âž•','âž–','âž—','âœ–ï¸','ðŸ’²','ðŸ’±','â„¢ï¸','Â©ï¸','Â®ï¸'],
 };
 
-const REACTION_EMOJIS = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
+const REACTION_EMOJIS = ['1ï¸âƒ£','2ï¸âƒ£','3ï¸âƒ£','4ï¸âƒ£','5ï¸âƒ£','6ï¸âƒ£','7ï¸âƒ£','8ï¸âƒ£','9ï¸âƒ£'];
 
-// ── Init ───────────────────────────────────────────────────
+// â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initWebSocket();
@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ── WebSocket ──────────────────────────────────────────────
+// â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function initWebSocket() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}`);
@@ -55,7 +55,7 @@ function initWebSocket() {
 
   ws.onopen = () => {
     state.wsRetry = 0;
-    appendLog('info', '🔌 Conectado ao servidor ZapBot Pro.');
+    appendLog('info', 'ðŸ”Œ Conectado ao servidor ZapBot Pro.');
   };
 
   ws.onmessage = (e) => {
@@ -92,12 +92,12 @@ function handleWsMessage(data) {
       break;
     case 'ai_status':
       updateAIStatusUI(data.enabled);
-      updateBadge('ai-agent', data.enabled ? '●' : null);
+      updateBadge('ai-agent', data.enabled ? 'â—' : null);
       break;
   }
 }
 
-// ── WhatsApp Status ────────────────────────────────────────
+// â”€â”€ WhatsApp Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function handleStatusUpdate(status) {
   state.waStatus = status;
   const dot = document.getElementById('pill-dot');
@@ -117,22 +117,22 @@ function handleStatusUpdate(status) {
   if (status === 'connected') {
     dot.classList.add('connected');
     text.textContent = 'Conectado';
-    statusEl.textContent = '● Conectado';
+    statusEl.textContent = 'â— Conectado';
     statusEl.className = 'status-value status-connected';
     qrConn.classList.remove('hidden');
-    showToast('✅ WhatsApp conectado!', 'success');
-    updateBadge('connection', '✓');
+    showToast('âœ… WhatsApp conectado!', 'success');
+    updateBadge('connection', 'âœ“');
   } else if (status === 'qr_ready') {
     dot.classList.add('connecting');
     text.textContent = 'Aguardando scan...';
-    statusEl.textContent = '● Aguardando QR';
+    statusEl.textContent = 'â— Aguardando QR';
     statusEl.className = 'status-value status-connecting';
     qrPH.style.display = 'flex';
     qrPH.innerHTML = '<p style="color:#888;font-size:13px">Carregando QR Code...</p>';
   } else {
     dot.classList.add('disconnected');
     text.textContent = 'Desconectado';
-    statusEl.textContent = '● Desconectado';
+    statusEl.textContent = 'â— Desconectado';
     statusEl.className = 'status-value status-disconnected';
     qrPH.style.display = 'flex';
     qrPH.innerHTML = '<div class="qr-spinner-ring"></div><p>Conectando ao servidor...</p>';
@@ -150,17 +150,17 @@ function handleQRCode(qrDataUrl) {
 }
 
 async function disconnectWhatsApp() {
-  if (!confirm('Tem certeza? Isso encerrará a sessão atual e gerará um novo QR Code.')) return;
+  if (!confirm('Tem certeza? Isso encerrarÃ¡ a sessÃ£o atual e gerarÃ¡ um novo QR Code.')) return;
   try {
     const r = await fetch('/api/disconnect', { method: 'POST' });
     const d = await r.json();
-    showToast(d.message || 'Sessão encerrada.', 'info');
+    showToast(d.message || 'SessÃ£o encerrada.', 'info');
   } catch (err) {
     showToast('Erro ao desconectar: ' + err.message, 'error');
   }
 }
 
-// ── Tab Navigation ─────────────────────────────────────────
+// â”€â”€ Tab Navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function initTabs() {
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
@@ -185,7 +185,7 @@ function updateBadge(tabId, text) {
   else { badge.classList.remove('visible'); }
 }
 
-// ── Contacts ───────────────────────────────────────────────
+// â”€â”€ Contacts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function validateContactsList() {
   const raw = document.getElementById('contacts-textarea').value;
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
@@ -241,7 +241,7 @@ function importExample() {
   validateContactsList();
 }
 
-// ── Emoji Picker ───────────────────────────────────────────
+// â”€â”€ Emoji Picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function toggleEmojiPicker(e) {
   e.stopPropagation();
   const picker = document.getElementById('emoji-picker');
@@ -307,7 +307,7 @@ function wrapSelection(char) {
   updateCharCount();
 }
 
-// ── Reactions Builder ──────────────────────────────────────
+// â”€â”€ Reactions Builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function initReactions() {
   renderReactions();
 }
@@ -321,20 +321,20 @@ function renderReactions() {
     div.innerHTML = `
       <span class="reaction-number">${REACTION_EMOJIS[i] || (i+1)}</span>
       <input type="text" class="reaction-input" id="reaction-${i}" placeholder="Ex: SIM, tenho interesse" />
-      <button class="reaction-remove" onclick="removeReaction(${i})">✕</button>
+      <button class="reaction-remove" onclick="removeReaction(${i})">âœ•</button>
     `;
     list.appendChild(div);
   }
 }
 
 function addReaction() {
-  if (state.reactionCount >= 9) { showToast('Máximo de 9 opções!', 'warning'); return; }
+  if (state.reactionCount >= 9) { showToast('MÃ¡ximo de 9 opÃ§Ãµes!', 'warning'); return; }
   state.reactionCount++;
   renderReactions();
 }
 
 function removeReaction(index) {
-  if (state.reactionCount <= 1) { showToast('Pelo menos 1 opção é necessária.', 'warning'); return; }
+  if (state.reactionCount <= 1) { showToast('Pelo menos 1 opÃ§Ã£o Ã© necessÃ¡ria.', 'warning'); return; }
   // Collect current values
   const vals = collectReactionValues();
   vals.splice(index, 1);
@@ -358,7 +358,7 @@ function togglePollMode() {
   const group = document.getElementById('poll-question-group');
   if (state.pollMode) {
     group.classList.remove('hidden');
-    showToast('📊 Modo enquete ativo! As opções serão enviadas como enquete nativa.', 'info');
+    showToast('ðŸ“Š Modo enquete ativo! As opÃ§Ãµes serÃ£o enviadas como enquete nativa.', 'info');
   } else {
     group.classList.add('hidden');
   }
@@ -375,21 +375,21 @@ function collectReactionValues() {
 
 function insertReactionsInMessage() {
   const vals = collectReactionValues();
-  // Usa valor preenchido ou texto padrão para campos vazios
-  const options = vals.map((v, i) => v.trim() || `Opção ${i + 1}`);
+  // Usa valor preenchido ou texto padrÃ£o para campos vazios
+  const options = vals.map((v, i) => v.trim() || `OpÃ§Ã£o ${i + 1}`);
 
-  const block = '\n\n*Selecione uma opção:*\n' +
+  const block = '\n\n*Selecione uma opÃ§Ã£o:*\n' +
     options.map((v, i) => `${REACTION_EMOJIS[i]} ${v}`).join('\n') +
-    '\n\n*Responda com o número da sua escolha.*';
+    '\n\n*Responda com o nÃºmero da sua escolha.*';
 
   const ta = document.getElementById('message-textarea');
   ta.value += block;
   updateMessagePreview();
   updateCharCount();
-  showToast('Opções inseridas na mensagem!', 'success');
+  showToast('OpÃ§Ãµes inseridas na mensagem!', 'success');
 }
 
-// ── Image Upload ───────────────────────────────────────────
+// â”€â”€ Image Upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function handleDragOver(e) {
   e.preventDefault();
   document.getElementById('upload-area').classList.add('drag-over');
@@ -409,7 +409,7 @@ function handleImageSelect(e) {
 }
 
 function loadImageFile(file) {
-  if (file.size > 16 * 1024 * 1024) { showToast('Imagem muito grande! Máx. 16MB.', 'error'); return; }
+  if (file.size > 16 * 1024 * 1024) { showToast('Imagem muito grande! MÃ¡x. 16MB.', 'error'); return; }
   state.selectedImage = file;
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -420,7 +420,7 @@ function loadImageFile(file) {
     // Update message bubble preview
     document.getElementById('bubble-img').src = src;
     document.getElementById('preview-image-bubble').classList.remove('hidden');
-    updateBadge('message', '🖼');
+    updateBadge('message', 'ðŸ–¼');
   };
   reader.readAsDataURL(file);
 }
@@ -435,7 +435,7 @@ function removeImage(e) {
   updateBadge('message', null);
 }
 
-// ── Message Preview ────────────────────────────────────────
+// â”€â”€ Message Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function updateMessagePreview() {
   const text = document.getElementById('message-textarea').value;
   const preview = document.getElementById('preview-text');
@@ -448,12 +448,12 @@ function updateMessagePreview() {
     .replace(/\n/g, '<br>');
 
   if (!html) {
-    preview.innerHTML = '<em style="color:#666">Sua mensagem aparecerá aqui...</em>';
+    preview.innerHTML = '<em style="color:#666">Sua mensagem aparecerÃ¡ aqui...</em>';
   } else {
     preview.innerHTML = html;
   }
 
-  if (text.trim()) updateBadge('message', '✓');
+  if (text.trim()) updateBadge('message', 'âœ“');
   else updateBadge('message', null);
 }
 
@@ -462,7 +462,7 @@ function updateCharCount() {
   document.getElementById('char-count').textContent = len;
 }
 
-// ── Schedule Settings ──────────────────────────────────────
+// â”€â”€ Schedule Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function updateIntervalMode() {
   const mode = document.querySelector('input[name="interval-mode"]:checked').value;
   const fixedGroup = document.getElementById('interval-fixed-group');
@@ -513,8 +513,8 @@ function updateEstimate() {
     const end = new Date(Date.now() + totalSec * 1000);
     document.getElementById('est-end').textContent = end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   } else {
-    document.getElementById('est-duration').textContent = '—';
-    document.getElementById('est-end').textContent = '—';
+    document.getElementById('est-duration').textContent = 'â€”';
+    document.getElementById('est-end').textContent = 'â€”';
   }
 }
 
@@ -526,7 +526,7 @@ function formatDuration(totalSec) {
   return m > 0 ? `${h}h ${m}min` : `${h}h`;
 }
 
-// ── Campaign ───────────────────────────────────────────────
+// â”€â”€ Campaign â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function startCampaign() {
   if (state.waStatus !== 'connected') {
     showToast('Conecte o WhatsApp primeiro!', 'error');
@@ -534,7 +534,7 @@ async function startCampaign() {
     return;
   }
   if (state.validNumbers.length === 0) {
-    showToast('Adicione contatos válidos!', 'error');
+    showToast('Adicione contatos vÃ¡lidos!', 'error');
     switchTab('contacts');
     return;
   }
@@ -551,10 +551,10 @@ async function startCampaign() {
   let pollQuestion = '';
   if (pollMode) {
     const vals = collectReactionValues();
-    pollOptions = vals.map((v, i) => v.trim() || `Opção ${i + 1}`);
+    pollOptions = vals.map((v, i) => v.trim() || `OpÃ§Ã£o ${i + 1}`);
     pollQuestion = document.getElementById('poll-question')?.value?.trim() || '';
     if (pollOptions.length < 2) {
-      showToast('A enquete precisa de pelo menos 2 opções!', 'error');
+      showToast('A enquete precisa de pelo menos 2 opÃ§Ãµes!', 'error');
       return;
     }
   }
@@ -596,7 +596,7 @@ async function startCampaign() {
   try {
     const btn = document.getElementById('btn-start');
     btn.disabled = true;
-    btn.textContent = '⏳ Iniciando...';
+    btn.textContent = 'â³ Iniciando...';
 
     const r = await fetch('/api/campaign/start', { method: 'POST', body: formData });
     const d = await r.json();
@@ -608,11 +608,11 @@ async function startCampaign() {
       showToast(d.error || 'Erro ao iniciar.', 'error');
     }
   } catch (err) {
-    showToast('Erro de conexão: ' + err.message, 'error');
+    showToast('Erro de conexÃ£o: ' + err.message, 'error');
   } finally {
     const btn = document.getElementById('btn-start');
     btn.disabled = false;
-    btn.textContent = '🚀 Iniciar Campanha';
+    btn.textContent = 'ðŸš€ Iniciar Campanha';
   }
 }
 
@@ -632,12 +632,12 @@ async function clearQueue() {
     showToast('Pause ou pare a campanha antes de limpar.', 'warning');
     return;
   }
-  if (!confirm('Limpar todo o histórico da fila?')) return;
+  if (!confirm('Limpar todo o histÃ³rico da fila?')) return;
   try {
     const r = await fetch('/api/campaign/clear', { method: 'POST' });
     const d = await r.json();
     if (r.ok) {
-      showToast('Histórico limpo!', 'success');
+      showToast('HistÃ³rico limpo!', 'success');
     } else {
       showToast(d.error || 'Erro ao limpar.', 'error');
     }
@@ -646,7 +646,7 @@ async function clearQueue() {
   }
 }
 
-// ── Campaign Status Updates ────────────────────────────────
+// â”€â”€ Campaign Status Updates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function handleCampaignLoaded(data) {
   state.stats = data.stats;
   state.queue = data.queue;
@@ -663,11 +663,11 @@ function handleCampaignStatus(status) {
   const btnStop = document.getElementById('btn-stop');
 
   const map = {
-    idle:      { text: '💤 Aguardando', cls: 'status-idle' },
-    running:   { text: '🚀 Enviando...', cls: 'status-running' },
-    paused:    { text: '⏸️ Pausado', cls: 'status-paused' },
-    stopped:   { text: '🛑 Parado', cls: 'status-stopped' },
-    completed: { text: '✅ Concluído', cls: 'status-completed' },
+    idle:      { text: 'ðŸ’¤ Aguardando', cls: 'status-idle' },
+    running:   { text: 'ðŸš€ Enviando...', cls: 'status-running' },
+    paused:    { text: 'â¸ï¸ Pausado', cls: 'status-paused' },
+    stopped:   { text: 'ðŸ›‘ Parado', cls: 'status-stopped' },
+    completed: { text: 'âœ… ConcluÃ­do', cls: 'status-completed' },
   };
 
   const info = map[status] || map.idle;
@@ -692,7 +692,7 @@ function handleCampaignStatus(status) {
     btnStop.classList.remove('hidden');
   }
 
-  updateBadge('campaign', status === 'running' ? '●' : null);
+  updateBadge('campaign', status === 'running' ? 'â—' : null);
 }
 
 function updateStats(stats) {
@@ -722,15 +722,15 @@ function updateQueueItem(index, status, sentAt, error) {
   dot.className = `queue-item-dot dot-${status}`;
 
   if (status === 'sent') {
-    statusEl.textContent = '✅ Enviado';
+    statusEl.textContent = 'âœ… Enviado';
     statusEl.className = 'queue-item-status sent';
     item.classList.remove('active-item');
   } else if (status === 'failed') {
-    statusEl.textContent = `❌ Falha`;
+    statusEl.textContent = `âŒ Falha`;
     statusEl.className = 'queue-item-status failed';
     item.classList.remove('active-item');
   } else if (status === 'sending') {
-    statusEl.textContent = '📤 Enviando...';
+    statusEl.textContent = 'ðŸ“¤ Enviando...';
     statusEl.className = 'queue-item-status sending';
     item.classList.add('active-item');
     item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -748,13 +748,13 @@ function renderQueueList() {
       <span class="queue-item-dot dot-${item.status}"></span>
       <span class="queue-item-num">+55 ${item.number}</span>
       <span class="queue-item-status ${item.status === 'sent' ? 'sent' : item.status === 'failed' ? 'failed' : ''}">
-        ${item.status === 'sent' ? '✅ Enviado' : item.status === 'failed' ? '❌ Falha' : item.status === 'sending' ? '📤 Enviando...' : '⏳ Pendente'}
+        ${item.status === 'sent' ? 'âœ… Enviado' : item.status === 'failed' ? 'âŒ Falha' : item.status === 'sending' ? 'ðŸ“¤ Enviando...' : 'â³ Pendente'}
       </span>
     </div>
   `).join('');
 }
 
-// ── Log Console ────────────────────────────────────────────
+// â”€â”€ Log Console â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function appendLog(level, message) {
   const console_ = document.getElementById('log-console');
   const line = document.createElement('div');
@@ -768,7 +768,7 @@ function clearLog() {
   document.getElementById('log-console').innerHTML = '';
 }
 
-// ── Toast ──────────────────────────────────────────────────
+// â”€â”€ Toast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
@@ -781,12 +781,79 @@ function showToast(message, type = 'info') {
   }, 3500);
 }
 
-// ════════════════════════════════════════════════════════════
-// ── AI AGENT TAB ───────────────────────────────────────────
-// ════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â”€â”€ AI AGENT TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 let aiConfig = {};
 let consultorCount = 0;
+const AI_PROVIDER_DEFAULTS = {
+  groq: 'llama-3.1-8b-instant',
+  gemini: 'gemini-2.5-flash',
+};
+
+function getProviderDefaultModel(provider = 'groq') {
+  return AI_PROVIDER_DEFAULTS[provider] || AI_PROVIDER_DEFAULTS.groq;
+}
+
+function updateKeyField(inputId, statusId, hasKey, maskedKey, defaultPlaceholder) {
+  const input = document.getElementById(inputId);
+  const status = document.getElementById(statusId);
+  if (!input) return;
+
+  input.value = '';
+  input.placeholder = hasKey && maskedKey ? maskedKey : defaultPlaceholder;
+
+  if (status) {
+    status.textContent = hasKey
+      ? `Chave salva: ${maskedKey || 'preenchida'}. Deixe em branco para manter.`
+      : 'Nenhuma chave salva ainda.';
+  }
+}
+
+function updateModelFields(provider, resetValues = true) {
+  const mainInput = document.getElementById('ai-model');
+  const qualificationInput = document.getElementById('qualification-model');
+  const mainHint = document.getElementById('ai-model-hint');
+  const qualificationHint = document.getElementById('qualification-model-hint');
+  const defaultModel = getProviderDefaultModel(provider);
+
+  if (mainInput) {
+    mainInput.placeholder = defaultModel;
+    if (resetValues) mainInput.value = defaultModel;
+  }
+
+  if (qualificationInput) {
+    qualificationInput.placeholder = 'Em branco = usar o modelo principal';
+    if (resetValues) qualificationInput.value = '';
+  }
+
+  if (mainHint) {
+    mainHint.textContent = `Se deixar no padrao, usamos ${defaultModel}. Voce pode informar qualquer ID valido do ${provider === 'gemini' ? 'Gemini' : 'Groq'}.`;
+  }
+
+  if (qualificationHint) {
+    qualificationHint.textContent = 'Deixe em branco para reaproveitar o modelo principal. Preencha somente se quiser um modelo separado para extracao e qualificacao.';
+  }
+}
+
+function resetPDFUploadArea() {
+  const area = document.getElementById('pdf-upload-area');
+  if (!area) return;
+
+  area.innerHTML = `
+    <input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)">
+    <span class="upload-icon">ðŸ“„</span>
+    <p>Clique ou arraste o PDF aqui</p>
+    <span class="upload-hint">Apenas arquivos PDF Â· max. 32MB</span>
+  `;
+}
+
+function setPDFUploadLoading(message = 'Extraindo texto...') {
+  const area = document.getElementById('pdf-upload-area');
+  if (!area) return;
+  area.innerHTML = `<span class="upload-icon">â³</span><p>${message}</p>`;
+}
 
 async function loadAIConfig() {
   try {
@@ -799,13 +866,14 @@ async function loadAIConfig() {
     radios.forEach(r => { r.checked = r.value === provider; });
     switchAIProvider(provider, false);
 
-    // Keys — backend now masks full keys; show placeholder when masked
-    const groqEl   = document.getElementById('ai-groq-key');
-    const geminiEl = document.getElementById('ai-gemini-key');
-    groqEl.value   = '';  // never pre-fill password fields with real or masked keys
-    geminiEl.value = '';
-    groqEl.placeholder   = aiConfig.groqKeyMasked   ? `Configurada (${aiConfig.groqKeyMasked}) — deixe vazio para manter` : 'gsk_...';
-    geminiEl.placeholder = aiConfig.geminiKeyMasked ? `Configurada (${aiConfig.geminiKeyMasked}) — deixe vazio para manter` : 'AIza...';
+    // Keys
+    updateKeyField('ai-groq-key', 'groq-key-status', !!aiConfig.hasGroqKey, aiConfig.groqKeyMasked, 'gsk_...');
+    updateKeyField('ai-gemini-key', 'gemini-key-status', !!aiConfig.hasGeminiKey, aiConfig.geminiKeyMasked, 'AIza...');
+
+    // Models
+    document.getElementById('ai-model').value = aiConfig.aiModel || getProviderDefaultModel(provider);
+    document.getElementById('qualification-model').value = aiConfig.qualificationModel || '';
+    updateModelFields(provider, false);
 
     // Rest of fields
     document.getElementById('ai-agent-name').value = aiConfig.agentName || '';
@@ -831,9 +899,12 @@ async function loadAIConfig() {
     if (aRadio) aRadio.checked = true;
     const sessionTimeoutEl = document.getElementById('ai-session-timeout');
     if (sessionTimeoutEl) sessionTimeoutEl.value = aiConfig.sessionTimeoutMinutes || 30;
+    const knowledgeEl = document.getElementById('ai-company-info');
+    if (knowledgeEl) updateKnowledgeCounter(knowledgeEl);
 
     updateAIStatusUI(aiConfig.aiEnabled);
     renderConsultors(aiConfig.consultors || []);
+    resetPDFUploadArea();
     await loadDocs();
     await updateAIStats();
   } catch (err) {
@@ -851,6 +922,8 @@ function switchAIProvider(provider, save = true) {
     groqGroup.classList.remove('hidden');
     geminiGroup.classList.add('hidden');
   }
+
+  updateModelFields(provider, save);
 }
 
 function updateAIStatusUI(enabled) {
@@ -858,19 +931,31 @@ function updateAIStatusUI(enabled) {
   const text = document.getElementById('ai-status-text');
   const icon = document.getElementById('ai-status-icon');
   toggle.checked = enabled;
-  text.textContent = enabled ? '✅ Ativo' : 'Desativado';
-  icon.textContent = enabled ? '🟢' : '⚡';
+  text.textContent = enabled ? 'âœ… Ativo' : 'Desativado';
+  icon.textContent = enabled ? 'ðŸŸ¢' : 'âš¡';
 }
 
 function toggleAIEnabled() {
   const enabled = document.getElementById('ai-enabled').checked;
+  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
+  const typedKey = provider === 'gemini'
+    ? document.getElementById('ai-gemini-key').value.trim()
+    : document.getElementById('ai-groq-key').value.trim();
+  const savedKey = provider === 'gemini' ? !!aiConfig.hasGeminiKey : !!aiConfig.hasGroqKey;
+
+  if (enabled && !typedKey && !savedKey) {
+    updateAIStatusUI(false);
+    showToast('Cadastre uma API key antes de ativar o agente.', 'warning');
+    return;
+  }
+
   updateAIStatusUI(enabled);
   // Auto-save just the enabled flag
   fetch('/api/ai/config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...collectAIFormData(), aiEnabled: enabled })
   });
-  showToast(enabled ? '🤖 Agente IA ativado!' : 'Agente IA desativado', enabled ? 'success' : 'info');
+  showToast(enabled ? 'ðŸ¤– Agente IA ativado!' : 'Agente IA desativado', enabled ? 'success' : 'info');
 }
 
 function collectAIFormData() {
@@ -889,8 +974,9 @@ function collectAIFormData() {
   return {
     aiEnabled: document.getElementById('ai-enabled').checked,
     aiProvider: provider,
-    // Only include keys if user actually typed something new — empty = keep existing
-    groqKey:   document.getElementById('ai-groq-key').value.trim()   || undefined,
+    aiModel: document.getElementById('ai-model').value.trim(),
+    qualificationModel: document.getElementById('qualification-model').value.trim(),
+    groqKey: document.getElementById('ai-groq-key').value.trim() || undefined,
     geminiKey: document.getElementById('ai-gemini-key').value.trim() || undefined,
     agentName: document.getElementById('ai-agent-name').value.trim(),
     companyName: document.getElementById('ai-company-name').value.trim(),
@@ -914,15 +1000,16 @@ function collectAIFormData() {
 
 // Visual feedback for behavior card selection
 function selectBehaviorCard(group, radioEl) {
-  // No extra logic needed — CSS handles :checked state automatically
+  // No extra logic needed â€” CSS handles :checked state automatically
   // This function exists as an onchange hook for future analytics or validation
 }
 
 async function saveAIConfig() {
   const data = collectAIFormData();
+  const savedKeyAvailable = data.aiProvider === 'groq' ? !!aiConfig.hasGroqKey : !!aiConfig.hasGeminiKey;
   const hasKey = data.aiProvider === 'groq'
-    ? (!!data.groqKey || !!aiConfig.groqKeyMasked)   // key already saved counts
-    : (!!data.geminiKey || !!aiConfig.geminiKeyMasked);
+    ? !!data.groqKey || savedKeyAvailable
+    : !!data.geminiKey || savedKeyAvailable;
   if (!hasKey) {
     showToast('Informe a API Key antes de salvar.', 'warning');
     return;
@@ -932,29 +1019,32 @@ async function saveAIConfig() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    const payload = await r.json().catch(() => ({}));
     if (r.ok) {
-      showToast('✅ Configurações salvas com sucesso!', 'success');
-      aiConfig = data;
+      showToast('âœ… ConfiguraÃ§Ãµes salvas com sucesso!', 'success');
+      await loadAIConfig();
     } else {
-      showToast('Erro ao salvar.', 'error');
+      showToast(payload.error || 'Erro ao salvar.', 'error');
     }
   } catch (err) {
     showToast('Erro: ' + err.message, 'error');
   }
 }
 
-async function testGeminiKey() {
+async function testAIKey() {
   const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
   const key = provider === 'gemini'
     ? document.getElementById('ai-gemini-key').value.trim()
     : document.getElementById('ai-groq-key').value.trim();
-  if (!key) { showToast('Informe uma API Key primeiro.', 'warning'); return; }
+  const hasSavedKey = provider === 'gemini' ? !!aiConfig.hasGeminiKey : !!aiConfig.hasGroqKey;
+  const model = document.getElementById('ai-model').value.trim() || getProviderDefaultModel(provider);
+  if (!key && !hasSavedKey) { showToast('Informe uma API Key primeiro.', 'warning'); return; }
   const btn = document.getElementById(provider === 'gemini' ? 'btn-test-key-gem' : 'btn-test-key');
   if (btn) { btn.textContent = '...'; btn.disabled = true; }
   try {
     const r = await fetch('/api/ai/test-key', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, provider }),
+      body: JSON.stringify({ key, provider, model }),
     });
     const d = await r.json();
     showToast(d.ok ? '\u2705 ' + d.message : '\u274c ' + d.message, d.ok ? 'success' : 'error');
@@ -963,6 +1053,10 @@ async function testGeminiKey() {
   } finally {
     if (btn) { btn.textContent = 'Testar'; btn.disabled = false; }
   }
+}
+
+async function testGeminiKey() {
+  return testAIKey();
 }
 
 // Consultors
@@ -982,10 +1076,10 @@ function addConsultorRow(name, number) {
   const div = document.createElement('div');
   div.className = 'consultor-item';
   div.innerHTML = `
-    <span style="font-size:16px">👤</span>
+    <span style="font-size:16px">ðŸ‘¤</span>
     <input type="text" data-role="name" placeholder="Nome (ex: Gabriel)" value="${name || ''}" style="width:35%">
-    <input type="text" data-role="number" placeholder="DDD+Número (11999990000)" value="${number || ''}" style="flex:1;font-family:var(--mono)">
-    <button class="consultor-remove" onclick="this.parentElement.remove()">✕</button>
+    <input type="text" data-role="number" placeholder="DDD+NÃºmero (11999990000)" value="${number || ''}" style="flex:1;font-family:var(--mono)">
+    <button class="consultor-remove" onclick="this.parentElement.remove()">âœ•</button>
   `;
   list.appendChild(div);
 }
@@ -993,6 +1087,8 @@ function addConsultorRow(name, number) {
 // PDFs
 async function loadDocs() {
   try {
+    const list = document.getElementById('docs-list');
+    if (!list) return;
     const r = await fetch('/api/ai/docs');
     const docs = await r.json();
     renderDocs(docs);
@@ -1001,18 +1097,19 @@ async function loadDocs() {
 
 function renderDocs(docs) {
   const list = document.getElementById('docs-list');
+  if (!list) return;
   if (!docs || docs.length === 0) {
     list.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:8px 0;">Nenhum documento carregado ainda.</div>';
     return;
   }
   list.innerHTML = docs.map(d => `
     <div class="doc-item">
-      <span class="doc-icon">📄</span>
+      <span class="doc-icon">ðŸ“„</span>
       <div class="doc-info">
-        <div class="doc-name">${d.filename}</div>
-        <div class="doc-meta">${d.pages} páginas · ${(d.wordCount || 0).toLocaleString()} palavras · Importado em ${new Date(d.extractedAt).toLocaleDateString('pt-BR')}</div>
+        <div class="doc-name">${escapeHtml(d.filename)}</div>
+        <div class="doc-meta">${d.pages} pÃ¡ginas Â· ${(d.wordCount || 0).toLocaleString()} palavras Â· Importado em ${new Date(d.extractedAt).toLocaleDateString('pt-BR')}</div>
       </div>
-      <button class="doc-remove" onclick="removePDF('${d.filename}')">🗑️</button>
+      <button class="doc-remove" onclick="removePDF('${d.filename}')">ðŸ—‘ï¸</button>
     </div>
   `).join('');
 }
@@ -1032,14 +1129,14 @@ async function handlePDFDrop(event) {
 
 async function uploadPDF(file) {
   const area = document.getElementById('pdf-upload-area');
-  area.innerHTML = '<span class="upload-icon">⏳</span><p>Extraindo texto...</p>';
+  area.innerHTML = '<span class="upload-icon">â³</span><p>Extraindo texto...</p>';
   const formData = new FormData();
   formData.append('pdf', file);
   try {
     const r = await fetch('/api/ai/docs', { method: 'POST', body: formData });
     const d = await r.json();
     if (r.ok) {
-      showToast(`✅ ${d.filename} — ${d.pages} páginas, ${(d.wordCount||0).toLocaleString()} palavras`, 'success');
+      showToast(`âœ… ${d.filename} â€” ${d.pages} pÃ¡ginas, ${(d.wordCount||0).toLocaleString()} palavras`, 'success');
       await loadDocs();
     } else {
       showToast('Erro: ' + d.error, 'error');
@@ -1047,7 +1144,7 @@ async function uploadPDF(file) {
   } catch (err) {
     showToast('Erro ao fazer upload: ' + err.message, 'error');
   } finally {
-    area.innerHTML = '<input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)"><span class="upload-icon">📄</span><p>Clique ou arraste o PDF aqui</p><span class="upload-hint">Apenas arquivos PDF · máx. 32MB</span>';
+    area.innerHTML = '<input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)"><span class="upload-icon">ðŸ“„</span><p>Clique ou arraste o PDF aqui</p><span class="upload-hint">Apenas arquivos PDF Â· mÃ¡x. 32MB</span>';
   }
 }
 
@@ -1065,13 +1162,13 @@ async function updateAIStats() {
     document.getElementById('ai-pill-leads').innerHTML = `<span>${s.todayTotal || 0}</span> leads hoje`;
     document.getElementById('ai-pill-qualified').innerHTML = `<span>${s.todayQualified || 0}</span> qualificados`;
     document.getElementById('ai-pill-talking').innerHTML = `<span>${s.talking || 0}</span> em conversa`;
-    document.getElementById('ai-pill-rate').innerHTML = `<span>${s.conversationRate || 0}%</span> conversão`;
+    document.getElementById('ai-pill-rate').innerHTML = `<span>${s.conversationRate || 0}%</span> conversÃ£o`;
   } catch {}
 }
 
-// ════════════════════════════════════════════════════════════
-// ── LEADS TAB ──────────────────────────────────────────────
-// ════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â”€â”€ LEADS TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 let allLeads = [];
 let currentFilter = 'all';
@@ -1119,15 +1216,15 @@ function renderLeadsList(filter) {
         <div class="lead-status-dot ${dotClass}"></div>
         <div class="lead-info">
           <div class="lead-name">${lead.name || 'Desconhecido'}</div>
-          <div class="lead-number">+55 ${formatPhone(lead.number)}</div>
+          <div class="lead-number">${formatLeadPhone(lead)}</div>
         </div>
         <div class="lead-vehicle">
-          ${lead.model ? `<div class="lead-model">🚗 ${lead.model}</div>` : ''}
+          ${lead.model ? `<div class="lead-model">ðŸš— ${lead.model}</div>` : ''}
           ${lead.plate ? `<span class="lead-plate">${lead.plate}</span>` : ''}
         </div>
         <div class="lead-since">${timeAgo}</div>
         <div class="lead-actions-mini" onclick="event.stopPropagation()">
-          ${lead.status === 'talking' ? `<button class="lead-btn" onclick="blockLead('${lead.number}')">⛔</button>` : ''}
+          ${lead.status === 'talking' ? `<button class="lead-btn" onclick="blockLead('${lead.number}')">â›”</button>` : ''}
         </div>
       </div>
     `;
@@ -1152,10 +1249,10 @@ async function exportLeadsCSV() {
 }
 
 async function blockLead(number) {
-  if (!confirm('Parar o bot para este número?')) return;
+  if (!confirm('Parar o bot para este nÃºmero?')) return;
   await fetch(`/api/leads/${number}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'blocked' }) });
   await loadLeads();
-  showToast('Bot pausado para esse número.', 'info');
+  showToast('Bot pausado para esse nÃºmero.', 'info');
 }
 
 function updateLeadBadge() {
@@ -1169,26 +1266,27 @@ function openLeadModal(number) {
   if (!lead) return;
 
   document.getElementById('modal-lead-name').textContent = lead.name || 'Desconhecido';
-  document.getElementById('modal-lead-number').textContent = `+55 ${formatPhone(number)} · ${statusLabel(lead.status)}`;
+  document.getElementById('modal-lead-number').textContent = `${formatLeadPhone(lead)} Â· ${statusLabel(lead.status)}`;
 
   const vehicle = document.getElementById('modal-vehicle');
   vehicle.innerHTML = lead.model || lead.plate
-    ? `<div class="modal-vehicle-item">🚗 <strong>${lead.model || '?'}</strong></div>
-       <div class="modal-vehicle-item">🔑 <strong>${lead.plate || '?'}</strong></div>
-       <div class="modal-vehicle-item" style="margin-left:auto">📅 ${new Date(lead.createdAt).toLocaleDateString('pt-BR')}</div>`
-    : `<div class="modal-vehicle-item" style="color:var(--text-3)">Veículo não capturado ainda</div>`;
+    ? `<div class="modal-vehicle-item">ðŸš— <strong>${lead.model || '?'}</strong></div>
+       <div class="modal-vehicle-item">ðŸ”‘ <strong>${lead.plate || '?'}</strong></div>
+       <div class="modal-vehicle-item" style="margin-left:auto">ðŸ“… ${new Date(lead.createdAt).toLocaleDateString('pt-BR')}</div>`
+    : `<div class="modal-vehicle-item" style="color:var(--text-3)">VeÃ­culo nÃ£o capturado ainda</div>`;
 
   const actions = document.getElementById('modal-actions');
+  const waTarget = getLeadWhatsAppTarget(lead);
   actions.innerHTML = `
-    <a href="https://wa.me/55${number}" target="_blank" class="btn btn-primary btn-sm">💬 Abrir no WhatsApp</a>
-    ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">⛔ Pausar bot</button>` : ''}
-    <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">🗑️ Excluir lead</button>
+    ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm">ðŸ’¬ Abrir no WhatsApp</a>` : ''}
+    ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">â›” Pausar bot</button>` : ''}
+    <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">ðŸ—‘ï¸ Excluir lead</button>
   `;
 
   const chat = document.getElementById('modal-chat');
   const history = lead.history || [];
   if (history.length === 0) {
-    chat.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:20px;">Sem histórico de conversa.</div>';
+    chat.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:20px;">Sem histÃ³rico de conversa.</div>';
   } else {
     chat.innerHTML = history.map(msg => {
       const isUser = msg.role === 'user';
@@ -1196,7 +1294,7 @@ function openLeadModal(number) {
       return `
         <div class="chat-bubble-wrap ${isUser ? '' : 'outgoing'}">
           <div class="chat-bubble">${escapeHtml(msg.content)}</div>
-          <div class="chat-ts">${isUser ? '👤' : '🤖'} ${time}</div>
+          <div class="chat-ts">${isUser ? 'ðŸ‘¤' : 'ðŸ¤–'} ${time}</div>
         </div>
       `;
     }).join('');
@@ -1217,10 +1315,10 @@ async function deleteLead(number) {
   await fetch(`/api/leads/${number}`, { method: 'DELETE' });
   closeLeadModal();
   await loadLeads();
-  showToast('Lead excluído.', 'info');
+  showToast('Lead excluÃ­do.', 'info');
 }
 
-// ── Helpers ────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function timeSince(dateStr) {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -1232,11 +1330,41 @@ function timeSince(dateStr) {
   return `${Math.floor(h / 24)}d`;
 }
 
+function normalizeBrazilPhone(number) {
+  let digits = String(number || '').replace(/\D/g, '');
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
+  return digits;
+}
+
 function formatPhone(number) {
-  const d = String(number).replace(/\D/g, '');
+  const d = normalizeBrazilPhone(number);
   if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
   if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
   return d;
+}
+
+function getLeadContactValue(lead) {
+  return lead?.displayNumber || lead?.phone || lead?.number || '';
+}
+
+function formatLeadPhone(lead) {
+  const digits = normalizeBrazilPhone(getLeadContactValue(lead));
+  if (!digits) return 'Nao informado';
+  if (digits.length === 10 || digits.length === 11) {
+    return `+55 ${formatPhone(digits)}`;
+  }
+  return formatPhone(digits);
+}
+
+function getLeadWhatsAppTarget(lead) {
+  let digits = String(getLeadContactValue(lead)).replace(/\D/g, '');
+  if (!digits) return '';
+  if (!digits.startsWith('55') && (digits.length === 10 || digits.length === 11)) {
+    digits = `55${digits}`;
+  }
+  return digits;
 }
 
 function statusLabel(status) {
@@ -1256,7 +1384,7 @@ function escapeHtml(text) {
   return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Knowledge base word counter ──────────────────────────────
+// â”€â”€ Knowledge base word counter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function updateKnowledgeCounter(textarea) {
   const len = textarea.value.length;
   const MAX = 4000;
@@ -1267,11 +1395,10 @@ function updateKnowledgeCounter(textarea) {
   if (remaining < 200)      { color = '#ef4444'; }
   else if (remaining < 800) { color = '#f59e0b'; }
   counter.style.color = color;
-  counter.textContent = `${len.toLocaleString()} / ${MAX.toLocaleString()} caracteres${remaining < 200 ? ' — quase no limite!' : ''}`;
+  counter.textContent = `${len.toLocaleString()} / ${MAX.toLocaleString()} caracteres${remaining < 200 ? ' â€” quase no limite!' : ''}`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   const ta = document.getElementById('ai-company-info');
   if (ta) updateKnowledgeCounter(ta);
 });
-

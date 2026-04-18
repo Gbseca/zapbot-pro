@@ -1,15 +1,56 @@
 /**
- * lead-detector.js — v3
- * Detects [QUALIFICADO|...] marker injected by the AI.
- * PHASE 3: profile is no longer mandatory — plate + model + phone is enough to qualify.
+ * lead-detector.js — v4
+ * Parses structured JSON from the qualification model and validates it
+ * deterministically before qualifying a lead.
  */
-
-const MARKER_REGEX = /\[QUALIFICADO\|placa=([^|]+)\|modelo=([^|]+)\|nome=([^|]*)\|phone=([^|]*)\|perfil=(sim|nao|não)\]/i;
 
 const FAKE_PLATE_VALUES = [
   'placa_aqui', 'placa_real', 'placa', 'não informada', 'nao informada',
   'sem placa', 'nenhuma', 'n/a', 'na', 'x', '?', '??', '???',
 ];
+
+function sanitizeString(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (['null', 'undefined', 'nenhum', 'nenhuma'].includes(text.toLowerCase())) return null;
+  return text;
+}
+
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return ['true', '1', 'sim', 'yes'].includes(normalized);
+  }
+  if (typeof value === 'number') return value === 1;
+  return false;
+}
+
+function extractJsonPayload(rawText = '') {
+  if (!rawText) return null;
+  const cleaned = String(rawText)
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Try to recover the first JSON object in the response.
+  }
+
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+
+  try {
+    return JSON.parse(cleaned.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
 
 function isRealPlate(plate) {
   if (!plate) return false;
@@ -23,7 +64,7 @@ function isRealPlate(plate) {
 function isRealPhone(phone) {
   if (!phone) return false;
   const digits = String(phone).replace(/\D/g, '');
-  return digits.length >= 10; // at least DDD + number
+  return digits.length >= 10;
 }
 
 /**
@@ -39,50 +80,28 @@ export function normalizePhone(raw) {
 }
 
 /**
- * Extracts lead info from AI response if qualification marker is present.
+ * Extracts lead info from the structured qualification response.
  *
- * QUALIFICATION RULES (Phase 3):
- *   ✅ plate (real) + model + phone → ALWAYS qualifies (fastest path — client was direct)
- *   ✅ plate (real) + model + profile=sim → qualifies (classic path, phone optional in marker)
+ * QUALIFICATION RULES:
+ *   ✅ plate (real) + model + phone → qualifies
+ *   ✅ plate (real) + model + profile=sim → qualifies
  *   ❌ missing plate or model → never qualifies
  */
 export function detectAndExtract(aiResponse, currentLead = {}) {
-  const match = aiResponse.match(MARKER_REGEX);
+  const parsed = extractJsonPayload(aiResponse) || {};
 
-  if (!match) {
-    return {
-      qualified: false,
-      plate: currentLead.plate || null,
-      model: currentLead.model || null,
-      name: currentLead.name  || null,
-      phone: currentLead.phone || null,
-      profileCaptured: currentLead.profileCaptured || false,
-      cleanResponse: aiResponse.trim(),
-    };
-  }
+  const plate = sanitizeString(parsed.plate) || currentLead.plate || null;
+  const model = sanitizeString(parsed.model) || currentLead.model || null;
+  const name = sanitizeString(parsed.name) || currentLead.name || null;
+  const phone = normalizePhone(parsed.phone) || currentLead.phone || null;
+  const profileCaptured = parseBoolean(parsed.profileCaptured) || currentLead.profileCaptured || false;
 
-  const plate         = (match[1] || '').trim() || currentLead.plate;
-  const model         = (match[2] || '').trim() || currentLead.model;
-  const name          = (match[3] || '').trim() || currentLead.name;
-  const rawPhone      = (match[4] || '').trim();
-  const profileField  = (match[5] || '').toLowerCase();
-  const profileCaptured = profileField === 'sim';
+  const hasRealPlate = isRealPlate(plate);
+  const hasRealModel = !!(model && model.length > 1);
+  const hasRealPhone = isRealPhone(phone);
 
-  const phone = normalizePhone(rawPhone) || currentLead.phone || null;
-
-  // Remove the marker from the response sent to the client
-  const cleanResponse = aiResponse.replace(MARKER_REGEX, '').replace(/\n+$/, '').trim();
-
-  const hasRealPlate  = isRealPlate(plate);
-  const hasRealModel  = !!(model && model.length > 1);
-  const hasRealPhone  = isRealPhone(phone);
-
-  // Fast path: client gave plate + model + phone → qualify immediately, no profile needed
   const fastQualify = hasRealPlate && hasRealModel && hasRealPhone;
-
-  // Classic path: plate + model + profile collected (phone preferred but not blocking)
   const classicQualify = hasRealPlate && hasRealModel && profileCaptured;
-
   const qualified = fastQualify || classicQualify;
 
   if (!hasRealPlate) {
@@ -98,14 +117,22 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
 
   if (phone) console.log(`[Detector] Phone captured: ${phone}`);
 
-  return { qualified, plate, model, name, phone, profileCaptured, cleanResponse };
+  return {
+    qualified,
+    plate,
+    model,
+    name,
+    phone,
+    profileCaptured,
+    reason: sanitizeString(parsed.reason) || null,
+  };
 }
 
 /**
  * Tries to extract a phone number from a free-text message (backup capture).
  */
 export function tryExtractPhone(message) {
-  const digits = message.replace(/\D/g, '');
+  const digits = String(message || '').replace(/\D/g, '');
   if ((digits.length === 10 || digits.length === 11) && /^[1-9]{2}9?\d{7,8}$/.test(digits)) {
     return `55${digits}`;
   }
@@ -123,9 +150,9 @@ export function tryExtractName(message) {
     /(?:sou|chamo|me chamo|meu nome(?: é)?) ([A-Za-záÁàÀãÃâÂéÉêÊíÍóÓôÔõÕúÚçÇ]+)/i,
     /(?:aqui é|é o|é a) ([A-Za-záÁàÀãÃâÂéÉêÊíÍóÓôÔõÕúÚçÇ]+)/i,
   ];
-  for (const p of patterns) {
-    const m = message.match(p);
-    if (m && m[1].length > 2) return m[1];
+  for (const pattern of patterns) {
+    const match = String(message || '').match(pattern);
+    if (match && match[1].length > 2) return match[1];
   }
   return null;
 }

@@ -1,9 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LEADS_FILE = path.join(__dirname, 'leads.json');
+import { LEADS_FILE } from '../storage/paths.js';
 
 function ensureDir() {
   const dir = path.dirname(LEADS_FILE);
@@ -61,7 +58,7 @@ export function exportLeadsCSV() {
   const leads = getAllLeads();
   const headers = ['Número', 'Nome', 'Modelo', 'Placa', 'Status', 'Criado em', 'Atualizado em', 'Transferido para'];
   const rows = leads.map(l => [
-    l.number,
+    l.phone || l.displayNumber || l.number,
     l.name || '',
     l.model || '',
     l.plate || '',

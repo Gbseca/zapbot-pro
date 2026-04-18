@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import { fileURLToPath } from 'url';
+import { AUTH_DIR } from './storage/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,7 +15,7 @@ class WhatsAppManager {
         this.qrCode = null;
         this.status = 'disconnected';
         this.wss = wss;
-        this.authPath = path.join(__dirname, 'auth_info');
+        this.authPath = AUTH_DIR;
         this.reconnecting = false;
         this.logger = pino({ level: 'silent' });
         this.onMessage = null; // AI agent callback — set externally

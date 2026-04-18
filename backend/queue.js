@@ -1,3 +1,11 @@
+import { getLead, saveLead } from './data/leads-manager.js';
+
+function normalizeCampaignNumber(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return null;
+    return digits.startsWith('55') ? digits : `55${digits}`;
+}
+
 class MessageQueue {
     constructor(wa, wss) {
         this.wa = wa;
@@ -110,6 +118,45 @@ class MessageQueue {
         return text.replace(/\{\{numero\}\}/gi, number);
     }
 
+    seedCampaignLead(number, message) {
+        const normalized = normalizeCampaignNumber(number);
+        if (!normalized) return;
+
+        const now = new Date().toISOString();
+        const existing = getLead(normalized) || {};
+        const history = Array.isArray(existing.history) ? [...existing.history] : [];
+        const cleanMessage = String(message || '').trim();
+
+        if (cleanMessage) {
+            const lastEntry = history[history.length - 1];
+            if (!lastEntry || lastEntry.role !== 'assistant' || lastEntry.content !== cleanMessage) {
+                history.push({ role: 'assistant', content: cleanMessage, ts: Date.now() });
+            }
+        }
+
+        saveLead(normalized, {
+            number: normalized,
+            displayNumber: existing.displayNumber || normalized,
+            phone: existing.phone || normalized,
+            name: existing.name || null,
+            status: existing.status || 'new',
+            history,
+            plate: existing.plate || null,
+            model: existing.model || null,
+            profileCaptured: !!existing.profileCaptured,
+            softRefusalSent: !!existing.softRefusalSent,
+            jid: existing.jid || null,
+            createdAt: existing.createdAt || now,
+            lastInteraction: existing.lastInteraction || now,
+            followUp1Sent: !!existing.followUp1Sent,
+            followUp2Sent: !!existing.followUp2Sent,
+            source: existing.source || 'campaign',
+            campaignSentAt: now,
+            campaignLoopHandled: false,
+            lastCampaignMessage: cleanMessage || existing.lastCampaignMessage || '',
+        });
+    }
+
     async start() {
         if (this.status === 'running') return;
         if (this.queue.length === 0) {
@@ -209,6 +256,7 @@ class MessageQueue {
             this.stats.sent++;
             this.stats.pending--;
             this.dailySent++;
+            this.seedCampaignLead(item.number, text || item.pollQuestion || '');
 
             this.log('success', `✅ Enviado para +55 ${item.number}`);
             this.broadcast({ type: 'queue_update', index: this.currentIndex, status: 'sent', sentAt: item.sentAt });
