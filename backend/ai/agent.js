@@ -8,7 +8,7 @@ import { executeHandoff } from './handoff.js';
 
 // Anti-flood buffer
 const messageBuffers = new Map();
-const ANTIFLOOD_MS = 10000;
+const ANTIFLOOD_MS = 5000; // reduced from 10s — still handles rapid multi-messages, but responds faster
 
 // Session inactivity timers
 const sessionTimers = new Map();
@@ -217,6 +217,17 @@ export async function handleIncomingMessage(wa, rawMsg) {
   if (!text) return;
 
   const existingLead = getLead(jidId);
+
+  // campaignLoopEnabled: if false, AI does NOT take over campaign replies.
+  // A "campaign reply" = new lead with no prior AI conversation history.
+  // The user wants to handle those manually when this is off.
+  if (config.campaignLoopEnabled === false) {
+    const isCampaignReply = !existingLead || (existingLead.status === 'new' && (!existingLead.history || existingLead.history.length === 0));
+    if (isCampaignReply) {
+      console.log(`[Agent] 🔕 campaignLoopEnabled=false — skipping new lead ${jidId}`);
+      return;
+    }
+  }
 
   // Blocked = total silence always
   if (existingLead?.status === 'blocked') return;

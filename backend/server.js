@@ -110,10 +110,15 @@ app.post('/api/campaign/clear', (req, res) => {
 
 app.get('/api/ai/config', (req, res) => {
   const config = loadConfig();
-  // Don't expose full API key, just first/last chars
   const safeConfig = { ...config };
+  // Mask both keys — never expose full API keys to the browser
+  if (safeConfig.groqKey && safeConfig.groqKey.length > 8) {
+    safeConfig.groqKeyMasked = safeConfig.groqKey.slice(0, 4) + '...' + safeConfig.groqKey.slice(-4);
+    delete safeConfig.groqKey;
+  }
   if (safeConfig.geminiKey && safeConfig.geminiKey.length > 8) {
     safeConfig.geminiKeyMasked = safeConfig.geminiKey.slice(0, 4) + '...' + safeConfig.geminiKey.slice(-4);
+    delete safeConfig.geminiKey;
   }
   res.json(safeConfig);
 });

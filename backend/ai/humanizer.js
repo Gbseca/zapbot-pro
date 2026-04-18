@@ -10,12 +10,11 @@ function calcNaturalDelay(receivedText = '', responseText = '') {
   const wordsReceived = receivedText.trim().split(/\s+/).length;
   const wordsResponse = responseText.trim().split(/\s+/).length;
 
-  // Reading time: ~250ms per word, max 4s
-  const readingTime = Math.min(wordsReceived * 250, 4000);
-  // Typing time: ~100ms per word, max 6s
-  const typingTime = Math.min(wordsResponse * 100, 6000);
-  // Human variation: ±30%
-  const variation = 0.70 + Math.random() * 0.60;
+  // Reduced caps: reading 2s max, typing 3s max (was 4s/6s)
+  // Commercial bots need consistency over simulation; 12s silence feels like a crash.
+  const readingTime = Math.min(wordsReceived * 150, 2000);
+  const typingTime  = Math.min(wordsResponse * 80,  3000);
+  const variation   = 0.75 + Math.random() * 0.50;
 
   return Math.round((readingTime + typingTime) * variation);
 }
@@ -83,8 +82,8 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
       // Subsequent messages: just typing time + small pause
       delay = Math.min(chunkWords * 110, 4000);
       delay = Math.round(delay * (0.8 + Math.random() * 0.4));
-      // Minimum 1.5s pause between messages
-      await sleep(1200 + Math.random() * 800);
+      // Minimum 0.6s pause between messages (was 1.2s)
+      await sleep(600 + Math.random() * 600);
     }
 
     // Show "typing..." for the calculated duration

@@ -5,12 +5,14 @@
  */
 
 // ── Groq (primary recommended — no billing ever) ──────────────
-async function callGroq(apiKey, { systemPrompt, history = [], userMessage }) {
-  // FIX [3]: Gemini uses .slice(-1) filter on history to exclude last user turn.
-  // Groq must do the same — exclude the last history entry if it's the user message
-  // we're about to send as userMessage, to avoid double-sending it.
-  const dedupedHistory = history.slice(-20); // up to 20 entries
-  // If the last history item is a 'user' role with the same content as userMessage, remove it
+async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, model = 'llama-3.3-70b-versatile') {
+  // FIX: Upgraded from llama-3.1-8b-instant → llama-3.3-70b-versatile
+  // 70B follows instructions much better, hallucinates less, handles qualifier marker reliably.
+  // Still free: ~500K tokens/day on Groq free tier (well above 8b limits for quality).
+  const selectedModel = model || 'llama-3.3-70b-versatile';
+
+  // Deduplicate last user message (prevent double-send in history)
+  const dedupedHistory = history.slice(-20);
   const lastH = dedupedHistory[dedupedHistory.length - 1];
   const historyToSend = (lastH && lastH.role === 'user' && lastH.content === userMessage)
     ? dedupedHistory.slice(0, -1)
@@ -32,12 +34,10 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'llama-3.1-8b-instant',
+      model: selectedModel,
       messages,
-      // FIX [4]: Reduced from 0.95 → 0.65 for commercial extraction accuracy.
-      // Lower temp = less hallucination, more rule-following, more literal responses.
       temperature: 0.65,
-      max_tokens: 512,   // also reduced — short commercial responses, not essays
+      max_tokens: 512,
       top_p: 0.80,
     }),
   });
@@ -112,10 +112,11 @@ async function testGeminiKey(apiKey) {
 // ── Public exports ────────────────────────────────────────────
 export async function callAI(config, context) {
   const provider = config.aiProvider || 'groq';
+  const model    = config.aiModel || null; // optional model override from UI
   if (provider === 'gemini') {
     return callGemini(config.geminiKey, context);
   }
-  return callGroq(config.groqKey || config.geminiKey, context);
+  return callGroq(config.groqKey || config.geminiKey, context, model);
 }
 
 export async function testAPIKey(provider, apiKey) {

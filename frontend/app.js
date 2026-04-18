@@ -799,9 +799,13 @@ async function loadAIConfig() {
     radios.forEach(r => { r.checked = r.value === provider; });
     switchAIProvider(provider, false);
 
-    // Keys
-    document.getElementById('ai-groq-key').value = aiConfig.groqKey || '';
-    document.getElementById('ai-gemini-key').value = aiConfig.geminiKey || '';
+    // Keys — backend now masks full keys; show placeholder when masked
+    const groqEl   = document.getElementById('ai-groq-key');
+    const geminiEl = document.getElementById('ai-gemini-key');
+    groqEl.value   = '';  // never pre-fill password fields with real or masked keys
+    geminiEl.value = '';
+    groqEl.placeholder   = aiConfig.groqKeyMasked   ? `Configurada (${aiConfig.groqKeyMasked}) — deixe vazio para manter` : 'gsk_...';
+    geminiEl.placeholder = aiConfig.geminiKeyMasked ? `Configurada (${aiConfig.geminiKeyMasked}) — deixe vazio para manter` : 'AIza...';
 
     // Rest of fields
     document.getElementById('ai-agent-name').value = aiConfig.agentName || '';
@@ -885,8 +889,9 @@ function collectAIFormData() {
   return {
     aiEnabled: document.getElementById('ai-enabled').checked,
     aiProvider: provider,
-    groqKey: document.getElementById('ai-groq-key').value.trim(),
-    geminiKey: document.getElementById('ai-gemini-key').value.trim(),
+    // Only include keys if user actually typed something new — empty = keep existing
+    groqKey:   document.getElementById('ai-groq-key').value.trim()   || undefined,
+    geminiKey: document.getElementById('ai-gemini-key').value.trim() || undefined,
     agentName: document.getElementById('ai-agent-name').value.trim(),
     companyName: document.getElementById('ai-company-name').value.trim(),
     companyInfo: document.getElementById('ai-company-info').value.trim(),
@@ -915,7 +920,9 @@ function selectBehaviorCard(group, radioEl) {
 
 async function saveAIConfig() {
   const data = collectAIFormData();
-  const hasKey = data.aiProvider === 'groq' ? !!data.groqKey : !!data.geminiKey;
+  const hasKey = data.aiProvider === 'groq'
+    ? (!!data.groqKey || !!aiConfig.groqKeyMasked)   // key already saved counts
+    : (!!data.geminiKey || !!aiConfig.geminiKeyMasked);
   if (!hasKey) {
     showToast('Informe a API Key antes de salvar.', 'warning');
     return;
