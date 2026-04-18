@@ -53,25 +53,30 @@ const STRONG_REFUSAL_PATTERNS = [
   /chega/,
 ];
 
-// Soft refusal: client may have coverage or isn't interested now — offer one gentle comparison, then respect
+// Soft refusal: client has coverage or isn't looking — one gentle pitch, then respect.
+// FIX [1]: Removed bare /ja\s*tenho/ — too broad, matches "já tenho a placa", "já tenho o doc", etc.
+// Only match explicitly commercial/refusal contexts.
 const SOFT_REFUSAL_PATTERNS = [
-  /ja\s*tenho\s*(seguro|protecao|proteção)/,
-  /já\s*tenho\s*(seguro|protecao|proteção)/,
+  /ja\s*tenho\s*(seguro|protecao|proteção|proteção\s*veicular|cobertura)/,
+  /já\s*tenho\s*(seguro|protecao|proteção|proteção\s*veicular|cobertura)/,
   /ja\s*sou\s*(segurado|associado|cliente)/,
   /já\s*sou\s*(segurado|associado|cliente)/,
-  /ja\s*tenho/,
-  /já\s*tenho/,
   /nao\s*estou\s*procurando/,
   /não\s*estou\s*procurando/,
   /nao\s*to\s*precisando/,
   /não\s*to\s*precisando/,
+  /nao\s*to\s*procurando/,
+  /não\s*to\s*procurando/,
   /meu\s*irmao\s*e\s*(meu\s*)?(corretor|agente)/,
-  /meu\s*irmão\s*é\s*(meu\s*)?(corretor|agente)/,
+  /meu\s*irmao\s*e\s*(meu\s*)?(corretor|agente)/,
 ];
 
-// Ambiguous short interjections — not vehicle data, not commercial intent
+// Ambiguous regional interjections — not vehicle data, not commercial intent.
+// FIX [2]: Removed "sim", "oi", "ola", "opa", "ok", "okay", "certo", "entendi", "entendido", "nao", "n"
+// Those are normal conversational words and should reach the AI.
+// "não"/"nao" is already caught by STRONG_REFUSAL_PATTERNS above.
 const INTERJECTION_PATTERNS = [
-  /^(oxi|ata|uai|eita|nossa|po|puts|ih|ah|oh|ué|ue|hm|hmm|hum|né|ne|kkk+|haha|rsrs|rs|noo+|eee|aaa|oi|ola|opa|ok|okay|certo|entendi|entendido|sim|nao|n)$/,
+  /^(oxi|ata|uai|eita|po|puts|ih|ué|ue|hm|hmm|hum|kkk+|haha|rsrs+|rs|noo+|eee+|aaa+)$/,
 ];
 
 function isStrongRefusal(normalizedText) {
@@ -83,12 +88,28 @@ function isSoftRefusal(normalizedText) {
 }
 
 function isAmbiguousInterjection(normalizedText) {
-  // Short (≤4 words) AND matches interjection list, OR just ≤2 chars that aren't a name/plate
+  // FIX [2]: Only flag true regional interjections/laughter.
+  // Do NOT flag short but meaningful words ("sim", "oi", "ok", "certo", etc.).
   if (normalizedText.split(' ').length > 4) return false;
-  if (INTERJECTION_PATTERNS.some(p => p.test(normalizedText))) return true;
-  // Very short with no recognizable word pattern
-  if (normalizedText.length <= 3 && /^[a-z]+$/.test(normalizedText)) return true;
-  return false;
+  return INTERJECTION_PATTERNS.some(p => p.test(normalizedText));
+}
+
+// FIX [3]: Re-engagement detection — leads that previously refused but now show clear intent
+const REENGAGEMENT_PATTERNS = [
+  /quero\s*(cotar|saber|fazer|ver|entender|conhecer)/,
+  /tenho\s*interesse/,
+  /me\s*passa\s*(mais|info|informac)/,
+  /vamos\s*continuar/,
+  /pode\s*me\s*explicar/,
+  /agora\s*quero/,
+  /mudei\s*de\s*ideia/,
+  /ainda\s*tem\s*(vaga|disponib)/,
+  /quanto\s*(custa|fica|seria)/,
+  /como\s*(funciona|contrato|ader)/,
+];
+
+function isReengagement(normalizedText) {
+  return REENGAGEMENT_PATTERNS.some(p => p.test(normalizedText));
 }
 
 // Varied closing messages — so it doesn't feel robotic
@@ -197,8 +218,24 @@ export async function handleIncomingMessage(wa, rawMsg) {
 
   const existingLead = getLead(jidId);
 
-  // Already blocked / no_interest — total silence
-  if (existingLead?.status === 'blocked' || existingLead?.status === 'no_interest') return;
+  // Blocked = total silence always
+  if (existingLead?.status === 'blocked') return;
+
+  // FIX [3]: no_interest leads can re-engage if they send a clear intent phrase.
+  // Otherwise, keep silence (no follow-up spam, no AI calls).
+  if (existingLead?.status === 'no_interest') {
+    const normForReeng = normalizeText(text);
+    if (!isReengagement(normForReeng)) {
+      console.log(`[Agent] ⏭️ Silencing no_interest lead ${jidId}: "${text.slice(0, 40)}"`);
+      return;
+    }
+    // Re-engagement detected: reactivate and fall through to normal flow
+    console.log(`[Agent] 🔄 Re-engagement detected for ${jidId}: "${text.slice(0, 40)}"`);
+    existingLead.status = 'talking';
+    existingLead.softRefusalSent = false;
+    saveLead(jidId, existingLead);
+  }
+
 
   if (!isBusinessHours(config)) {
     const today = new Date().toDateString();

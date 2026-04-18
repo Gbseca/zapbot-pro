@@ -90,6 +90,7 @@ export function getLeadStats() {
     transferred: leads.filter(l => l.status === 'transferred').length,
     cold: leads.filter(l => l.status === 'cold').length,
     blocked: leads.filter(l => l.status === 'blocked').length,
+    no_interest: leads.filter(l => l.status === 'no_interest').length, // FIX [4]
     conversationRate,
   };
 }

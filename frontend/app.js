@@ -1080,9 +1080,10 @@ async function loadLeads() {
 }
 
 function renderLeadsStats() {
-  const talking = allLeads.filter(l => l.status === 'talking').length;
-  const qualified = allLeads.filter(l => l.status === 'qualified' || l.status === 'transferred').length;
-  const cold = allLeads.filter(l => l.status === 'cold').length;
+  const talking    = allLeads.filter(l => l.status === 'talking').length;
+  const qualified  = allLeads.filter(l => l.status === 'qualified' || l.status === 'transferred').length;
+  const cold       = allLeads.filter(l => l.status === 'cold').length;
+  const noInterest = allLeads.filter(l => l.status === 'no_interest').length; // FIX [4c]
   const today = new Date().toDateString();
   const todayLeads = allLeads.filter(l => new Date(l.createdAt).toDateString() === today);
   const rate = todayLeads.length > 0 ? Math.round((todayLeads.filter(l => l.status === 'qualified' || l.status === 'transferred').length / todayLeads.length) * 100) : 0;
@@ -1090,7 +1091,7 @@ function renderLeadsStats() {
   document.getElementById('ls-total').textContent = allLeads.length;
   document.getElementById('ls-talking').textContent = talking;
   document.getElementById('ls-qualified').textContent = qualified;
-  document.getElementById('ls-cold').textContent = cold;
+  document.getElementById('ls-cold').textContent = cold + (noInterest > 0 ? ` (+${noInterest} sem interesse)` : '');
   document.getElementById('ls-rate').textContent = rate + '%';
 }
 
@@ -1232,7 +1233,15 @@ function formatPhone(number) {
 }
 
 function statusLabel(status) {
-  const m = { new:'Novo', talking:'Em conversa', qualified:'Qualificado', transferred:'Transferido', cold:'Frio', blocked:'Bloqueado' };
+  const m = {
+    new: 'Novo',
+    talking: 'Em conversa',
+    qualified: 'Qualificado',
+    transferred: 'Transferido',
+    cold: 'Frio',
+    blocked: 'Bloqueado',
+    no_interest: 'Sem interesse', // FIX [4b]
+  };
   return m[status] || status;
 }
 
