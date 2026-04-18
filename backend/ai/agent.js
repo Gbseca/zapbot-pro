@@ -6,12 +6,118 @@ import { sendHumanized } from './humanizer.js';
 import { detectAndExtract, tryExtractPhone } from './lead-detector.js';
 import { executeHandoff } from './handoff.js';
 
-// Anti-flood: accumulate messages per JID before processing
+// Anti-flood buffer
 const messageBuffers = new Map();
-const ANTIFLOOD_MS = 10000; // 10s to accumulate rapid messages
+const ANTIFLOOD_MS = 10000;
 
-// Session inactivity timers — clears history after N minutes of silence
+// Session inactivity timers
 const sessionTimers = new Map();
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FIX [1][2]: DETERMINISTIC INTENT PRE-PROCESSOR
+// Runs BEFORE the AI — no LLM calls for these cases.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function normalizeText(text) {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/[^\w\s]/g, ' ')         // strip punctuation
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Strong refusal: should NEVER get a follow-up AI response
+const STRONG_REFUSAL_PATTERNS = [
+  /^n(a|ao|ão)?o?$/,                    // "não", "nao", "n", "nao"
+  /^nao\s*(quero|preciso|obrigad)/,
+  /^não\s*(quero|preciso|obrigad)/,
+  /sem\s*interesse/,
+  /nao\s*tenho\s*interesse/,
+  /não\s*tenho\s*interesse/,
+  /to\s*procurando\s*nao/,
+  /tou\s*procurando\s*nao/,
+  /nao\s*senhora/,
+  /não\s*senhora/,
+  /pode\s*parar/,
+  /nao\s*precisa/,
+  /não\s*precisa/,
+  /deixa\s*quieto/,
+  /me\s*tira\s*da\s*lista/,
+  /para\s*de\s*me\s*mandar/,
+  /bloquei/,
+  /denuncia/,
+  /nao\s*quero\s*mais/,
+  /não\s*quero\s*mais/,
+  /chega/,
+];
+
+// Soft refusal: client may have coverage or isn't interested now — offer one gentle comparison, then respect
+const SOFT_REFUSAL_PATTERNS = [
+  /ja\s*tenho\s*(seguro|protecao|proteção)/,
+  /já\s*tenho\s*(seguro|protecao|proteção)/,
+  /ja\s*sou\s*(segurado|associado|cliente)/,
+  /já\s*sou\s*(segurado|associado|cliente)/,
+  /ja\s*tenho/,
+  /já\s*tenho/,
+  /nao\s*estou\s*procurando/,
+  /não\s*estou\s*procurando/,
+  /nao\s*to\s*precisando/,
+  /não\s*to\s*precisando/,
+  /meu\s*irmao\s*e\s*(meu\s*)?(corretor|agente)/,
+  /meu\s*irmão\s*é\s*(meu\s*)?(corretor|agente)/,
+];
+
+// Ambiguous short interjections — not vehicle data, not commercial intent
+const INTERJECTION_PATTERNS = [
+  /^(oxi|ata|uai|eita|nossa|po|puts|ih|ah|oh|ué|ue|hm|hmm|hum|né|ne|kkk+|haha|rsrs|rs|noo+|eee|aaa|oi|ola|opa|ok|okay|certo|entendi|entendido|sim|nao|n)$/,
+];
+
+function isStrongRefusal(normalizedText) {
+  return STRONG_REFUSAL_PATTERNS.some(p => p.test(normalizedText));
+}
+
+function isSoftRefusal(normalizedText) {
+  return SOFT_REFUSAL_PATTERNS.some(p => p.test(normalizedText));
+}
+
+function isAmbiguousInterjection(normalizedText) {
+  // Short (≤4 words) AND matches interjection list, OR just ≤2 chars that aren't a name/plate
+  if (normalizedText.split(' ').length > 4) return false;
+  if (INTERJECTION_PATTERNS.some(p => p.test(normalizedText))) return true;
+  // Very short with no recognizable word pattern
+  if (normalizedText.length <= 3 && /^[a-z]+$/.test(normalizedText)) return true;
+  return false;
+}
+
+// Varied closing messages — so it doesn't feel robotic
+const REFUSAL_RESPONSES = [
+  'Tudo bem! Fico à disposição caso mude de ideia. Até mais 😊',
+  'Perfeito, sem problema. Não vou insistir. Se um dia quiser comparar, é só chamar.',
+  'Entendido! Qualquer coisa é só mandar mensagem. Até mais 👋',
+  'Ok, sem problemas. Boa sorte e qualquer dúvida pode chamar!',
+];
+
+const SOFT_REFUSAL_RESPONSES = [
+  'Entendo! Cada caso é um caso né 😊 Se um dia quiser comparar valores ou coberturas, é só chamar. Abraço!',
+  'Faz sentido! Se algum dia quiser ver se a Moove faz mais sentido pra você, estaremos aqui. Até mais 👋',
+  'Tranquilo! Qualquer dúvida no futuro pode chamar sem compromisso 😊',
+];
+
+const CLARIFICATION_RESPONSES = [
+  'Rsrs — isso foi só uma reação ou você quis me dizer alguma coisa sobre seu veículo?',
+  'Entendi a reação 😄 Me conta mais, o que você tá procurando?',
+  'Haha — pode falar! O que você precisava?',
+];
+
+function randomFrom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUSINESS HOURS + VALIDATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function isBusinessHours(config) {
   const now = new Date();
@@ -40,51 +146,43 @@ function isValidIncoming(msg) {
   return true;
 }
 
-/**
- * Resets the inactivity timer for a JID.
- * If the client goes silent for sessionTimeoutMinutes, the conversation history is cleared.
- */
-function resetSessionTimer(jidId, config) {
-  if (sessionTimers.has(jidId)) {
-    clearTimeout(sessionTimers.get(jidId));
-  }
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION TIMEOUT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  // Don't set timer if follow-up is enabled (follow-up will handle re-engagement)
+function resetSessionTimer(jidId, config) {
+  if (sessionTimers.has(jidId)) clearTimeout(sessionTimers.get(jidId));
   if (config.followUpEnabled) return;
 
-  const timeoutMs = ((config.sessionTimeoutMinutes || 30) * 60 * 1000);
-
+  const timeoutMs = (config.sessionTimeoutMinutes || 30) * 60 * 1000;
   const timer = setTimeout(() => {
     sessionTimers.delete(jidId);
     const lead = getLead(jidId);
     if (!lead) return;
-
-    // Only clear if still in talking/new state (not transferred or blocked)
     if (lead.status === 'talking' || lead.status === 'new') {
       lead.history = [];
       lead.status  = 'new';
       saveLead(jidId, lead);
-      console.log(`[Agent] 🕐 Session expired for ${jidId} (${config.sessionTimeoutMinutes}min inactivity) — history cleared`);
+      console.log(`[Agent] 🕐 Session expired for ${jidId} — history cleared`);
     }
   }, timeoutMs);
-
   sessionTimers.set(jidId, timer);
 }
 
-/**
- * Main entry point — called by WhatsApp manager on each incoming message.
- */
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MAIN ENTRY POINT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
 
   const config = loadConfig();
-
   if (!config.aiEnabled) return;
 
   const provider = config.aiProvider || 'groq';
   const hasKey = provider === 'gemini' ? !!config.geminiKey : !!config.groqKey;
   if (!hasKey) {
-    console.warn(`[Agent] No API key for provider "${provider}" — configure it in the AI panel.`);
+    console.warn(`[Agent] No API key for "${provider}"`);
     return;
   }
 
@@ -98,14 +196,16 @@ export async function handleIncomingMessage(wa, rawMsg) {
   if (!text) return;
 
   const existingLead = getLead(jidId);
-  if (existingLead?.status === 'blocked') return;
+
+  // Already blocked / no_interest — total silence
+  if (existingLead?.status === 'blocked' || existingLead?.status === 'no_interest') return;
 
   if (!isBusinessHours(config)) {
     const today = new Date().toDateString();
     if (existingLead?.lastOutOfHoursMsg !== today) {
       const [sh] = (config.businessHoursStart || '08:00').split(':');
       const [eh] = (config.businessHoursEnd   || '22:00').split(':');
-      const msg = `Oi! 😊 Nosso horário de atendimento é das ${sh}h às ${eh}h. Estarei aqui para te ajudar quando voltar! Até logo 👋`;
+      const msg = `Oi! 😊 Nosso horário de atendimento é das ${sh}h às ${eh}h. Estarei aqui quando voltar! Até logo 👋`;
       await wa.sendMessage(fullJid, msg, null);
       const lead = existingLead || createNewLead(jidId, displayNum, pushName);
       saveLead(jidId, { ...lead, lastOutOfHoursMsg: today });
@@ -113,8 +213,56 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  // Reset inactivity timer every time client sends a message
   resetSessionTimer(jidId, config);
+
+  // ── DETERMINISTIC INTENT LAYER (runs before AI) ──────────────
+  const norm = normalizeText(text);
+
+  if (isStrongRefusal(norm)) {
+    console.log(`[Agent] 🚫 Strong refusal detected from ${jidId}: "${text}"`);
+    const lead = existingLead || createNewLead(jidId, displayNum, pushName);
+    lead.status = 'no_interest';
+    lead.history = lead.history || [];
+    lead.history.push({ role: 'user', content: text, ts: Date.now() });
+    saveLead(jidId, lead);
+    // Single message, no splitting, no AI
+    await wa.sendMessage(fullJid, randomFrom(REFUSAL_RESPONSES), null);
+    return;
+  }
+
+  // Soft refusal: check if they already got the soft pitch (2nd refusal = close)
+  if (isSoftRefusal(norm)) {
+    const alreadyPitched = existingLead?.softRefusalSent;
+    if (alreadyPitched) {
+      console.log(`[Agent] 🚫 2nd soft refusal — closing ${jidId}`);
+      const lead = existingLead;
+      lead.status = 'no_interest';
+      saveLead(jidId, lead);
+      await wa.sendMessage(fullJid, randomFrom(REFUSAL_RESPONSES), null);
+      return;
+    } else {
+      console.log(`[Agent] 💬 Soft refusal from ${jidId} — sending gentle pitch`);
+      const lead = existingLead || createNewLead(jidId, displayNum, pushName);
+      lead.softRefusalSent = true;
+      lead.history = lead.history || [];
+      lead.history.push({ role: 'user', content: text, ts: Date.now() });
+      saveLead(jidId, lead);
+      await wa.sendMessage(fullJid, randomFrom(SOFT_REFUSAL_RESPONSES), null);
+      return;
+    }
+  }
+
+  // Ambiguous interjection: ask for clarification without AI qualification logic
+  if (isAmbiguousInterjection(norm)) {
+    console.log(`[Agent] ❓ Ambiguous interjection from ${jidId}: "${text}"`);
+    const lead = existingLead || createNewLead(jidId, displayNum, pushName);
+    lead.history = lead.history || [];
+    lead.history.push({ role: 'user', content: text, ts: Date.now() });
+    saveLead(jidId, lead);
+    await wa.sendMessage(fullJid, randomFrom(CLARIFICATION_RESPONSES), null);
+    return;
+  }
+  // ── END DETERMINISTIC LAYER ──────────────────────────────────
 
   accumulate(wa, fullJid, jidId, displayNum, text, pushName, config);
 }
@@ -152,6 +300,7 @@ function createNewLead(jidId, displayNum, pushName) {
     plate: null,
     model: null,
     profileCaptured: false,
+    softRefusalSent: false,
     jid: null,
     createdAt: new Date().toISOString(),
     lastInteraction: new Date().toISOString(),
@@ -171,28 +320,26 @@ async function processConversation(wa, fullJid, jidId, displayNum, texts, pushNa
   if (lead.status === 'cold') lead.status = 'talking';
   if (!lead.name && pushName) lead.name = pushName;
 
+  const alreadyTransferred = lead.status === 'transferred';
+
   lead.history = lead.history || [];
   lead.history.push({ role: 'user', content: combinedText, ts: Date.now() });
   lead.lastInteraction = new Date().toISOString();
   lead.followUp1Sent = false;
   lead.followUp2Sent = false;
 
-  // If already transferred, still respond but skip the handoff
-  const alreadyTransferred = lead.status === 'transferred';
-
-  // Backup phone capture from free text
+  // Backup phone capture — only if text looks like a phone number (not interjection)
   if (!lead.phone) {
     const extractedPhone = tryExtractPhone(combinedText);
     if (extractedPhone) {
       lead.phone = extractedPhone;
       lead.displayNumber = extractedPhone;
-      console.log(`[Agent] Phone extracted from message text: ${extractedPhone}`);
+      console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
     }
   }
 
   saveLead(jidId, lead);
 
-  // Build AI context and call
   const context = await buildContext(config, lead, alreadyTransferred);
   let aiResponse;
   try {

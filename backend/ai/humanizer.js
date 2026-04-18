@@ -24,16 +24,22 @@ function calcNaturalDelay(receivedText = '', responseText = '') {
  * Splits a response into natural-feeling message chunks.
  * Prefers splitting at paragraph breaks, then at sentences.
  */
-function splitIntoChunks(text) {
-  // If short enough, send as one message
+function splitIntoChunks(text, forceSingle = false) {
   const words = text.trim().split(/\s+/).length;
-  if (words <= 20) return [text.trim()];
 
-  // Try splitting by double newlines first (paragraphs)
+  // FIX [8]: Never split if forced single, or if the response is short (≤15 words),
+  // or if it looks like a closure/clarification (single question or short statement).
+  if (forceSingle) return [text.trim()];
+  if (words <= 15) return [text.trim()];
+
+  // If it's a single question or ends with '?' — don't split
+  const trimmed = text.trim();
+  if ((trimmed.match(/\?/g) || []).length === 1 && words <= 30) return [trimmed];
+
+  // Try splitting by double newlines (paragraphs)
   const paragraphs = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
   if (paragraphs.length >= 2 && paragraphs.length <= 3) return paragraphs;
 
-  // If too many paragraphs, group them
   if (paragraphs.length > 3) {
     const half = Math.ceil(paragraphs.length / 2);
     return [
@@ -59,8 +65,8 @@ function splitIntoChunks(text) {
  * @param {string} responseText - AI response text
  * @param {string} receivedText - What the user sent (for delay calc)
  */
-export async function sendHumanized(wa, number, responseText, receivedText = '') {
-  const chunks = splitIntoChunks(responseText);
+export async function sendHumanized(wa, number, responseText, receivedText = '', forceSingle = false) {
+  const chunks = splitIntoChunks(responseText, forceSingle);
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i].trim();

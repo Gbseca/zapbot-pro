@@ -11,7 +11,12 @@ async function runFollowUp(wa) {
   const leads = getAllLeads();
   const now = Date.now();
 
+  // FIX [7]: Only follow up with genuinely engaged leads.
+  // no_interest, blocked, transferred, cold → never re-engage automatically.
+  const SKIP_STATUSES = new Set(['no_interest', 'blocked', 'transferred', 'cold']);
+
   for (const lead of leads) {
+    if (SKIP_STATUSES.has(lead.status)) continue;
     if (lead.status !== 'talking') continue;
 
     const lastInteraction = new Date(lead.lastInteraction || lead.createdAt).getTime();

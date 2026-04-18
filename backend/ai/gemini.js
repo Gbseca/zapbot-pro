@@ -1,14 +1,24 @@
 /**
- * AI Provider module — supports Groq (Llama 3.3 70B) and Google Gemini
+ * AI Provider module — supports Groq (Llama 3.1 8B) and Google Gemini
  * Groq: free, generous limits, excellent PT-BR quality → console.groq.com
  * Gemini: free tier, requires valid project with API enabled → aistudio.google.com
  */
 
 // ── Groq (primary recommended — no billing ever) ──────────────
 async function callGroq(apiKey, { systemPrompt, history = [], userMessage }) {
+  // FIX [3]: Gemini uses .slice(-1) filter on history to exclude last user turn.
+  // Groq must do the same — exclude the last history entry if it's the user message
+  // we're about to send as userMessage, to avoid double-sending it.
+  const dedupedHistory = history.slice(-20); // up to 20 entries
+  // If the last history item is a 'user' role with the same content as userMessage, remove it
+  const lastH = dedupedHistory[dedupedHistory.length - 1];
+  const historyToSend = (lastH && lastH.role === 'user' && lastH.content === userMessage)
+    ? dedupedHistory.slice(0, -1)
+    : dedupedHistory;
+
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...history.slice(-18).map(h => ({
+    ...historyToSend.map(h => ({
       role: h.role === 'assistant' ? 'assistant' : 'user',
       content: h.content,
     })),
@@ -24,9 +34,11 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }) {
     body: JSON.stringify({
       model: 'llama-3.1-8b-instant',
       messages,
-      temperature: 0.95,
-      max_tokens: 1024,
-      top_p: 0.88,
+      // FIX [4]: Reduced from 0.95 → 0.65 for commercial extraction accuracy.
+      // Lower temp = less hallucination, more rule-following, more literal responses.
+      temperature: 0.65,
+      max_tokens: 512,   // also reduced — short commercial responses, not essays
+      top_p: 0.80,
     }),
   });
 
@@ -55,7 +67,7 @@ async function testGroqKey(apiKey) {
       return { ok: false, message: e?.error?.message || `Erro ${res.status}` };
     }
     const d = await res.json();
-    return { ok: true, message: `Groq OK — Llama 3.3 70B ativo! (${d.choices[0].message.content.trim()})` };
+    return { ok: true, message: `Groq OK — Llama 3.1 8B ativo! (${d.choices[0].message.content.trim()})` };
   } catch (err) {
     return { ok: false, message: err.message };
   }
@@ -63,17 +75,17 @@ async function testGroqKey(apiKey) {
 
 // ── Gemini (alternative — requires valid project) ───────────────
 async function callGemini(apiKey, { systemPrompt, history = [], userMessage }) {
-  // Dynamically import to avoid breaking startup if not installed
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
     systemInstruction: systemPrompt,
-    generationConfig: { temperature: 0.85, topP: 0.95, maxOutputTokens: 1024 },
+    generationConfig: { temperature: 0.65, topP: 0.80, maxOutputTokens: 512 },
   });
 
+  // Gemini: history excludes last user message (sent via sendMessage separately)
   const gcHistory = history
-    .slice(-18)
+    .slice(-20)
     .filter((_, i, arr) => i < arr.length - 1)
     .map(h => ({
       role: h.role === 'assistant' ? 'model' : 'user',
