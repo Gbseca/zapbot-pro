@@ -14,6 +14,7 @@ import { loadConfig, saveConfig } from './data/config-manager.js';
 import { getAllLeads, getLead, updateLead, deleteLead, clearAllLeads, exportLeadsCSV, getLeadStats } from './data/leads-manager.js';
 import { extractAndSavePDF, getUploadedDocs, removePDF } from './knowledge/pdf-loader.js';
 import { testAPIKey } from './ai/gemini.js';
+import { createAdResearchService } from './ad-research/service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,9 +30,17 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024 } });
 
+function broadcast(data) {
+  const payload = JSON.stringify(data);
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) client.send(payload);
+  });
+}
+
 // Core instances
 const wa = new WhatsAppManager(wss);
 const queue = new MessageQueue(wa, wss);
+const adResearch = createAdResearchService({ loadConfig, broadcast });
 
 // Connect WhatsApp AI message handler
 wa.onMessage = handleIncomingMessage;
@@ -59,6 +68,10 @@ wss.on('connection', (ws) => {
   // Send AI config state
   const config = loadConfig();
   ws.send(JSON.stringify({ type: 'ai_status', enabled: config.aiEnabled }));
+
+  adResearch.listRecentJobs().forEach((job) => {
+    ws.send(JSON.stringify({ type: 'ad_research_update', job }));
+  });
 
   ws.on('error', console.error);
 });
@@ -104,6 +117,27 @@ app.get('/api/campaign/progress', (req, res) => res.json(queue.getProgress()));
 app.post('/api/campaign/clear', (req, res) => {
   const success = queue.clear();
   success ? res.json({ success: true }) : res.status(400).json({ error: 'Pare a campanha antes de limpar.' });
+});
+
+app.post('/api/ad-research/search', (req, res) => {
+  try {
+    const query = String(req.body?.query || '').trim();
+    const region = String(req.body?.region || '').trim();
+    const sort = String(req.body?.sort || 'popular').trim();
+
+    if (!query) return res.status(400).json({ error: 'Informe o nicho ou objetivo da busca.' });
+
+    const job = adResearch.startSearch({ query, region, sort });
+    res.status(202).json({ jobId: job.jobId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ad-research/:jobId', (req, res) => {
+  const job = adResearch.getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Busca nao encontrada.' });
+  res.json(job);
 });
 
 // â”€â”€ AI Config Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -77,6 +77,13 @@
           <span class="nav-label">Agente IA</span>
           <span class="nav-badge" id="badge-ai-agent"></span>
         </button>
+        <button class="nav-item" data-tab="ad-research" id="nav-ad-research">
+          <span class="nav-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
+          </span>
+          <span class="nav-label">Pesquisa Ads</span>
+          <span class="nav-badge" id="badge-ad-research"></span>
+        </button>
         <button class="nav-item" data-tab="leads" id="nav-leads">
           <span class="nav-icon">
             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z"/></svg>
@@ -927,6 +934,99 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
         <!-- Save -->
         <button class="btn btn-primary btn-lg" onclick="saveAIConfig()" style="width:100%;">💾 Salvar Configurações</button>
 
+      </section>
+
+      <!-- ── Tab: Ad Research ───────────── -->
+      <section id="tab-ad-research" class="tab-pane">
+        <div class="page-header">
+          <h1 class="page-title">Pesquisa de Anuncios</h1>
+          <p class="page-sub">Procure concorrentes por nicho, descubra copy, veja o que esta mais forte e copie os melhores angulos.</p>
+        </div>
+
+        <div class="ad-search-grid">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-icon">🔎</span>
+              <h2 class="card-title">Nova Busca</h2>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Nicho ou objetivo <span class="label-hint">— obrigatorio</span></label>
+              <textarea id="ad-search-query" class="form-textarea" rows="4" placeholder="Ex: protecao veicular&#10;ou&#10;Quero encontrar empresas que anunciam rastreador e assistencia 24h para carros"></textarea>
+              <p class="hint-text">Pode escrever o nicho direto ou descrever o objetivo da sua empresa. A busca expande termos parecidos automaticamente.</p>
+            </div>
+
+            <div class="content-grid two-col">
+              <div class="form-group">
+                <label class="form-label">Regiao <span class="label-hint">— opcional</span></label>
+                <input id="ad-search-region" class="form-input" type="text" placeholder="Ex: Sao Goncalo, Rio de Janeiro">
+                <p class="hint-text">Se deixar vazio, pesquisamos sem filtro regional e usamos localidade so quando houver sinal publico.</p>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Ordenar por</label>
+                <select id="ad-search-sort" class="form-input" onchange="handleAdResearchSortChange()">
+                  <option value="popular">Mais populares</option>
+                  <option value="relevant">Mais relevantes</option>
+                  <option value="recent">Mais recentes</option>
+                </select>
+                <p class="hint-text">Popularidade aqui e estimada pelos sinais publicos que a Meta deixa visiveis.</p>
+              </div>
+            </div>
+
+            <div class="ad-search-actions">
+              <button id="btn-start-ad-search" class="btn btn-primary" onclick="startAdResearch()">Pesquisar anuncios</button>
+              <button class="btn btn-outline" onclick="restoreAdResearchJob(true)">Recuperar ultima busca</button>
+            </div>
+          </div>
+
+          <div class="card ad-search-sidecard">
+            <div class="card-header">
+              <span class="card-icon">📈</span>
+              <h2 class="card-title">Como o ranking funciona</h2>
+            </div>
+
+            <div class="ad-search-score-grid">
+              <div class="ad-score-pill"><strong>30%</strong><span>Aderencia ao nicho</span></div>
+              <div class="ad-score-pill"><strong>20%</strong><span>Recorrencia do anunciante</span></div>
+              <div class="ad-score-pill"><strong>20%</strong><span>Volume de criativos</span></div>
+              <div class="ad-score-pill"><strong>15%</strong><span>Estabilidade no ar</span></div>
+              <div class="ad-score-pill"><strong>10%</strong><span>Aderencia regional</span></div>
+              <div class="ad-score-pill"><strong>5%</strong><span>Forca comercial</span></div>
+            </div>
+
+            <div class="info-box" style="margin-top:16px;">
+              <h3>O que essa aba entrega</h3>
+              <p>Nome do anunciante, resumo da copy, link para abrir o anuncio, texto pronto para copiar e indicios de onde ele parece estar atuando.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card progress-card">
+          <div class="progress-header">
+            <div>
+              <div class="card-title">Status da busca</div>
+              <div class="hint-text" id="ad-search-progress-text">Nenhuma busca iniciada ainda.</div>
+            </div>
+            <span class="campaign-status-badge status-idle" id="ad-search-status-badge">idle</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="ad-search-progress-fill" style="width:0%"></div>
+          </div>
+          <div class="ad-search-meta" id="ad-search-meta">Sem consulta em andamento.</div>
+          <div class="ad-search-chips" id="ad-search-expanded-terms"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">🧠</span>
+            <h2 class="card-title">Resultados encontrados</h2>
+          </div>
+          <div class="ad-search-results-summary" id="ad-search-results-summary">Inicie uma busca para listar os anuncios aqui.</div>
+          <div class="ad-search-results" id="ad-search-results">
+            <div class="queue-empty">Nenhum anuncio carregado ainda.</div>
+          </div>
+        </div>
       </section>
 
       <!-- ── Tab: Leads ──────────────────── -->

@@ -15,7 +15,21 @@ const state = {
   pollMode: false,
   queue: [],
   stats: { total: 0, sent: 0, failed: 0, pending: 0 },
+  adResearch: {
+    jobId: '',
+    status: 'idle',
+    query: '',
+    region: '',
+    sort: 'popular',
+    progress: null,
+    summary: null,
+    warnings: [],
+    results: [],
+    error: '',
+  },
 };
+
+const AD_RESEARCH_STORAGE_KEY = 'zapbot_pro_ad_research_job_id';
 
 // â”€â”€ Emoji Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const EMOJIS = {
@@ -36,6 +50,8 @@ document.addEventListener('DOMContentLoaded', () => {
   renderEmojiGrid();
   initReactions();
   updateEstimate();
+  renderAdResearchState();
+  restoreAdResearchJob();
 
   // Close emoji picker on outside click
   document.addEventListener('click', (e) => {
@@ -93,6 +109,9 @@ function handleWsMessage(data) {
     case 'ai_status':
       updateAIStatusUI(data.enabled);
       updateBadge('ai-agent', data.enabled ? 'â—' : null);
+      break;
+    case 'ad_research_update':
+      handleAdResearchUpdate(data.job);
       break;
   }
 }
@@ -175,6 +194,7 @@ function switchTab(tabId) {
 
   if (tabId === 'schedule') updateEstimate();
   if (tabId === 'ai-agent') loadAIConfig();
+  if (tabId === 'ad-research') loadAdResearchTab();
   if (tabId === 'leads') loadLeads();
 }
 
@@ -784,6 +804,369 @@ function showToast(message, type = 'info') {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // â”€â”€ AI AGENT TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+function loadAdResearchTab() {
+  renderAdResearchState();
+  restoreAdResearchJob();
+}
+
+function getStoredAdResearchJobId() {
+  try {
+    return localStorage.getItem(AD_RESEARCH_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setStoredAdResearchJobId(jobId) {
+  try {
+    if (jobId) localStorage.setItem(AD_RESEARCH_STORAGE_KEY, jobId);
+    else localStorage.removeItem(AD_RESEARCH_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function setAdResearchButtonBusy(isBusy) {
+  const button = document.getElementById('btn-start-ad-search');
+  if (!button) return;
+  button.disabled = !!isBusy;
+  button.textContent = isBusy ? 'Pesquisando...' : 'Pesquisar anuncios';
+}
+
+function syncAdResearchInputs() {
+  const queryInput = document.getElementById('ad-search-query');
+  const regionInput = document.getElementById('ad-search-region');
+  const sortInput = document.getElementById('ad-search-sort');
+
+  if (queryInput && state.adResearch.query && document.activeElement !== queryInput) {
+    queryInput.value = state.adResearch.query;
+  }
+  if (regionInput && document.activeElement !== regionInput) {
+    regionInput.value = state.adResearch.region || '';
+  }
+  if (sortInput) {
+    sortInput.value = state.adResearch.sort || 'popular';
+  }
+}
+
+function formatAdResearchDate(value) {
+  if (!value) return 'Data nao informada';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Data nao informada';
+  return date.toLocaleDateString('pt-BR');
+}
+
+function sortAdResearchResults(results = [], sort = 'popular') {
+  const list = [...results];
+  if (sort === 'recent') {
+    return list.sort((left, right) => {
+      const leftDate = Date.parse(left.deliveryStart || 0);
+      const rightDate = Date.parse(right.deliveryStart || 0);
+      return rightDate - leftDate || (right.relevanceScore || 0) - (left.relevanceScore || 0);
+    });
+  }
+  if (sort === 'relevant') {
+    return list.sort((left, right) => (
+      (right.relevanceScore || 0) - (left.relevanceScore || 0)
+      || (right.popularityScore || 0) - (left.popularityScore || 0)
+      || (right.metaImpressionHint || 0) - (left.metaImpressionHint || 0)
+    ));
+  }
+  return list.sort((left, right) => (
+    (right.popularityScore || 0) - (left.popularityScore || 0)
+    || (right.metaImpressionHint || 0) - (left.metaImpressionHint || 0)
+    || (right.relevanceScore || 0) - (left.relevanceScore || 0)
+  ));
+}
+
+function getAdResearchBadgeClass(status) {
+  if (status === 'running') return 'status-running';
+  if (status === 'completed') return 'status-completed';
+  if (status === 'failed') return 'status-stopped';
+  return 'status-idle';
+}
+
+function renderAdResearchResults() {
+  const container = document.getElementById('ad-search-results');
+  if (!container) return;
+
+  const results = sortAdResearchResults(state.adResearch.results || [], state.adResearch.sort || 'popular');
+  if (!results.length) {
+    container.innerHTML = '<div class="queue-empty">Nenhum anuncio consolidado ainda. Inicie uma busca para preencher esta lista.</div>';
+    return;
+  }
+
+  container.innerHTML = results.map((result, index) => `
+    <article class="ad-result-card">
+      <div class="ad-result-top">
+        <div>
+          <div class="ad-result-rank">#${index + 1} em ${state.adResearch.sort === 'recent' ? 'mais recentes' : state.adResearch.sort === 'relevant' ? 'mais relevantes' : 'mais populares'}</div>
+          <h3 class="ad-result-title">${escapeHtml(result.advertiserName || 'Anunciante')}</h3>
+          <div class="ad-result-meta-line">
+            <span>Meta Ads</span>
+            <span>${formatAdResearchDate(result.deliveryStart)}</span>
+            <span>${escapeHtml(result.regionLabel || 'Nao identificado')} (${escapeHtml(result.regionConfidence || 'baixa')})</span>
+          </div>
+        </div>
+        <div class="ad-score-badge">
+          <strong>${Number(result.popularityScore || 0)}</strong>
+          <span>score</span>
+        </div>
+      </div>
+
+      <div class="ad-result-summary">${escapeHtml(result.copySummary || 'Resumo indisponivel')}</div>
+      <div class="ad-result-copy">${escapeHtml(result.adText || '')}</div>
+
+      <div class="ad-result-reasons">
+        ${(result.popularityReasons || []).map((reason) => `<span class="ad-chip">${escapeHtml(reason)}</span>`).join('')}
+      </div>
+
+      <div class="ad-result-details">
+        <div><strong>Por que apareceu:</strong> ${escapeHtml(result.matchReason || 'Afinidade com o nicho pesquisado.')}</div>
+        <div><strong>Leitura do ranking:</strong> ${escapeHtml(result.popularityExplanation || 'Score montado pelos sinais publicos da Meta.')}</div>
+        <div><strong>Regiao:</strong> ${escapeHtml(result.regionSource || 'Sem pistas suficientes.')}</div>
+        ${result.landingDomain ? `<div><strong>Dominio:</strong> ${escapeHtml(result.landingDomain)}</div>` : ''}
+      </div>
+
+      <div class="ad-result-actions">
+        <button class="btn btn-purple btn-sm" onclick="copyAdResearchCopy('${String(result.id || '').replace(/'/g, '')}')">Copiar copy</button>
+        <a class="btn btn-outline btn-sm" href="${result.adUrl || '#'}" target="_blank" rel="noopener noreferrer">Abrir anuncio</a>
+      </div>
+    </article>
+  `).join('');
+}
+
+function renderAdResearchState() {
+  syncAdResearchInputs();
+
+  const statusBadge = document.getElementById('ad-search-status-badge');
+  const progressText = document.getElementById('ad-search-progress-text');
+  const progressFill = document.getElementById('ad-search-progress-fill');
+  const meta = document.getElementById('ad-search-meta');
+  const summary = document.getElementById('ad-search-results-summary');
+  const terms = document.getElementById('ad-search-expanded-terms');
+
+  if (statusBadge) {
+    statusBadge.className = `campaign-status-badge ${getAdResearchBadgeClass(state.adResearch.status)}`;
+    statusBadge.textContent = state.adResearch.status || 'idle';
+  }
+
+  if (progressText) {
+    progressText.textContent = state.adResearch.progress?.message || 'Nenhuma busca iniciada ainda.';
+  }
+
+  if (progressFill) {
+    progressFill.style.width = `${Math.max(0, Math.min(100, state.adResearch.progress?.percent || 0))}%`;
+  }
+
+  if (meta) {
+    const pieces = [
+      state.adResearch.progress?.step || 'Sem consulta em andamento.',
+      Number.isFinite(state.adResearch.progress?.queriesCompleted) && Number.isFinite(state.adResearch.progress?.queriesTotal)
+        ? `${state.adResearch.progress.queriesCompleted}/${state.adResearch.progress.queriesTotal} consultas`
+        : '',
+      Number.isFinite(state.adResearch.progress?.resultsFound)
+        ? `${state.adResearch.progress.resultsFound} anuncios consolidados`
+        : '',
+      state.adResearch.warnings?.length ? `${state.adResearch.warnings.length} aviso(s)` : '',
+    ].filter(Boolean);
+    meta.textContent = pieces.join(' • ') || 'Sem consulta em andamento.';
+  }
+
+  if (summary) {
+    const searchTermsCount = state.adResearch.summary?.searchTerms?.length || 0;
+    if (state.adResearch.results?.length) {
+      summary.textContent = `${state.adResearch.results.length} anuncios consolidados em ${searchTermsCount || 0} consultas.`;
+    } else if (state.adResearch.status === 'running') {
+      summary.textContent = 'Buscando anuncios e montando ranking...';
+    } else if (state.adResearch.error) {
+      summary.textContent = state.adResearch.error;
+    } else {
+      summary.textContent = 'Inicie uma busca para listar os anuncios aqui.';
+    }
+  }
+
+  if (terms) {
+    const searchTerms = state.adResearch.summary?.searchTerms || [];
+    terms.innerHTML = searchTerms.length
+      ? searchTerms.map((term) => `<span class="ad-chip">${escapeHtml(term)}</span>`).join('')
+      : '<span class="ad-chip muted">Sem expansao carregada ainda</span>';
+  }
+
+  renderAdResearchResults();
+  updateBadge('ad-research', state.adResearch.status === 'running' ? '...' : (state.adResearch.results?.length || null));
+  setAdResearchButtonBusy(state.adResearch.status === 'running');
+}
+
+function applyAdResearchJob(job) {
+  if (!job) return;
+
+  state.adResearch = {
+    ...state.adResearch,
+    jobId: job.jobId || state.adResearch.jobId,
+    status: job.status || state.adResearch.status,
+    query: job.query || state.adResearch.query,
+    region: job.region || '',
+    sort: job.sort || state.adResearch.sort || 'popular',
+    progress: job.progress || null,
+    summary: job.summary || null,
+    warnings: job.warnings || [],
+    results: Array.isArray(job.results) ? job.results : [],
+    error: job.error || '',
+  };
+
+  if (state.adResearch.jobId) setStoredAdResearchJobId(state.adResearch.jobId);
+  renderAdResearchState();
+}
+
+function handleAdResearchUpdate(job) {
+  const storedJobId = getStoredAdResearchJobId();
+  if (!job?.jobId) return;
+
+  if (!state.adResearch.jobId && !storedJobId) {
+    applyAdResearchJob(job);
+    return;
+  }
+
+  if (job.jobId === state.adResearch.jobId || job.jobId === storedJobId) {
+    applyAdResearchJob(job);
+  }
+}
+
+async function loadAdResearchJob(jobId, showErrors = false) {
+  if (!jobId) return null;
+
+  try {
+    const response = await fetch(`/api/ad-research/${encodeURIComponent(jobId)}`);
+    const payload = await response.json();
+    if (!response.ok) {
+      if (response.status === 404) {
+        setStoredAdResearchJobId('');
+        state.adResearch = {
+          ...state.adResearch,
+          jobId: '',
+          status: 'idle',
+          progress: null,
+          summary: null,
+          warnings: [],
+          results: [],
+          error: '',
+        };
+        renderAdResearchState();
+        if (showErrors) showToast('A ultima busca salva nao esta mais disponivel.', 'warning');
+        return null;
+      }
+      throw new Error(payload.error || 'Nao foi possivel carregar a busca.');
+    }
+
+    applyAdResearchJob(payload);
+    return payload;
+  } catch (error) {
+    if (showErrors) showToast(`Erro ao carregar busca: ${error.message}`, 'error');
+    return null;
+  }
+}
+
+async function restoreAdResearchJob(forceToast = false) {
+  const storedJobId = getStoredAdResearchJobId();
+  if (!storedJobId) {
+    if (forceToast) showToast('Nenhuma busca salva para recuperar.', 'info');
+    renderAdResearchState();
+    return null;
+  }
+
+  return loadAdResearchJob(storedJobId, forceToast);
+}
+
+async function startAdResearch() {
+  const queryInput = document.getElementById('ad-search-query');
+  const regionInput = document.getElementById('ad-search-region');
+  const sortInput = document.getElementById('ad-search-sort');
+
+  const query = queryInput?.value.trim() || '';
+  const region = regionInput?.value.trim() || '';
+  const sort = sortInput?.value || 'popular';
+
+  if (!query) {
+    showToast('Informe o nicho ou objetivo da busca.', 'warning');
+    queryInput?.focus();
+    return;
+  }
+
+  state.adResearch = {
+    ...state.adResearch,
+    jobId: '',
+    status: 'running',
+    query,
+    region,
+    sort,
+    progress: {
+      percent: 1,
+      step: 'Preparando',
+      message: 'Criando a busca inteligente...',
+      queriesTotal: 0,
+      queriesCompleted: 0,
+      resultsFound: 0,
+    },
+    summary: null,
+    results: [],
+    warnings: [],
+    error: '',
+  };
+  renderAdResearchState();
+
+  try {
+    const response = await fetch('/api/ad-research/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, region, sort }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Nao foi possivel iniciar a busca.');
+
+    state.adResearch.jobId = payload.jobId;
+    setStoredAdResearchJobId(payload.jobId);
+    await loadAdResearchJob(payload.jobId, true);
+    showToast('Busca iniciada. Estou montando o ranking dos anuncios.', 'success');
+  } catch (error) {
+    state.adResearch.status = 'failed';
+    state.adResearch.error = error.message;
+    renderAdResearchState();
+    showToast(`Erro ao iniciar busca: ${error.message}`, 'error');
+  }
+}
+
+function handleAdResearchSortChange() {
+  const sortInput = document.getElementById('ad-search-sort');
+  if (!sortInput) return;
+  state.adResearch.sort = sortInput.value || 'popular';
+  renderAdResearchState();
+}
+
+async function copyAdResearchCopy(resultId) {
+  const result = (state.adResearch.results || []).find((item) => String(item.id) === String(resultId));
+  if (!result?.copyToClipboardText) {
+    showToast('Nao encontrei uma copy valida para copiar.', 'warning');
+    return;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(result.copyToClipboardText);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = result.copyToClipboardText;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    showToast('Copy copiada para a area de transferencia.', 'success');
+  } catch (error) {
+    showToast(`Nao foi possivel copiar a copy: ${error.message}`, 'error');
+  }
+}
 
 let aiConfig = {};
 let consultorCount = 0;

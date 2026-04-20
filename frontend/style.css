@@ -1027,3 +1027,196 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+
+/* Ad Research */
+.ad-search-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+  gap: 16px;
+}
+.ad-search-sidecard {
+  background:
+    radial-gradient(circle at top right, rgba(168,85,247,.16), transparent 45%),
+    linear-gradient(180deg, rgba(20,20,20,1) 0%, rgba(14,14,14,1) 100%);
+}
+.ad-search-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ad-search-score-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ad-score-pill {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ad-score-pill strong {
+  color: var(--purple);
+  font-size: 18px;
+  line-height: 1;
+}
+.ad-score-pill span {
+  color: var(--text-2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.ad-search-meta {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ad-search-chips,
+.ad-result-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ad-search-chips {
+  margin-top: 12px;
+}
+.ad-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ad-chip.muted {
+  color: var(--text-3);
+}
+.ad-search-results-summary {
+  color: var(--text-2);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.ad-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ad-result-card {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(28,28,28,.9) 0%, rgba(12,12,12,.95) 100%);
+  box-shadow: var(--shadow-sm);
+}
+.ad-result-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ad-result-rank {
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin-bottom: 4px;
+}
+.ad-result-title {
+  font-size: 18px;
+  line-height: 1.2;
+  margin-bottom: 8px;
+}
+.ad-result-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.ad-score-badge {
+  min-width: 84px;
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(168,85,247,.22), rgba(59,130,246,.18));
+  border: 1px solid rgba(168,85,247,.28);
+  text-align: center;
+}
+.ad-score-badge strong {
+  display: block;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--text-1);
+}
+.ad-score-badge span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--text-2);
+}
+.ad-result-summary {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(59,130,246,.09);
+  border: 1px solid rgba(59,130,246,.18);
+  color: #dce8ff;
+  font-weight: 600;
+}
+.ad-result-copy {
+  margin-top: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.ad-result-details {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.ad-result-details strong {
+  color: var(--text-1);
+}
+.ad-result-actions {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 1180px) {
+  .ad-search-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .ad-score-pill {
+    padding: 10px;
+  }
+  .ad-search-score-grid {
+    grid-template-columns: 1fr;
+  }
+  .ad-result-top {
+    flex-direction: column;
+  }
+  .ad-score-badge {
+    width: 100%;
+  }
+  .ad-result-actions,
+  .ad-search-actions {
+    flex-direction: column;
+  }
+}
