@@ -1,9 +1,17 @@
 import { randomUUID } from 'crypto';
 import { callAI } from '../ai/gemini.js';
-import { collectMetaAds } from './meta-collector.js';
+import { collectMetaAds, preflightMetaCollector } from './meta-collector.js';
 import { expandSearchQuery } from './query-expander.js';
 import { rankAds, sortRankedAds } from './ranker.js';
 import { SORT_MODES } from './utils.js';
+
+function createDiagnostics() {
+  return {
+    collectorReady: null,
+    fatalReason: '',
+    perTermErrors: [],
+  };
+}
 
 function sanitizeJob(job) {
   if (!job) return null;
@@ -21,7 +29,31 @@ function sanitizeJob(job) {
     results: job.results,
     warnings: job.warnings,
     error: job.error,
+    diagnostics: job.diagnostics,
   };
+}
+
+function makeTermWarning(searchTerm, message) {
+  return `Falha ao consultar "${searchTerm}": ${message}`;
+}
+
+function summarizeCompletion(job, finalResults) {
+  if (job.status === 'partial') {
+    if (finalResults.length) {
+      return `${finalResults.length} anuncios consolidados, mas algumas consultas falharam.`;
+    }
+    return 'Busca concluida com falhas parciais e sem anuncios consolidados.';
+  }
+
+  if (job.status === 'failed') {
+    return job.error || job.diagnostics?.fatalReason || 'A busca falhou antes de gerar resultados utilizaveis.';
+  }
+
+  if (finalResults.length === 0) {
+    return `Nenhum anuncio publico foi consolidado para ${job.query}.`;
+  }
+
+  return `${finalResults.length} anuncios consolidados para ${job.query}.`;
 }
 
 async function enrichSummariesWithAI(results, config) {
@@ -86,6 +118,26 @@ export function createAdResearchService({ loadConfig, broadcast }) {
     emit(job);
   }
 
+  async function failJob(job, message, diagnostics = {}) {
+    job.diagnostics = {
+      ...createDiagnostics(),
+      ...job.diagnostics,
+      ...diagnostics,
+      fatalReason: diagnostics.fatalReason || message,
+    };
+
+    updateJob(job, {
+      status: 'failed',
+      error: message,
+      progress: {
+        ...job.progress,
+        percent: Math.max(job.progress?.percent || 0, 12),
+        step: 'Erro na busca',
+        message,
+      },
+    });
+  }
+
   async function runJob(job) {
     try {
       updateJob(job, {
@@ -117,12 +169,46 @@ export function createAdResearchService({ loadConfig, broadcast }) {
 
       updateJob(job, {
         progress: {
-          percent: 15,
+          percent: 14,
           step: 'Planejamento pronto',
           message: `Buscando em ${expansion.searchTerms.length} consultas inteligentes.`,
           queriesTotal: expansion.searchTerms.length,
           queriesCompleted: 0,
           resultsFound: 0,
+        },
+      });
+
+      updateJob(job, {
+        progress: {
+          ...job.progress,
+          percent: 18,
+          step: 'Validando coletor',
+          message: 'Testando o Chromium antes de abrir a Meta Ad Library.',
+        },
+      });
+
+      const preflight = await preflightMetaCollector();
+      job.diagnostics.collectorReady = preflight.collectorReady;
+
+      if (!preflight.collectorReady) {
+        console.error('[AdResearch] Collector preflight failed:', preflight.originalMessage || preflight.message);
+        await failJob(job, preflight.message, {
+          collectorReady: false,
+          fatalReason: preflight.message,
+        });
+        return;
+      }
+
+      updateJob(job, {
+        diagnostics: {
+          ...job.diagnostics,
+          collectorReady: true,
+        },
+        progress: {
+          ...job.progress,
+          percent: 22,
+          step: 'Varrendo a Meta Ad Library',
+          message: 'Coletor pronto. Iniciando as consultas na Meta.',
         },
       });
 
@@ -132,7 +218,7 @@ export function createAdResearchService({ loadConfig, broadcast }) {
         updateJob(job, {
           progress: {
             ...job.progress,
-            percent: Math.min(82, 20 + Math.round((index / expansion.searchTerms.length) * 55)),
+            percent: Math.min(82, 22 + Math.round((index / expansion.searchTerms.length) * 54)),
             step: 'Varrendo a Meta Ad Library',
             message: `Consultando "${searchTerm}"...`,
             queriesTotal: expansion.searchTerms.length,
@@ -178,8 +264,17 @@ export function createAdResearchService({ loadConfig, broadcast }) {
             },
           });
         } catch (error) {
-          job.warnings.push(`Falha ao consultar "${searchTerm}": ${error.message}`);
+          const message = error?.message || 'Falha desconhecida no coletor.';
+          console.error(`[AdResearch] Term failed for "${searchTerm}":`, error?.cause?.message || message);
+          job.warnings.push(makeTermWarning(searchTerm, message));
+          job.diagnostics.perTermErrors.push({
+            searchTerm,
+            code: error?.code || 'collector_error',
+            message,
+          });
+
           updateJob(job, {
+            diagnostics: { ...job.diagnostics },
             progress: {
               ...job.progress,
               queriesCompleted: index + 1,
@@ -214,26 +309,43 @@ export function createAdResearchService({ loadConfig, broadcast }) {
       job.summary.dedupedAds = finalResults.length;
       job.results = finalResults;
 
+      const perTermFailures = job.diagnostics.perTermErrors.length;
+      const totalTerms = expansion.searchTerms.length;
+      let finalStatus = 'completed';
+      let finalError = '';
+
+      if (perTermFailures > 0 && finalResults.length > 0) {
+        finalStatus = 'partial';
+      } else if (perTermFailures === totalTerms && finalResults.length === 0) {
+        finalStatus = 'failed';
+        finalError = 'Todas as consultas falharam antes de gerar resultados utilizaveis.';
+      } else if (perTermFailures > 0) {
+        finalStatus = 'partial';
+      }
+
+      if (finalStatus === 'failed' && !job.diagnostics.fatalReason) {
+        job.diagnostics.fatalReason = finalError;
+      }
+
+      job.status = finalStatus;
+      job.error = finalError;
+
       updateJob(job, {
-        status: 'completed',
+        status: finalStatus,
+        error: finalError,
+        diagnostics: { ...job.diagnostics },
         progress: {
           ...job.progress,
           percent: 100,
-          step: 'Busca finalizada',
-          message: `${finalResults.length} anuncios consolidados para ${job.query}.`,
+          step: finalStatus === 'failed' ? 'Busca falhou' : finalStatus === 'partial' ? 'Busca finalizada com avisos' : 'Busca finalizada',
+          message: summarizeCompletion(job, finalResults),
           resultsFound: finalResults.length,
         },
       });
     } catch (error) {
-      updateJob(job, {
-        status: 'failed',
-        error: error.message,
-        progress: {
-          ...job.progress,
-          percent: job.progress?.percent || 0,
-          step: 'Erro na busca',
-          message: error.message,
-        },
+      console.error('[AdResearch] Fatal job error:', error?.stack || error?.message || error);
+      await failJob(job, error?.message || 'Erro inesperado ao montar a busca.', {
+        collectorReady: job.diagnostics?.collectorReady,
       });
     } finally {
       trimJobs();
@@ -273,13 +385,16 @@ export function createAdResearchService({ loadConfig, broadcast }) {
         results: [],
         warnings: [],
         error: '',
+        diagnostics: createDiagnostics(),
       };
 
       jobs.set(job.jobId, job);
       emit(job);
       setTimeout(() => {
         runJob(job).catch((error) => {
-          updateJob(job, { status: 'failed', error: error.message });
+          void failJob(job, error.message || 'Erro inesperado ao iniciar a busca.', {
+            collectorReady: job.diagnostics?.collectorReady,
+          });
         });
       }, 0);
 

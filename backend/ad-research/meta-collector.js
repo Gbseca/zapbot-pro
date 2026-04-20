@@ -28,6 +28,103 @@ const UI_NOISE_LINES = new Set([
   'meta',
 ]);
 
+const CHROMIUM_LAUNCH_ARGS = [
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--disable-setuid-sandbox',
+  '--disable-web-security',
+  '--no-sandbox',
+];
+
+function createCollectorError(code, message, cause = null) {
+  const error = new Error(message);
+  error.code = code;
+  error.cause = cause || null;
+  return error;
+}
+
+export function classifyCollectorError(error) {
+  const originalMessage = String(error?.message || error || 'Falha desconhecida no coletor.');
+  const normalized = originalMessage.toLowerCase();
+
+  if (typeof error?.code === 'string' && error.code) {
+    return {
+      code: error.code,
+      fatal: ['browser_missing', 'system_libs_missing'].includes(error.code),
+      originalMessage: String(error?.cause?.message || originalMessage),
+      message: originalMessage,
+    };
+  }
+
+  if (normalized.includes('executable doesn') || normalized.includes('browser executable')) {
+    return {
+      code: 'browser_missing',
+      fatal: true,
+      originalMessage,
+      message: 'O Chromium do Playwright nao esta instalado neste ambiente.',
+    };
+  }
+
+  if (
+    normalized.includes('error while loading shared libraries')
+    || normalized.includes('libatk')
+    || normalized.includes('libnss3')
+    || normalized.includes('glib')
+  ) {
+    return {
+      code: 'system_libs_missing',
+      fatal: true,
+      originalMessage,
+      message: 'O ambiente nao tem as bibliotecas do Linux exigidas pelo Chromium.',
+    };
+  }
+
+  if (normalized.includes('timed out') || normalized.includes('timeout')) {
+    return {
+      code: 'timeout',
+      fatal: false,
+      originalMessage,
+      message: 'A Meta Ad Library demorou demais para responder nesta tentativa.',
+    };
+  }
+
+  if (normalized.includes('net::') || normalized.includes('navigation')) {
+    return {
+      code: 'navigation_failed',
+      fatal: false,
+      originalMessage,
+      message: 'Nao foi possivel navegar ate a Meta Ad Library nesta tentativa.',
+    };
+  }
+
+  return {
+    code: 'collector_error',
+    fatal: false,
+    originalMessage,
+    message: originalMessage,
+  };
+}
+
+async function launchMetaBrowser() {
+  try {
+    return await chromium.launch({
+      headless: true,
+      args: CHROMIUM_LAUNCH_ARGS,
+    });
+  } catch (error) {
+    const classified = classifyCollectorError(error);
+    throw createCollectorError(classified.code, classified.message, error);
+  }
+}
+
+async function createMetaContext(browser) {
+  return browser.newContext({
+    locale: 'pt-BR',
+    viewport: { width: 1440, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  });
+}
+
 function isUiNoiseLine(value = '') {
   const normalized = normalizeText(value);
   if (!normalized) return true;
@@ -229,6 +326,43 @@ async function dismissCookiePrompt(page) {
   }
 }
 
+export async function preflightMetaCollector() {
+  let browser;
+  let context;
+
+  try {
+    browser = await launchMetaBrowser();
+    context = await createMetaContext(browser);
+    const page = await context.newPage();
+
+    await page.goto('https://www.facebook.com/ads/library/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+    await page.waitForTimeout(1800);
+    await dismissCookiePrompt(page);
+
+    return {
+      collectorReady: true,
+      code: 'ok',
+      fatal: false,
+      message: 'Chromium pronto para consultar a Meta Ad Library.',
+    };
+  } catch (error) {
+    const classified = classifyCollectorError(error);
+    return {
+      collectorReady: false,
+      code: classified.code,
+      fatal: classified.fatal,
+      message: classified.message,
+      originalMessage: classified.originalMessage,
+    };
+  } finally {
+    await context?.close().catch(() => {});
+    await browser?.close().catch(() => {});
+  }
+}
+
 async function extractVisibleCandidates(page) {
   return page.evaluate(({ libraryIdPattern, creativeCountPattern }) => {
     const libraryRegex = new RegExp(libraryIdPattern, 'i');
@@ -270,7 +404,7 @@ async function extractVisibleCandidates(page) {
 
       const previousSignal = previous.text.length - (creativeRegex.test(previous.text) ? 40 : 0);
       const currentSignal = candidate.text.length - (creativeRegex.test(candidate.text) ? 40 : 0);
-      if (currentSignal < previousSignal) {
+      if (currentSignal > previousSignal) {
         byId.set(libraryId, candidate);
       }
     }
@@ -283,14 +417,12 @@ async function extractVisibleCandidates(page) {
 }
 
 export async function collectMetaAds({ searchTerm, country = 'BR', limit = 14, onProgress }) {
-  const browser = await chromium.launch({ headless: true });
+  let browser;
+  let context;
 
   try {
-    const context = await browser.newContext({
-      locale: 'pt-BR',
-      viewport: { width: 1440, height: 1080 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    });
+    browser = await launchMetaBrowser();
+    context = await createMetaContext(browser);
     const page = await context.newPage();
     const searchUrl = buildMetaSearchUrl({ query: searchTerm, country });
 
@@ -306,7 +438,7 @@ export async function collectMetaAds({ searchTerm, country = 'BR', limit = 14, o
 
       for (const candidate of candidates) {
         const previous = candidatesById.get(candidate.id);
-        if (!previous || String(candidate.text || '').length < String(previous.text || '').length) {
+        if (!previous || String(candidate.text || '').length > String(previous.text || '').length) {
           candidatesById.set(candidate.id, candidate);
         }
       }
@@ -340,8 +472,6 @@ export async function collectMetaAds({ searchTerm, country = 'BR', limit = 14, o
       .filter((ad) => ad && ad.adText)
       .slice(0, limit);
 
-    await context.close();
-
     return {
       platform: 'Meta Ads',
       searchTerm,
@@ -349,7 +479,11 @@ export async function collectMetaAds({ searchTerm, country = 'BR', limit = 14, o
       ads,
       rawCount: candidatesById.size,
     };
+  } catch (error) {
+    const classified = classifyCollectorError(error);
+    throw createCollectorError(classified.code, classified.message, error);
   } finally {
-    await browser.close();
+    await context?.close().catch(() => {});
+    await browser?.close().catch(() => {});
   }
 }

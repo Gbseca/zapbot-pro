@@ -5,6 +5,7 @@ import { callAI } from './gemini.js';
 import { sendHumanized } from './humanizer.js';
 import { detectAndExtract, normalizePhone, tryExtractPhone } from './lead-detector.js';
 import { executeHandoff } from './handoff.js';
+import { getCollectionsContextForPhone } from '../campaign-state.js';
 
 const messageBuffers = new Map();
 const ANTIFLOOD_MS = 3500;
@@ -161,6 +162,23 @@ function resolveLeadIdentity(jidId, conversationPhone) {
   return { leadId: preferredId, lead: null };
 }
 
+function resolveConversationModeContext(config, lead, conversationPhone, jidId) {
+  const candidates = [
+    conversationPhone,
+    lead?.phone,
+    lead?.displayNumber,
+    lead?.number,
+    jidId,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const context = getCollectionsContextForPhone(candidate, config);
+    if (context) return context;
+  }
+
+  return null;
+}
+
 function sanitizeReply(text) {
   const reply = String(text || '').trim();
   if (!reply) {
@@ -239,6 +257,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
   if (!text) return;
 
   const existingLead = leadFromStore;
+  const collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
 
   if (existingLead?.status === 'blocked') return;
 
@@ -247,7 +266,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  if (existingLead?.status === 'no_interest') {
+  if (existingLead?.status === 'no_interest' && !collectionsContext) {
     const normForReeng = normalizeText(text);
     if (!isReengagement(normForReeng)) {
       console.log(`[Agent] ⏭️ Silencing no_interest lead ${leadId}: "${text.slice(0, 40)}"`);
@@ -292,7 +311,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  if (isSoftRefusal(norm)) {
+  if (!collectionsContext && isSoftRefusal(norm)) {
     const alreadyPitched = existingLead?.softRefusalSent;
     if (alreadyPitched) {
       console.log(`[Agent] 🚫 2nd soft refusal — closing ${leadId}`);
@@ -313,7 +332,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  if (isAmbiguousInterjection(norm)) {
+  if (!collectionsContext && isAmbiguousInterjection(norm)) {
     console.log(`[Agent] ❓ Ambiguous interjection from ${leadId}: "${text}"`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.history = lead.history || [];
@@ -365,11 +384,8 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     lead.displayNumber = lead.displayNumber || displayNum;
   }
 
-  if (lead.status === 'new' || lead.status === 'cold') lead.status = 'talking';
   if (!lead.name && pushName) lead.name = pushName;
   if (lead.campaignSentAt && !lead.campaignLoopHandled) lead.campaignLoopHandled = true;
-
-  const alreadyTransferred = lead.status === 'transferred';
 
   lead.history = lead.history || [];
   lead.history.push({ role: 'user', content: combinedText, ts: Date.now() });
@@ -384,46 +400,101 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
   }
 
+  const conversationModeContext = resolveConversationModeContext(
+    config,
+    lead,
+    lead.phone || conversationPhone,
+    jidId,
+  );
+
+  if (conversationModeContext) {
+    if (lead.status === 'new' || lead.status === 'cold' || lead.status === 'no_interest') {
+      lead.status = 'talking';
+    }
+    console.log(`[Agent] Collections mode active for ${leadId} via campaign ${conversationModeContext.campaignId}`);
+  } else if (lead.status === 'new' || lead.status === 'cold') {
+    lead.status = 'talking';
+  }
+
+  const alreadyTransferred = lead.status === 'transferred';
+
   saveLead(leadId, lead);
 
-  const replyContext = await buildContext(config, lead, alreadyTransferred);
-  const qualificationContext = await buildQualificationContext(config, lead, combinedText);
+  const replyContext = await buildContext(
+    config,
+    lead,
+    alreadyTransferred,
+    conversationModeContext || { conversationMode: 'sales' },
+  );
 
-  const [replyResult, qualificationResult] = await Promise.allSettled([
-    callAI(config, replyContext, { purpose: 'reply' }),
-    callAI(config, qualificationContext, { purpose: 'qualification' }),
-  ]);
+  let cleanResponse = '';
 
-  if (replyResult.status !== 'fulfilled') {
-    console.error('[Agent] AI reply error:', replyResult.reason?.message || replyResult.reason);
-    return;
-  }
-
-  const cleanResponse = sanitizeReply(replyResult.value);
-
-  let extraction = {
-    qualified: false,
-    plate: lead.plate || null,
-    model: lead.model || null,
-    name: lead.name || null,
-    phone: lead.phone || null,
-    profileCaptured: !!lead.profileCaptured,
-  };
-
-  if (qualificationResult.status === 'fulfilled') {
-    extraction = detectAndExtract(qualificationResult.value, lead);
+  if (conversationModeContext) {
+    try {
+      cleanResponse = sanitizeReply(await callAI(config, replyContext, { purpose: 'reply' }));
+    } catch (error) {
+      console.error('[Agent] Collections reply error:', error.message || error);
+      return;
+    }
   } else {
-    console.warn('[Agent] Qualification extraction failed:', qualificationResult.reason?.message || qualificationResult.reason);
-  }
+    const qualificationContext = await buildQualificationContext(config, lead, combinedText);
 
-  if (extraction.plate) lead.plate = extraction.plate;
-  if (extraction.model) lead.model = extraction.model;
-  if (extraction.name && extraction.name.length > 1) lead.name = extraction.name;
-  if (extraction.profileCaptured) lead.profileCaptured = true;
-  if (extraction.phone) {
-    lead.phone = extraction.phone;
-    lead.displayNumber = extraction.phone;
-    console.log(`[Agent] Phone from extraction: ${extraction.phone}`);
+    const [replyResult, qualificationResult] = await Promise.allSettled([
+      callAI(config, replyContext, { purpose: 'reply' }),
+      callAI(config, qualificationContext, { purpose: 'qualification' }),
+    ]);
+
+    if (replyResult.status !== 'fulfilled') {
+      console.error('[Agent] AI reply error:', replyResult.reason?.message || replyResult.reason);
+      return;
+    }
+
+    cleanResponse = sanitizeReply(replyResult.value);
+
+    let extraction = {
+      qualified: false,
+      plate: lead.plate || null,
+      model: lead.model || null,
+      name: lead.name || null,
+      phone: lead.phone || null,
+      profileCaptured: !!lead.profileCaptured,
+    };
+
+    if (qualificationResult.status === 'fulfilled') {
+      extraction = detectAndExtract(qualificationResult.value, lead);
+    } else {
+      console.warn('[Agent] Qualification extraction failed:', qualificationResult.reason?.message || qualificationResult.reason);
+    }
+
+    if (extraction.plate) lead.plate = extraction.plate;
+    if (extraction.model) lead.model = extraction.model;
+    if (extraction.name && extraction.name.length > 1) lead.name = extraction.name;
+    if (extraction.profileCaptured) lead.profileCaptured = true;
+    if (extraction.phone) {
+      lead.phone = extraction.phone;
+      lead.displayNumber = extraction.phone;
+      console.log(`[Agent] Phone from extraction: ${extraction.phone}`);
+    }
+
+    console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);
+    try {
+      await sendHumanized(wa, fullJid, cleanResponse, combinedText);
+    } catch (err) {
+      console.error(`[Agent] Failed to send to ${fullJid}:`, err.message);
+      return;
+    }
+
+    lead.history.push({ role: 'assistant', content: cleanResponse, ts: Date.now() });
+
+    if (extraction.qualified && !alreadyTransferred) {
+      lead.status = 'qualified';
+      lead.qualifiedAt = new Date().toISOString();
+      saveLead(leadId, lead);
+      await executeHandoff(wa, lead, config);
+    } else {
+      saveLead(leadId, lead);
+    }
+    return;
   }
 
   console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);
@@ -435,13 +506,5 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   }
 
   lead.history.push({ role: 'assistant', content: cleanResponse, ts: Date.now() });
-
-  if (extraction.qualified && !alreadyTransferred) {
-    lead.status = 'qualified';
-    lead.qualifiedAt = new Date().toISOString();
-    saveLead(leadId, lead);
-    await executeHandoff(wa, lead, config);
-  } else {
-    saveLead(leadId, lead);
-  }
+  saveLead(leadId, lead);
 }

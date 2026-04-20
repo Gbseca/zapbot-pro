@@ -26,6 +26,11 @@ const state = {
     warnings: [],
     results: [],
     error: '',
+    diagnostics: {
+      collectorReady: null,
+      fatalReason: '',
+      perTermErrors: [],
+    },
   },
 };
 
@@ -880,20 +885,13 @@ function sortAdResearchResults(results = [], sort = 'popular') {
   ));
 }
 
-function getAdResearchBadgeClass(status) {
-  if (status === 'running') return 'status-running';
-  if (status === 'completed') return 'status-completed';
-  if (status === 'failed') return 'status-stopped';
-  return 'status-idle';
-}
-
 function renderAdResearchResults() {
   const container = document.getElementById('ad-search-results');
   if (!container) return;
 
   const results = sortAdResearchResults(state.adResearch.results || [], state.adResearch.sort || 'popular');
   if (!results.length) {
-    container.innerHTML = '<div class="queue-empty">Nenhum anuncio consolidado ainda. Inicie uma busca para preencher esta lista.</div>';
+    container.innerHTML = `<div class="queue-empty">${escapeHtml(getAdResearchEmptyStateMessage())}</div>`;
     return;
   }
 
@@ -969,7 +967,7 @@ function renderAdResearchState() {
       Number.isFinite(state.adResearch.progress?.resultsFound)
         ? `${state.adResearch.progress.resultsFound} anuncios consolidados`
         : '',
-      state.adResearch.warnings?.length ? `${state.adResearch.warnings.length} aviso(s)` : '',
+      getAdResearchWarnings().length ? `${getAdResearchWarnings().length} aviso(s)` : '',
     ].filter(Boolean);
     meta.textContent = pieces.join(' • ') || 'Sem consulta em andamento.';
   }
@@ -977,11 +975,17 @@ function renderAdResearchState() {
   if (summary) {
     const searchTermsCount = state.adResearch.summary?.searchTerms?.length || 0;
     if (state.adResearch.results?.length) {
-      summary.textContent = `${state.adResearch.results.length} anuncios consolidados em ${searchTermsCount || 0} consultas.`;
+      summary.textContent = state.adResearch.status === 'partial'
+        ? `${state.adResearch.results.length} anuncios consolidados em ${searchTermsCount || 0} consultas, com avisos no caminho.`
+        : `${state.adResearch.results.length} anuncios consolidados em ${searchTermsCount || 0} consultas.`;
     } else if (state.adResearch.status === 'running') {
       summary.textContent = 'Buscando anuncios e montando ranking...';
-    } else if (state.adResearch.error) {
-      summary.textContent = state.adResearch.error;
+    } else if (state.adResearch.status === 'failed') {
+      summary.textContent = getAdResearchFatalReason() || state.adResearch.error || 'A busca falhou.';
+    } else if (state.adResearch.status === 'partial') {
+      summary.textContent = 'A busca terminou com avisos e sem anuncios consolidados.';
+    } else if (state.adResearch.status === 'completed') {
+      summary.textContent = 'A busca terminou, mas nenhum anuncio publico foi consolidado para esse recorte.';
     } else {
       summary.textContent = 'Inicie uma busca para listar os anuncios aqui.';
     }
@@ -994,6 +998,7 @@ function renderAdResearchState() {
       : '<span class="ad-chip muted">Sem expansao carregada ainda</span>';
   }
 
+  renderAdResearchDiagnostics();
   renderAdResearchResults();
   updateBadge('ad-research', state.adResearch.status === 'running' ? '...' : (state.adResearch.results?.length || null));
   setAdResearchButtonBusy(state.adResearch.status === 'running');
@@ -1014,6 +1019,11 @@ function applyAdResearchJob(job) {
     warnings: job.warnings || [],
     results: Array.isArray(job.results) ? job.results : [],
     error: job.error || '',
+    diagnostics: job.diagnostics || {
+      collectorReady: null,
+      fatalReason: '',
+      perTermErrors: [],
+    },
   };
 
   if (state.adResearch.jobId) setStoredAdResearchJobId(state.adResearch.jobId);
@@ -1052,6 +1062,11 @@ async function loadAdResearchJob(jobId, showErrors = false) {
           warnings: [],
           results: [],
           error: '',
+          diagnostics: {
+            collectorReady: null,
+            fatalReason: '',
+            perTermErrors: [],
+          },
         };
         renderAdResearchState();
         if (showErrors) showToast('A ultima busca salva nao esta mais disponivel.', 'warning');
@@ -1113,6 +1128,11 @@ async function startAdResearch() {
     results: [],
     warnings: [],
     error: '',
+    diagnostics: {
+      collectorReady: null,
+      fatalReason: '',
+      perTermErrors: [],
+    },
   };
   renderAdResearchState();
 
@@ -1132,6 +1152,11 @@ async function startAdResearch() {
   } catch (error) {
     state.adResearch.status = 'failed';
     state.adResearch.error = error.message;
+    state.adResearch.diagnostics = {
+      collectorReady: null,
+      fatalReason: error.message,
+      perTermErrors: [],
+    };
     renderAdResearchState();
     showToast(`Erro ao iniciar busca: ${error.message}`, 'error');
   }
@@ -1166,6 +1191,93 @@ async function copyAdResearchCopy(resultId) {
   } catch (error) {
     showToast(`Nao foi possivel copiar a copy: ${error.message}`, 'error');
   }
+}
+
+function getAdResearchBadgeClass(status) {
+  if (status === 'running') return 'status-running';
+  if (status === 'completed') return 'status-completed';
+  if (status === 'partial') return 'status-partial';
+  if (status === 'failed') return 'status-stopped';
+  return 'status-idle';
+}
+
+function getAdResearchWarnings() {
+  return Array.isArray(state.adResearch.warnings) ? state.adResearch.warnings : [];
+}
+
+function getAdResearchFatalReason() {
+  return state.adResearch.diagnostics?.fatalReason || state.adResearch.error || '';
+}
+
+function renderAdResearchDiagnostics() {
+  const diagnostics = document.getElementById('ad-search-diagnostics');
+  const warningsList = document.getElementById('ad-search-warning-list');
+  if (!diagnostics || !warningsList) return;
+
+  const warnings = getAdResearchWarnings();
+  const fatalReason = getAdResearchFatalReason();
+  const perTermErrors = Array.isArray(state.adResearch.diagnostics?.perTermErrors)
+    ? state.adResearch.diagnostics.perTermErrors
+    : [];
+  const blocks = [];
+
+  if (state.adResearch.status === 'failed' && fatalReason) {
+    blocks.push(`
+      <div class="warning-box compact">
+        <h3>Falha principal</h3>
+        <p>${escapeHtml(fatalReason)}</p>
+      </div>
+    `);
+  } else if (state.adResearch.status === 'partial') {
+    blocks.push(`
+      <div class="warning-box compact">
+        <h3>Busca parcial</h3>
+        <p>Parte das consultas falhou, mas a busca continuou e consolidou o que conseguiu aproveitar.</p>
+      </div>
+    `);
+  }
+
+  if (state.adResearch.diagnostics?.collectorReady === true && perTermErrors.length > 0) {
+    blocks.push(`
+      <div class="info-box compact">
+        <h3>Coletor pronto</h3>
+        <p>O Chromium abriu corretamente. Os avisos abaixo vieram de termos ou navegacoes especificas, nao de uma falha total do coletor.</p>
+      </div>
+    `);
+  }
+
+  diagnostics.innerHTML = blocks.join('');
+  warningsList.innerHTML = warnings.length
+    ? `
+      <div class="ad-warning-list-title">Avisos desta busca</div>
+      ${warnings.map((warning, index) => `
+        <div class="ad-warning-item">
+          <span class="ad-warning-index">${index + 1}</span>
+          <span>${escapeHtml(warning)}</span>
+        </div>
+      `).join('')}
+    `
+    : '';
+}
+
+function getAdResearchEmptyStateMessage() {
+  if (state.adResearch.status === 'failed') {
+    return getAdResearchFatalReason() || 'A busca falhou antes de consolidar anuncios.';
+  }
+
+  if (state.adResearch.status === 'partial') {
+    return 'A busca terminou com falhas parciais e sem anuncios consolidados.';
+  }
+
+  if (state.adResearch.status === 'completed') {
+    return 'A busca terminou sem anuncios publicos consolidados para essa combinacao.';
+  }
+
+  if (state.adResearch.status === 'running') {
+    return 'Buscando anuncios e montando o ranking agora.';
+  }
+
+  return 'Nenhum anuncio consolidado ainda. Inicie uma busca para preencher esta lista.';
 }
 
 let aiConfig = {};
@@ -1271,6 +1383,7 @@ async function loadAIConfig() {
     document.getElementById('followup-h2').value = aiConfig.followUp2Hours || 24;
     document.getElementById('followup-cold').value = aiConfig.followUpColdHours || 48;
     document.getElementById('campaign-loop-enabled').checked = aiConfig.campaignLoopEnabled !== false;
+    document.getElementById('collections-mode-enabled').checked = aiConfig.collectionsModeEnabled === true;
     document.getElementById('report-enabled').checked = aiConfig.reportEnabled !== false;
 
     // Phase 3: personality + aggression
@@ -1374,6 +1487,7 @@ function collectAIFormData() {
     followUp2Hours: parseInt(document.getElementById('followup-h2').value),
     followUpColdHours: parseInt(document.getElementById('followup-cold').value),
     campaignLoopEnabled: document.getElementById('campaign-loop-enabled').checked,
+    collectionsModeEnabled: document.getElementById('collections-mode-enabled').checked,
     reportEnabled: document.getElementById('report-enabled').checked,
     aiPersonality: personality,
     aiAggression: aggression,

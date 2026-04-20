@@ -33,6 +33,7 @@ const defaultConfig = {
   reportEnabled: true,
   reportHour: '18:00',
   campaignLoopEnabled: true,
+  collectionsModeEnabled: false,
   // ── Phase 3: new personality/behavior controls ──
   aiPersonality: 'human',       // 'human' | 'balanced' | 'robot'
   aiAggression: 'balanced',     // 'aggressive' | 'balanced' | 'soft'

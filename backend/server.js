@@ -39,7 +39,7 @@ function broadcast(data) {
 
 // Core instances
 const wa = new WhatsAppManager(wss);
-const queue = new MessageQueue(wa, wss);
+const queue = new MessageQueue(wa, wss, { loadConfig });
 const adResearch = createAdResearchService({ loadConfig, broadcast });
 
 // Connect WhatsApp AI message handler

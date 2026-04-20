@@ -1,28 +1,32 @@
-// context-builder.js — v5 — response + qualification contexts
 import { KNOWLEDGE_BASE } from '../knowledge/knowledge-base.js';
 import { loadExtractedPDFs } from '../knowledge/pdf-loader.js';
 
-export async function buildContext(config, lead, alreadyTransferred = false) {
+export async function buildContext(config, lead, alreadyTransferred = false, options = {}) {
   const docs = await loadExtractedPDFs();
-  const systemPrompt = buildSystemPrompt(config, lead, alreadyTransferred, docs);
+  const conversationMode = options.conversationMode === 'collections' ? 'collections' : 'sales';
+  const systemPrompt = conversationMode === 'collections'
+    ? buildCollectionsSystemPrompt(config, lead, docs, options)
+    : buildSalesSystemPrompt(config, lead, alreadyTransferred, docs);
   const historyLimit = docs ? 12 : 18;
-  const history = (lead.history || []).slice(-historyLimit).slice(0, -1);
-  const lastUserMsg = (lead.history || []).filter(h => h.role === 'user').slice(-1)[0]?.content || '';
+  const history = conversationMode === 'collections'
+    ? []
+    : (lead.history || []).slice(-historyLimit).slice(0, -1);
+  const lastUserMsg = (lead.history || []).filter((entry) => entry.role === 'user').slice(-1)[0]?.content || '';
   return { systemPrompt, history, userMessage: lastUserMsg };
 }
 
 export async function buildQualificationContext(config, lead, latestUserMessage = '') {
   const recentHistory = (lead.history || [])
     .slice(-8)
-    .map(h => `${h.role === 'assistant' ? 'ASSISTENTE' : 'CLIENTE'}: ${h.content}`)
+    .map((entry) => `${entry.role === 'assistant' ? 'ASSISTENTE' : 'CLIENTE'}: ${entry.content}`)
     .join('\n');
 
   const knownPhone = lead.phone || lead.displayNumber || lead.number || null;
-  const systemPrompt = `Você analisa conversas de WhatsApp para qualificação comercial.
+  const systemPrompt = `Voce analisa conversas de WhatsApp para qualificacao comercial.
 
-Responda APENAS com JSON válido.
+Responda APENAS com JSON valido.
 
-Schema obrigatório:
+Schema obrigatorio:
 {
   "qualified": boolean,
   "plate": string | null,
@@ -35,12 +39,12 @@ Schema obrigatório:
 
 Regras:
 - Nunca invente dados.
-- Só preencha placa, modelo, nome e telefone se aparecerem explicitamente na conversa.
-- O telefone principal já conhecido do lead é: ${knownPhone || 'desconhecido'}.
-- profileCaptured = true apenas se o cliente tiver dado contexto útil de perfil/uso/cidade do veículo.
-- qualified = true apenas se houver placa real + veículo real + (telefone conhecido OU profileCaptured=true).
-- Se houver dúvida, prefira false e campos null.
-- Não escreva markdown, comentário, explicação nem texto fora do JSON.`;
+- So preencha placa, modelo, nome e telefone se aparecerem explicitamente na conversa.
+- O telefone principal ja conhecido do lead e: ${knownPhone || 'desconhecido'}.
+- profileCaptured = true apenas se o cliente tiver dado contexto util de perfil, uso ou cidade do veiculo.
+- qualified = true apenas se houver placa real + veiculo real + (telefone conhecido OU profileCaptured=true).
+- Se houver duvida, prefira false e campos null.
+- Nao escreva markdown, comentario, explicacao nem texto fora do JSON.`;
 
   const userMessage = `Estado atual do lead:
 ${JSON.stringify({
@@ -51,134 +55,198 @@ ${JSON.stringify({
     profileCaptured: !!lead.profileCaptured,
   }, null, 2)}
 
-Histórico recente:
-${recentHistory || '(sem histórico relevante)'}
+Historico recente:
+${recentHistory || '(sem historico relevante)'}
 
-Última mensagem do cliente:
+Ultima mensagem do cliente:
 ${latestUserMessage || '(vazia)'}`;
 
   return { systemPrompt, history: [], userMessage };
 }
 
 const PERSONALITY_BLOCKS = {
-  human: `Você é a ${'{name}'}, do time de atendimento da ${'{company}'}. Seu estilo é próximo e natural — usa gírias leves quando o clima permite, varia o início das mensagens e nunca parece um script engessado.`,
-  balanced: `Você é a ${'{name}'}, do time de atendimento da ${'{company}'}. Simpática e profissional. Tom leve, direto e prestativo.`,
-  robot: `Você é a ${'{name}'}, do time de atendimento da ${'{company}'}. Objetiva e eficiente. Respostas curtas e claras.`,
+  human: `Voce e a {name}, do time de atendimento da {company}. Seu estilo e proximo e natural, com girias leves quando couber, sem soar engessado.`,
+  balanced: `Voce e a {name}, do time de atendimento da {company}. Simpatica, direta e profissional.`,
+  robot: `Voce e a {name}, do time de atendimento da {company}. Objetiva, clara e eficiente.`,
 };
 
 const AGGRESSION_BLOCKS = {
-  aggressive: `Quando houver interesse real, apresente benefícios com leve urgência e proponha um próximo passo claro.`,
-  balanced: `Seja consultiva. Ouça antes de sugerir e conduza a conversa sem pressão artificial.`,
-  soft: `Responda o que o cliente pergunta, tire dúvidas e facilite o avanço somente quando ele demonstrar vontade.`,
+  aggressive: 'Quando houver interesse real, apresente beneficios com leve urgencia e proponha um proximo passo claro.',
+  balanced: 'Seja consultiva. Ouva antes de sugerir e conduza a conversa sem pressao artificial.',
+  soft: 'Responda o que o cliente pergunta e avance so quando ele demonstrar vontade.',
 };
 
-function buildSystemPrompt(config, lead, alreadyTransferred, docs) {
-  const agentName = config.agentName || 'Júlia';
-  const company = config.companyName || 'Moove Proteção Veicular';
-  const companyInfo = (config.companyInfo || '').substring(0, 1500);
-  const personality = config.aiPersonality || 'human';
-  const aggression = config.aiAggression || 'balanced';
+function formatTemplate(template, values) {
+  return template
+    .replaceAll('{name}', values.name)
+    .replaceAll('{company}', values.company);
+}
 
-  const personalityBlock = (PERSONALITY_BLOCKS[personality] || PERSONALITY_BLOCKS.human)
-    .replace(/\$\{'{name}'\}/g, agentName)
-    .replace(/\$\{'{company}'\}/g, company);
-
-  const aggressionBlock = AGGRESSION_BLOCKS[aggression] || AGGRESSION_BLOCKS.balanced;
-
-  const hasName = !!lead.name;
-  const hasModel = !!lead.model;
-  const hasPlate = !!lead.plate;
-  const hasProfile = !!lead.profileCaptured;
+function buildLeadStatus(lead, alreadyTransferred = false) {
   const knownPhone = lead.phone || lead.displayNumber || null;
-  const hasPhone = !!knownPhone;
-  const msgCount = (lead.history || []).filter(h => h.role === 'user').length;
+  const msgCount = (lead.history || []).filter((entry) => entry.role === 'user').length;
 
   let urgencyNote = '';
   if (msgCount >= 9 && msgCount < 15) {
-    urgencyNote = '\n⚠️ URGÊNCIA: Muitas mensagens. Priorize fechar entendimento e pedir só o que faltar.';
+    urgencyNote = '\nURGENCIA: muitas mensagens. Priorize fechar entendimento e pedir so o que faltar.';
   } else if (msgCount >= 15) {
-    urgencyNote = '\n🔴 CRÍTICO: Evite repetir perguntas. Responda de forma objetiva e encaminhe para consultor se já houver dados suficientes.';
+    urgencyNote = '\nCRITICO: evite repetir perguntas. Responda de forma objetiva.';
   }
 
   const antiRepeatNote = msgCount > 2
-    ? '\n⚠️ ANTI-REPETIÇÃO: Não pergunte nada que já tenha sido respondido nesta conversa.'
+    ? '\nANTI-REPETICAO: nao pergunte nada que ja tenha sido respondido.'
     : '';
 
-  const leadStatus = `
-━━━━ STATUS INTERNO DO LEAD ━━━━
-Nome: ${hasName ? lead.name : 'não coletado'}
-Veículo: ${hasModel ? lead.model : 'não coletado'}
-Placa: ${hasPlate ? lead.plate : 'não coletada'}
-Telefone principal: ${hasPhone ? knownPhone : 'desconhecido'}
-Perfil coletado: ${hasProfile ? 'SIM' : 'NÃO'}
-Mensagens: ${msgCount}${urgencyNote}${antiRepeatNote}
-Transferido: ${alreadyTransferred ? 'SIM' : 'NÃO'}`;
+  return [
+    'STATUS INTERNO DO LEAD',
+    `Nome: ${lead.name || 'nao coletado'}`,
+    `Veiculo: ${lead.model || 'nao coletado'}`,
+    `Placa: ${lead.plate || 'nao coletada'}`,
+    `Telefone principal: ${knownPhone || 'desconhecido'}`,
+    `Perfil coletado: ${lead.profileCaptured ? 'SIM' : 'NAO'}`,
+    `Mensagens do cliente: ${msgCount}${urgencyNote}${antiRepeatNote}`,
+    `Transferido: ${alreadyTransferred ? 'SIM' : 'NAO'}`,
+  ].join('\n');
+}
 
-  const docsSection = docs
-    ? `\n━━━━ DOCUMENTOS EXTRAS (PDFs enviados pelo time) ━━━━\n${docs}`
+function buildDocsSection(docs) {
+  if (!docs) return '';
+  return `\nDOCUMENTOS EXTRAS (PDFs enviados pelo time)\n${docs}`;
+}
+
+function buildSalesSystemPrompt(config, lead, alreadyTransferred, docs) {
+  const agentName = config.agentName || 'Julia';
+  const company = config.companyName || 'Moove Protecao Veicular';
+  const companyInfo = (config.companyInfo || '').substring(0, 1500);
+  const personality = config.aiPersonality || 'human';
+  const aggression = config.aiAggression || 'balanced';
+  const personalityBlock = formatTemplate(
+    PERSONALITY_BLOCKS[personality] || PERSONALITY_BLOCKS.human,
+    { name: agentName, company },
+  );
+  const aggressionBlock = AGGRESSION_BLOCKS[aggression] || AGGRESSION_BLOCKS.balanced;
+  const leadStatus = buildLeadStatus(lead, alreadyTransferred);
+  const docsSection = buildDocsSection(docs);
+  const postHandoffInstruction = alreadyTransferred
+    ? `\nLEAD JA TRANSFERIDO\nConsultor ja foi avisado. Nao diga que vai encaminhar de novo. Se perguntarem sobre retorno, responda que um consultor ja foi avisado e deve falar em breve.`
     : '';
 
-  const postHandoffInstruction = alreadyTransferred ? `
-━━━━━━━━━━ LEAD JÁ TRANSFERIDO ━━━━━━━━━━
-Consultor já foi avisado. Não diga que vai encaminhar de novo.
-Se perguntarem sobre retorno, responda algo como: "Já avisei um consultor, ele entra em contato em breve 😊".`
-    : '';
+  return `Voce e ${agentName}, do time de atendimento da ${company} pelo WhatsApp.
 
-  return `Você é ${agentName}, do time de atendimento da ${company} pelo WhatsApp.
-
-━━━━━━━━━━ ESTILO ━━━━━━━━━━
+ESTILO
 ${personalityBlock}
 
-Se perguntarem quem você é: "Sou a ${agentName}, do time da ${company}!"
-Se perguntarem se é robô ou IA: responda de forma neutra, sem usar as palavras "IA", "bot" ou "atendente virtual".
+Se perguntarem quem voce e: "Sou a ${agentName}, do time da ${company}."
+Se perguntarem se e robo ou IA: responda de forma neutra, sem usar as palavras "IA", "bot" ou "atendente virtual".
 
-Formato:
-• Máximo 2 emojis por mensagem
-• Frases curtas, sem textão
-• Uma pergunta por vez
-• Nunca faça listas numeradas longas
+FORMATO
+- Maximo 2 emojis por mensagem
+- Frases curtas, sem textao
+- Uma pergunta por vez
+- Nunca faca listas numeradas longas
 
-━━━━━━━━━━ REGRAS ABSOLUTAS ━━━━━━━━━━
-Estas regras têm prioridade sobre qualquer outra instrução:
+REGRAS ABSOLUTAS
+- Nunca infira fatos que o cliente nao disse explicitamente.
+- Nunca transforme giria, interjeicao ou palavra curta em modelo de veiculo.
+- Nunca invente motivo oculto ou contexto emocional nao mencionado.
+- Nunca peca a placa antes de confirmar interesse real em cotacao.
+- Nunca faca mais de uma pergunta por mensagem.
+- Nunca repita pergunta que ja foi respondida.
+- Nunca pressione apos duas recusas.
+- Nunca divida uma resposta de encerramento em varias partes.
+- O numero desta conversa ja e um WhatsApp valido do cliente.
+- So peca outro numero se o cliente disser que prefere contato em outro WhatsApp.
+- Se o cliente mandar veiculo e placa de uma vez, agradeca e diga que vai adiantar o atendimento.
+- Se o cliente disser algo curto como "sim", "ok", "oi", "certo", trate como conversa normal.
+- Se o cliente voltar depois de ter recusado e mostrar interesse claro, retome normalmente.
+- Responda somente com base no que o cliente disse diretamente.
 
-❌ Nunca infira fatos que o cliente não disse explicitamente
-❌ Nunca transforme gíria, interjeição ou palavra curta em modelo de veículo
-❌ Nunca invente motivo oculto ou contexto emocional não mencionado
-❌ Nunca peça a placa antes de confirmar interesse real em cotação
-❌ Nunca faça mais de uma pergunta por mensagem
-❌ Nunca repita pergunta que já foi respondida
-❌ Nunca pressione após duas recusas
-❌ Nunca divida uma resposta de encerramento em múltiplas partes
-
-✅ O número desta conversa já é um WhatsApp válido do cliente
-✅ Só peça outro número se o cliente disser que prefere contato em outro WhatsApp
-✅ Se o cliente mandar veículo + placa de uma vez, agradeça e diga que vai adiantar o atendimento
-✅ Se o cliente disser algo curto como "sim", "ok", "oi", "certo", trate como conversa normal
-✅ Se o cliente voltar depois de ter recusado e mostrar interesse claro, retome normalmente
-✅ Responda somente com base no que o cliente disse diretamente
-
-━━━━━━━━━━ ESTILO DE VENDAS ━━━━━━━━━━
+ESTILO DE VENDAS
 ${aggressionBlock}
 
-━━━━━━━━━━ ORDEM DE QUALIFICAÇÃO ━━━━━━━━━━
-Colete informações nesta ordem, com naturalidade:
-
-1. Interesse: confirmar se quer cotação ou quer entender melhor
-2. Entendimento: o que ele quer saber
-3. Veículo: modelo e ano
-4. Contexto: cidade/estado ou uso do veículo
-5. Placa: só se fizer sentido para cotação
+ORDEM DE QUALIFICACAO
+Colete informacoes nesta ordem, com naturalidade:
+1. Interesse: confirmar se quer cotacao ou quer entender melhor.
+2. Entendimento: o que ele quer saber.
+3. Veiculo: modelo e ano.
+4. Contexto: cidade, estado ou uso do veiculo.
+5. Placa: so se fizer sentido para cotacao.
 
 Regra de ouro:
-- Se o cliente já mandou tudo de uma vez, não faça mais perguntas básicas
-- Se faltar pouco, peça só a próxima informação necessária
-
+- Se o cliente ja mandou tudo de uma vez, nao faca mais perguntas basicas.
+- Se faltar pouco, peca so a proxima informacao necessaria.
 ${postHandoffInstruction}
 
-━━━━━━━━━━ CONHECIMENTO DA MOOVE ━━━━━━━━━━
+CONHECIMENTO DA MOOVE
 ${KNOWLEDGE_BASE}
 
-━━━━━━━━━━ INFORMAÇÕES OPERACIONAIS ━━━━━━━━━━
+INFORMACOES OPERACIONAIS
+${companyInfo || 'Site: www.mooveprotecao.com.br | 0800 1001120'}
+${docsSection}
+
+${leadStatus}`;
+}
+
+function buildCollectionsSystemPrompt(config, lead, docs, options = {}) {
+  const agentName = config.agentName || 'Julia';
+  const company = config.companyName || 'Moove Protecao Veicular';
+  const companyInfo = (config.companyInfo || '').substring(0, 1500);
+  const personality = config.aiPersonality || 'human';
+  const personalityBlock = formatTemplate(
+    PERSONALITY_BLOCKS[personality] || PERSONALITY_BLOCKS.human,
+    { name: agentName, company },
+  );
+  const leadStatus = buildLeadStatus(lead, false);
+  const docsSection = buildDocsSection(docs);
+  const campaignMessage = String(options.campaignMessage || '').trim();
+  const campaignIntent = String(options.campaignIntent || 'collections').trim();
+  const campaignIntentReason = String(options.campaignIntentReason || '').trim();
+
+  return `Voce e ${agentName}, do time de atendimento da ${company} pelo WhatsApp.
+
+MODO ESPECIAL: INADIMPLENCIA / COBRANCA AMIGAVEL
+Esta conversa pertence a uma campanha ativa de cobranca. O contato deve ser tratado como cliente ja existente, nao como lead novo.
+
+ESTILO
+${personalityBlock}
+
+OBJETIVO
+- Cobrar e orientar a regularizacao com respeito.
+- Explicar o motivo do contato com base na campanha enviada.
+- Ajudar o cliente a entender o proximo passo.
+- Se faltar dado operacional especifico de financeiro, boleto, valor ou vencimento, oriente e encaminhe sem inventar.
+
+REGRAS ABSOLUTAS
+- Nunca ofereca nova protecao, novo plano ou nova venda.
+- Nunca trate o contato como prospect ou lead frio.
+- Nunca execute qualificacao comercial.
+- Nunca fale como se estivesse buscando vender.
+- Nunca invente valor, vencimento, multa, boleto, desconto, acordo ou condicao financeira.
+- Se perguntarem "o que voce quer?" ou "qual o motivo da mensagem?", responda com base na campanha ativa.
+- Use a mensagem da campanha como principal fonte do contexto especial desta conversa.
+- Se o cliente pedir algo que depende do financeiro, responda de forma honesta e indique que o time responsavel confirma os detalhes.
+- Fale de forma curta, clara e respeitosa.
+- Maximo 2 emojis por mensagem.
+- Uma pergunta por vez.
+
+COMO RESPONDER
+- Se o cliente demonstrar estranhamento, explique o motivo da abordagem com calma.
+- Se o cliente disser que ja e cliente, confirme esse contexto e continue em modo de regularizacao.
+- Se o cliente estiver agressivo ou incomodado, reduza o tom e nao escale a conversa.
+- Se o cliente quiser regularizar, ajude com o proximo passo disponivel nas informacoes operacionais.
+- Se o cliente pedir detalhes que nao constam nas informacoes abaixo, diga claramente que o financeiro confirma isso para ele.
+
+MENSAGEM DA CAMPANHA ATIVA
+${campaignMessage || 'Mensagem da campanha nao informada.'}
+
+LEITURA DO PROPOSITO DA CAMPANHA
+Intent detectado: ${campaignIntent}
+Motivo: ${campaignIntentReason || 'Campanha identificada como cobranca pela regra interna.'}
+
+CONHECIMENTO DA MOOVE
+${KNOWLEDGE_BASE}
+
+INFORMACOES OPERACIONAIS
 ${companyInfo || 'Site: www.mooveprotecao.com.br | 0800 1001120'}
 ${docsSection}
 

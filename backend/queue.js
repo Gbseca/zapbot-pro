@@ -1,4 +1,9 @@
 import { getLead, saveLead } from './data/leads-manager.js';
+import {
+    clearActiveCampaign,
+    registerActiveCampaign,
+    updateActiveCampaignStatus,
+} from './campaign-state.js';
 
 function normalizeCampaignNumber(raw) {
     const digits = String(raw || '').replace(/\D/g, '');
@@ -7,9 +12,10 @@ function normalizeCampaignNumber(raw) {
 }
 
 class MessageQueue {
-    constructor(wa, wss) {
+    constructor(wa, wss, options = {}) {
         this.wa = wa;
         this.wss = wss;
+        this.loadConfig = typeof options.loadConfig === 'function' ? options.loadConfig : () => ({});
         this.queue = [];
         this.status = 'idle';
         this.currentIndex = 0;
@@ -54,6 +60,11 @@ class MessageQueue {
         this.config = { scheduleConfig, antiRestriction };
         const total = numbers.length;
         this.stats = { total, sent: 0, failed: 0, pending: total };
+        registerActiveCampaign({
+            numbers,
+            message: String(message || pollQuestion || '').trim(),
+            config: this.loadConfig(),
+        });
 
         this.broadcast({
             type: 'campaign_loaded',
@@ -76,6 +87,7 @@ class MessageQueue {
         this.currentIndex = 0;
         this.stats = { total: 0, sent: 0, failed: 0, pending: 0 };
         this.status = 'idle';
+        clearActiveCampaign('Campanha limpa manualmente.');
         this.broadcast({ type: 'campaign_cleared' });
         this.log('info', '🗑️ Histórico da fila limpo.');
         return true;
@@ -164,6 +176,7 @@ class MessageQueue {
             return;
         }
         this.status = 'running';
+        updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
         this.log('info', `🚀 Campanha iniciada! ${this.stats.total} mensagens na fila.`);
         await this.processNext();
@@ -173,6 +186,7 @@ class MessageQueue {
         if (this.status !== 'running') return;
         this.status = 'paused';
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        updateActiveCampaignStatus('paused');
         this.broadcast({ type: 'campaign_status', status: 'paused' });
         this.log('warning', '⏸️ Campanha pausada.');
     }
@@ -180,6 +194,7 @@ class MessageQueue {
     resume() {
         if (this.status !== 'paused') return;
         this.status = 'running';
+        updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
         this.log('info', '▶️ Campanha retomada.');
         this.processNext();
@@ -188,6 +203,7 @@ class MessageQueue {
     stop() {
         this.status = 'stopped';
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        updateActiveCampaignStatus('stopped');
         this.broadcast({ type: 'campaign_status', status: 'stopped' });
         this.log('warning', '🛑 Campanha interrompida pelo usuário.');
     }
@@ -197,6 +213,7 @@ class MessageQueue {
 
         if (this.currentIndex >= this.queue.length) {
             this.status = 'completed';
+            updateActiveCampaignStatus('completed');
             this.broadcast({ type: 'campaign_status', status: 'completed' });
             this.log('success', `🎉 Concluída! ✅ ${this.stats.sent} enviadas | ❌ ${this.stats.failed} falhas`);
             return;
@@ -211,6 +228,7 @@ class MessageQueue {
         if (this.isDailyLimitReached()) {
             this.log('warning', '⚠️ Limite diário atingido. Campanha pausada.');
             this.status = 'paused';
+            updateActiveCampaignStatus('paused');
             this.broadcast({ type: 'campaign_status', status: 'paused' });
             return;
         }
