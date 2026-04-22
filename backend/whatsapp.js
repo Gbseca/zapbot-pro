@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -81,6 +81,7 @@ class WhatsAppManager extends EventEmitter {
         this.onMessage = null;
         this._contactMap = new Map();
         this._outboundRecords = new Map();
+        this._messageCache = new Map();
         this._baileysVersionRange = readBaileysVersionRange();
         this._latestWebVersion = null;
     }
@@ -219,6 +220,7 @@ class WhatsAppManager extends EventEmitter {
             if (!stale) return;
             if (stale.timeoutHandle) clearTimeout(stale.timeoutHandle);
             this._outboundRecords.delete(messageId);
+            this._messageCache.delete(messageId);
         }, OUTBOUND_RECORD_TTL_MS);
     }
 
@@ -294,6 +296,9 @@ class WhatsAppManager extends EventEmitter {
         };
 
         this._outboundRecords.set(messageId, record);
+        if (result?.message) {
+            this._messageCache.set(messageId, result);
+        }
         this._emitOutboundStatus(record);
 
         return {
@@ -367,23 +372,31 @@ class WhatsAppManager extends EventEmitter {
         this.reconnecting = true;
         try {
             const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
-            const latest = await fetchLatestBaileysVersion();
-            const latestVersion = latest?.version || [];
             const overrideVersion = parseVersionOverride(process.env.WA_WEB_VERSION_OVERRIDE);
-            const version = overrideVersion || latestVersion;
-            this._latestWebVersion = version;
+            this._latestWebVersion = overrideVersion || null;
 
-            console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${stringifyVersion(version)}${overrideVersion ? ` (override, latest ${stringifyVersion(latestVersion)})` : ''}`);
+            console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${overrideVersion ? stringifyVersion(overrideVersion) : 'default-internal-v7'}${overrideVersion ? ' (override)' : ''}`);
 
-            this.sock = makeWASocket({
-                version,
+            const socketConfig = {
                 auth: state,
                 logger: this.logger,
-                browser: ['ZapBot Pro', 'Chrome', '120.0.0'],
+                browser: Browsers.ubuntu('Chrome'),
                 generateHighQualityLinkPreview: false,
                 syncFullHistory: false,
                 emitOwnEvents: true,
-            });
+                markOnlineOnConnect: false,
+                getMessage: async (key) => {
+                    if (!key?.id) return undefined;
+                    const cached = this._messageCache.get(key.id);
+                    return cached?.message;
+                },
+            };
+
+            if (overrideVersion) {
+                socketConfig.version = overrideVersion;
+            }
+
+            this.sock = makeWASocket(socketConfig);
 
             this.sock.ev.on('connection.update', async (update) => {
                 const { connection, lastDisconnect, qr } = update;
@@ -570,6 +583,7 @@ class WhatsAppManager extends EventEmitter {
             if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
         }
         this._outboundRecords.clear();
+        this._messageCache.clear();
 
         this.status = 'disconnected';
         this.qrCode = null;
