@@ -207,6 +207,7 @@ class WhatsAppManager extends EventEmitter {
             msg?.key?.participant,
             msg?.participant,
             msg?.key?.remoteJid,
+            msg?.key?.remoteJidAlt,
             msg?.message?.extendedTextMessage?.contextInfo?.participant,
             msg?.message?.imageMessage?.contextInfo?.participant,
             msg?.message?.videoMessage?.contextInfo?.participant,

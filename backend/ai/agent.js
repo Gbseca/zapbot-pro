@@ -277,14 +277,15 @@ export async function handleIncomingMessage(wa, rawMsg) {
   }
 
   const fullJid = rawMsg.key.remoteJid;
+  const fullJidAlt = rawMsg.key.remoteJidAlt || '';
   const jidId = fullJid.split('@')[0].split(':')[0];
-  const displayNum = wa.resolvePhone(fullJid);
+  const displayNum = wa.resolvePhone(fullJidAlt || fullJid);
   const conversationPhone = resolveConversationPhone(displayNum, jidId);
   const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone);
   const text = extractText(rawMsg);
   const pushName = rawMsg.pushName || null;
 
-  console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}): "${text.slice(0, 60)}"`);
+  console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${text.slice(0, 60)}"`);
   if (!text) return;
 
   const existingLead = leadFromStore;
