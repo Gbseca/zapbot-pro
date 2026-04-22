@@ -17,6 +17,7 @@ function createStats(total = 0) {
     return {
         total,
         accepted: 0,
+        acceptedUnconfirmed: 0,
         confirmed: 0,
         sent: 0,
         failed: 0,
@@ -41,6 +42,7 @@ class MessageQueue {
         this.wa = wa;
         this.wss = wss;
         this.loadConfig = typeof options.loadConfig === 'function' ? options.loadConfig : () => ({});
+        this.onStatusEvent = typeof options.onStatusEvent === 'function' ? options.onStatusEvent : null;
         this.queue = [];
         this.status = 'idle';
         this.currentIndex = 0;
@@ -49,6 +51,20 @@ class MessageQueue {
         this.stats = createStats(0);
         this.dailySent = 0;
         this.consecutiveFailures = 0;
+    }
+
+    setStatusReporter(reporter) {
+        this.onStatusEvent = typeof reporter === 'function' ? reporter : null;
+    }
+
+    _reportStatusEvent(event = {}) {
+        if (!this.onStatusEvent) return;
+        this.onStatusEvent({
+            scope: 'campaign',
+            ts: new Date().toISOString(),
+            ...event,
+            snapshot: this.getStatusSnapshot(),
+        });
     }
 
     broadcast(data) {
@@ -62,6 +78,12 @@ class MessageQueue {
         const ts = new Date().toLocaleTimeString('pt-BR');
         this.broadcast({ type: 'log', level, message: `[${ts}] ${message}` });
         console.log(`[${level.toUpperCase()}] ${message}`);
+        this._reportStatusEvent({
+            type: 'log',
+            severity: level === 'error' ? 'error' : level === 'warning' ? 'warning' : 'info',
+            title: 'Campanha',
+            message,
+        });
     }
 
     initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction }) {
@@ -86,6 +108,7 @@ class MessageQueue {
             error: null,
             messageId: null,
             resolvedTarget: null,
+            targetKind: null,
         }));
 
         this.config = { scheduleConfig, antiRestriction };
@@ -107,6 +130,7 @@ class MessageQueue {
                 error: q.error,
                 messageId: q.messageId,
                 resolvedTarget: q.resolvedTarget,
+                targetKind: q.targetKind,
             })),
         });
 
@@ -219,6 +243,7 @@ class MessageQueue {
         this.status = 'running';
         updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
+        this._reportStatusEvent({ type: 'state', severity: 'info', title: 'Campanha', message: 'Campanha iniciada.' });
         this.log('info', `Campanha iniciada! ${this.stats.total} mensagens na fila.`);
         await this.processNext();
     }
@@ -232,6 +257,7 @@ class MessageQueue {
         }
         updateActiveCampaignStatus('paused');
         this.broadcast({ type: 'campaign_status', status: 'paused' });
+        this._reportStatusEvent({ type: 'state', severity: 'warning', title: 'Campanha', message: reason });
         this.log('warning', reason);
     }
 
@@ -241,6 +267,7 @@ class MessageQueue {
         this.consecutiveFailures = 0;
         updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
+        this._reportStatusEvent({ type: 'state', severity: 'info', title: 'Campanha', message: 'Campanha retomada.' });
         this.log('info', 'Campanha retomada.');
         this.processNext();
     }
@@ -253,6 +280,7 @@ class MessageQueue {
         }
         updateActiveCampaignStatus('stopped');
         this.broadcast({ type: 'campaign_status', status: 'stopped' });
+        this._reportStatusEvent({ type: 'state', severity: 'warning', title: 'Campanha', message: 'Campanha interrompida pelo usuario.' });
         this.log('warning', 'Campanha interrompida pelo usuario.');
     }
 
@@ -278,6 +306,7 @@ class MessageQueue {
             error: item.error,
             messageId: item.messageId,
             resolvedTarget: item.resolvedTarget,
+            targetKind: item.targetKind,
         });
     }
 
@@ -285,12 +314,14 @@ class MessageQueue {
         const lastAccepted = acceptedRecords[acceptedRecords.length - 1] || null;
         const firstProblem = finalRecords.find(record => record.status === 'failed' || record.status === 'delivery_timeout');
         if (firstProblem) {
+            const status = firstProblem.status === 'delivery_timeout' ? 'accepted_unconfirmed' : firstProblem.status;
             return {
-                status: firstProblem.status,
+                status,
                 error: firstProblem.error || 'Falha na confirmacao do WhatsApp',
                 messageId: firstProblem.messageId || lastAccepted?.messageId || null,
                 targetJid: firstProblem.targetResolved || lastAccepted?.resolvedJid || null,
                 resolvedTarget: firstProblem.targetResolved || lastAccepted?.resolvedJid || null,
+                targetKind: firstProblem.targetKind || lastAccepted?.targetKind || null,
             };
         }
 
@@ -300,6 +331,7 @@ class MessageQueue {
             messageId: lastAccepted?.messageId || null,
             targetJid: lastAccepted?.resolvedJid || null,
             resolvedTarget: lastAccepted?.resolvedJid || null,
+            targetKind: lastAccepted?.targetKind || null,
         };
     }
 
@@ -377,6 +409,7 @@ class MessageQueue {
             const delivery = await this._sendCampaignItem(item, text);
             item.messageId = delivery.messageId;
             item.resolvedTarget = delivery.resolvedTarget;
+            item.targetKind = delivery.targetKind;
 
             this.stats.accepted += 1;
             this.stats.pending = Math.max(0, this.stats.pending - 1);
@@ -387,17 +420,20 @@ class MessageQueue {
                 status: 'accepted',
                 messageId: item.messageId,
                 resolvedTarget: item.resolvedTarget,
+                targetKind: item.targetKind,
             });
             this._broadcastStats();
 
             if (delivery.status !== 'confirmed') {
                 item.status = delivery.status;
                 item.error = delivery.error;
-                this.stats.failed += 1;
-                this.log(
-                    delivery.status === 'delivery_timeout' ? 'warning' : 'error',
-                    `${delivery.status === 'delivery_timeout' ? 'Sem confirmacao' : 'Falha'} para ${item.number}: ${delivery.error}`
-                );
+                if (delivery.status === 'accepted_unconfirmed') {
+                    this.stats.acceptedUnconfirmed += 1;
+                    this.log('warning', `Sem confirmacao para ${item.number}: ${delivery.error}`);
+                } else {
+                    this.stats.failed += 1;
+                    this.log('error', `Falha para ${item.number}: ${delivery.error}`);
+                }
                 this.broadcast({
                     type: 'queue_update',
                     index: this.currentIndex,
@@ -405,8 +441,11 @@ class MessageQueue {
                     error: item.error,
                     messageId: item.messageId,
                     resolvedTarget: item.resolvedTarget,
+                    targetKind: item.targetKind,
                 });
-                this._markConsecutiveFailure(item, item.status, item.error);
+                if (delivery.status !== 'accepted_unconfirmed') {
+                    this._markConsecutiveFailure(item, item.status, item.error);
+                }
             } else {
                 item.status = 'confirmed';
                 item.sentAt = new Date().toISOString();
@@ -427,6 +466,7 @@ class MessageQueue {
                     sentAt: item.sentAt,
                     messageId: item.messageId,
                     resolvedTarget: item.resolvedTarget,
+                    targetKind: item.targetKind,
                 });
             }
 
@@ -435,6 +475,7 @@ class MessageQueue {
             item.error = err.message;
             item.messageId = err.messageId || item.messageId || null;
             item.resolvedTarget = err.targetResolved || item.resolvedTarget || null;
+            item.targetKind = err.targetKind || item.targetKind || null;
             this.stats.failed += 1;
             this.stats.pending = Math.max(0, this.stats.pending - 1);
 
@@ -446,6 +487,7 @@ class MessageQueue {
                 error: err.message,
                 messageId: item.messageId,
                 resolvedTarget: item.resolvedTarget,
+                targetKind: item.targetKind,
             });
             this._markConsecutiveFailure(item, 'failed', err.message);
         }
@@ -469,6 +511,38 @@ class MessageQueue {
         }
     }
 
+    getStatusSnapshot() {
+        const routeKinds = {};
+        const recentResolvedTargets = [];
+
+        for (const item of this.queue) {
+            if (item.targetKind) {
+                routeKinds[item.targetKind] = (routeKinds[item.targetKind] || 0) + 1;
+            }
+            if (item.resolvedTarget) {
+                recentResolvedTargets.push({
+                    number: item.number,
+                    resolvedTarget: item.resolvedTarget,
+                    targetKind: item.targetKind || null,
+                    status: item.status,
+                });
+            }
+        }
+
+        const dominantRouteKind = Object.entries(routeKinds)
+            .sort((left, right) => right[1] - left[1])[0]?.[0] || '';
+
+        return {
+            status: this.status,
+            currentIndex: this.currentIndex,
+            consecutiveFailures: this.consecutiveFailures,
+            stats: { ...this.stats, sent: this.stats.confirmed },
+            dominantRouteKind,
+            routeKinds,
+            recentResolvedTargets: recentResolvedTargets.slice(-5).reverse(),
+        };
+    }
+
     getProgress() {
         this._syncSentAlias();
         return {
@@ -481,6 +555,7 @@ class MessageQueue {
                 error: q.error,
                 messageId: q.messageId,
                 resolvedTarget: q.resolvedTarget,
+                targetKind: q.targetKind,
             })),
             currentIndex: this.currentIndex,
         };

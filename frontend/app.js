@@ -15,7 +15,8 @@ const state = {
   reactionCount: 1,
   pollMode: false,
   queue: [],
-  stats: { total: 0, accepted: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 },
+  stats: { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 },
+  systemStatus: null,
   adResearch: {
     jobId: '',
     status: 'idle',
@@ -53,11 +54,14 @@ const REACTION_EMOJIS = ['1ï¸âƒ£','2ï¸âƒ£','3ï¸âƒ£','4ï¸�
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initWebSocket();
+  const groqRadioDesc = document.querySelector('#radio-groq .radio-desc');
+  if (groqRadioDesc) groqRadioDesc.textContent = 'Llama 3.3 70B - rapido e pronto para uso';
   renderEmojiGrid();
   initReactions();
   updateEstimate();
   renderAdResearchState();
   restoreAdResearchJob();
+  loadSystemStatus();
 
   // Close emoji picker on outside click
   document.addEventListener('click', (e) => {
@@ -102,12 +106,12 @@ function handleWsMessage(data) {
     case 'qr':           handleQRCode(data.qr); break;
     case 'log':          appendLog(data.level, data.message); break;
     case 'stats':        updateStats(data.stats); break;
-    case 'queue_update': updateQueueItem(data.index, data.status, data.sentAt, data.error, data.messageId, data.resolvedTarget); break;
+    case 'queue_update': updateQueueItem(data.index, data.status, data.sentAt, data.error, data.messageId, data.resolvedTarget, data.targetKind); break;
     case 'campaign_status': handleCampaignStatus(data.status); break;
     case 'campaign_loaded': handleCampaignLoaded(data); break;
     case 'campaign_cleared':
       state.queue = [];
-      state.stats = { total: 0, accepted: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 };
+      state.stats = { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 };
       renderQueueList();
       updateStats(state.stats);
       handleCampaignStatus('idle');
@@ -118,6 +122,9 @@ function handleWsMessage(data) {
       break;
     case 'ad_research_update':
       handleAdResearchUpdate(data.job);
+      break;
+    case 'system_status':
+      handleSystemStatusUpdate(data.snapshot);
       break;
   }
 }
@@ -227,6 +234,7 @@ function switchTab(tabId) {
   if (tabId === 'schedule') updateEstimate();
   if (tabId === 'ai-agent') loadAIConfig();
   if (tabId === 'ad-research') loadAdResearchTab();
+  if (tabId === 'status') loadSystemStatus();
   if (tabId === 'leads') loadLeads();
 }
 
@@ -704,7 +712,7 @@ function handleCampaignLoaded(data) {
   state.queue = data.queue;
   renderQueueList();
   state.queue.forEach((item, index) => {
-    updateQueueItem(index, item.status, item.sentAt, item.error, item.messageId, item.resolvedTarget);
+    updateQueueItem(index, item.status, item.sentAt, item.error, item.messageId, item.resolvedTarget, item.targetKind);
   });
   updateStats(data.stats);
 }
@@ -753,14 +761,16 @@ function handleCampaignStatus(status) {
 function updateStats(stats) {
   state.stats = stats;
   const accepted = stats.accepted ?? 0;
+  const acceptedUnconfirmed = stats.acceptedUnconfirmed ?? 0;
   const confirmed = stats.confirmed ?? stats.sent ?? 0;
   document.getElementById('stat-total').textContent = stats.total;
   document.getElementById('stat-accepted').textContent = accepted;
+  document.getElementById('stat-accepted-unconfirmed').textContent = acceptedUnconfirmed;
   document.getElementById('stat-confirmed').textContent = confirmed;
   document.getElementById('stat-failed').textContent = stats.failed;
   document.getElementById('stat-pending').textContent = stats.pending;
 
-  const pct = stats.total > 0 ? Math.round(((confirmed + stats.failed) / stats.total) * 100) : 0;
+  const pct = stats.total > 0 ? Math.round(((confirmed + acceptedUnconfirmed + stats.failed) / stats.total) * 100) : 0;
   document.getElementById('progress-bar').style.width = `${pct}%`;
   document.getElementById('progress-pct').textContent = `${pct}%`;
 }
@@ -774,6 +784,7 @@ function queueStatusMeta(status) {
     case 'confirmed':
     case 'sent':
       return { label: 'Confirmado', className: 'confirmed' };
+    case 'accepted_unconfirmed':
     case 'delivery_timeout':
       return { label: 'Sem confirmacao', className: 'timeout' };
     case 'failed':
@@ -783,9 +794,9 @@ function queueStatusMeta(status) {
   }
 }
 
-function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget) {
+function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget, targetKind) {
   if (index >= state.queue.length) return;
-  state.queue[index] = { ...state.queue[index], status, sentAt, error, messageId, resolvedTarget };
+  state.queue[index] = { ...state.queue[index], status, sentAt, error, messageId, resolvedTarget, targetKind };
 
   const item = document.getElementById(`qi-${index}`);
   if (!item) {
@@ -797,7 +808,7 @@ function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget
 
   const dot = item.querySelector('.queue-item-dot');
   const statusEl = item.querySelector('.queue-item-status');
-  dot.className = `queue-item-dot dot-${status === 'confirmed' ? 'sent' : status === 'delivery_timeout' ? 'failed' : status}`;
+  dot.className = `queue-item-dot dot-${status === 'confirmed' ? 'sent' : status === 'accepted_unconfirmed' || status === 'delivery_timeout' ? 'timeout' : status}`;
 
   if (status === 'accepted') {
     statusEl.textContent = 'Aceito pelo WhatsApp';
@@ -808,7 +819,7 @@ function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget
     statusEl.textContent = 'Confirmado';
     statusEl.className = 'queue-item-status confirmed';
     item.classList.remove('active-item');
-  } else if (status === 'delivery_timeout') {
+  } else if (status === 'accepted_unconfirmed' || status === 'delivery_timeout') {
     statusEl.textContent = 'Sem confirmacao';
     statusEl.className = 'queue-item-status timeout';
     item.classList.remove('active-item');
@@ -834,6 +845,22 @@ function renderQueueList() {
     list.innerHTML = '<div class="queue-empty">Nenhuma campanha carregada ainda</div>';
     return;
   }
+  list.innerHTML = state.queue.map((item, i) => {
+    const meta = queueStatusMeta(item.status);
+    const dotClass = item.status === 'confirmed' || item.status === 'sent'
+      ? 'sent'
+      : item.status === 'accepted_unconfirmed' || item.status === 'delivery_timeout'
+        ? 'timeout'
+        : item.status;
+    return `
+      <div class="queue-item" id="qi-${i}">
+        <span class="queue-item-dot dot-${dotClass}"></span>
+        <span class="queue-item-num">+55 ${item.number}</span>
+        <span class="queue-item-status ${meta.className}">${meta.label}</span>
+      </div>
+    `;
+  }).join('');
+  return;
   list.innerHTML = state.queue.map((item, i) => `
     <div class="queue-item" id="qi-${i}">
       <span class="queue-item-dot dot-${item.status === 'confirmed' ? 'sent' : item.status === 'delivery_timeout' ? 'failed' : item.status}"></span>
@@ -870,6 +897,297 @@ function showToast(message, type = 'info') {
     toast.classList.add('removing');
     setTimeout(() => toast.remove(), 300);
   }, 3500);
+}
+
+function severityWeight(severity = 'healthy') {
+  const weights = { healthy: 0, warning: 1, degraded: 2, error: 3 };
+  return weights[severity] ?? 0;
+}
+
+function overallSeverity(snapshot) {
+  if (!snapshot) return 'warning';
+  return ['whatsapp', 'ai', 'campaign', 'adResearch', 'automations', 'storage']
+    .map((key) => snapshot[key]?.severity || 'healthy')
+    .sort((left, right) => severityWeight(right) - severityWeight(left))[0] || 'healthy';
+}
+
+function severityLabel(severity = 'healthy') {
+  const labels = {
+    healthy: 'Saudavel',
+    warning: 'Atencao',
+    degraded: 'Degradado',
+    error: 'Erro',
+  };
+  return labels[severity] || 'Saudavel';
+}
+
+function formatStatusDate(value) {
+  if (!value) return '--';
+  return new Date(value).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function statusMetric(label, value) {
+  return `
+    <div class="status-metric">
+      <span class="status-metric-label">${escapeHtml(label)}</span>
+      <strong class="status-metric-value">${escapeHtml(String(value ?? '--'))}</strong>
+    </div>
+  `;
+}
+
+function statusDetail(label, value) {
+  return `
+    <div class="status-detail-row">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(value ?? '--'))}</strong>
+    </div>
+  `;
+}
+
+function renderStatusCard(elementId, section = {}, config = {}) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const severity = section.severity || 'warning';
+  el.className = `status-card severity-${severity}`;
+  el.innerHTML = `
+    <div class="status-card-head">
+      <div>
+        <div class="status-card-eyebrow">${escapeHtml(config.eyebrow || 'Status')}</div>
+        <h3 class="status-card-title">${escapeHtml(config.title || 'Modulo')}</h3>
+      </div>
+      <span class="status-severity-pill severity-${severity}">${escapeHtml(severityLabel(severity))}</span>
+    </div>
+    ${config.summary ? `<p class="status-card-summary">${escapeHtml(config.summary(section) || '')}</p>` : ''}
+    ${Array.isArray(config.metrics?.(section)) ? `<div class="status-metrics">${config.metrics(section).join('')}</div>` : ''}
+    ${Array.isArray(config.details?.(section)) ? `<div class="status-details">${config.details(section).join('')}</div>` : ''}
+  `;
+}
+
+function renderStatusEvents(events = []) {
+  const list = document.getElementById('status-events');
+  if (!list) return;
+  if (!events.length) {
+    list.innerHTML = '<div class="queue-empty">Ainda nao ha eventos consolidados para mostrar.</div>';
+    return;
+  }
+
+  list.innerHTML = events.map((event) => `
+    <div class="status-event severity-${event.severity || 'healthy'}">
+      <div class="status-event-dot"></div>
+      <div class="status-event-body">
+        <div class="status-event-top">
+          <strong>${escapeHtml(event.title || 'Evento')}</strong>
+          <span>${escapeHtml(formatStatusDate(event.at))}</span>
+        </div>
+        <p>${escapeHtml(event.message || '')}</p>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderSystemStatus() {
+  const snapshot = state.systemStatus;
+  if (!snapshot) return;
+
+  const severity = overallSeverity(snapshot);
+  const overallEl = document.getElementById('system-status-overall');
+  const summaryEl = document.getElementById('system-status-summary');
+  const updatedEl = document.getElementById('system-status-updated');
+
+  if (overallEl) {
+    overallEl.className = `campaign-status-badge status-${severity === 'error' ? 'stopped' : severity === 'degraded' ? 'partial' : severity === 'warning' ? 'paused' : 'running'}`;
+    overallEl.textContent = severityLabel(severity);
+  }
+
+  if (summaryEl) {
+    const pieces = [
+      `WhatsApp: ${severityLabel(snapshot.whatsapp?.severity || 'warning')}`,
+      `IA: ${severityLabel(snapshot.ai?.severity || 'warning')}`,
+      `Campanhas: ${severityLabel(snapshot.campaign?.severity || 'warning')}`,
+      `Ads: ${severityLabel(snapshot.adResearch?.severity || 'warning')}`,
+    ];
+    summaryEl.textContent = pieces.join(' | ');
+  }
+
+  if (updatedEl) {
+    updatedEl.textContent = `Atualizado em ${formatStatusDate(snapshot.updatedAt)}`;
+  }
+
+  updateBadge('status', severity === 'error' ? '!' : severity === 'degraded' ? '!' : severity === 'warning' ? '•' : null);
+
+  renderStatusCard('status-card-whatsapp', snapshot.whatsapp, {
+    eyebrow: 'Conexao',
+    title: 'WhatsApp',
+    summary: (section) => `Estado atual: ${section.status || 'desconhecido'}.`,
+    metrics: (section) => [
+      statusMetric('Estado', section.status || '--'),
+      statusMetric('WA Web', section.webVersion || '--'),
+      statusMetric('Baileys', section.baileysVersion || '--'),
+      statusMetric('Rota', section.predominantRoute || '--'),
+    ],
+    details: (section) => [
+      statusDetail('Reconexoes', section.reconnectCount ?? 0),
+      statusDetail('Ultimo erro', section.lastDisconnect?.message || 'Nenhum'),
+      statusDetail('Ultima rota', section.lastInboundRoute?.addressingMode || '--'),
+    ],
+  });
+
+  renderStatusCard('status-card-ai', snapshot.ai, {
+    eyebrow: 'Inteligencia',
+    title: 'IA',
+    summary: (section) => `Provedor efetivo ${section.effectiveProvider || '--'} com modelo ${section.effectiveAiModel || '--'}.`,
+    metrics: (section) => [
+      statusMetric('Ativa', section.enabled ? 'Sim' : 'Nao'),
+      statusMetric('Modelo', section.effectiveAiModel || '--'),
+      statusMetric('Chave', section.hasEffectiveKey ? `Ativa (${section.effectiveKeySource || '--'})` : 'Ausente'),
+    ],
+    details: (section) => [
+      statusDetail('Origem Groq', section.groqKeySource || '--'),
+      statusDetail('Ultimo teste', section.lastKeyTest?.message || 'Nao testado'),
+      statusDetail('Testado em', formatStatusDate(section.lastKeyTest?.checkedAt)),
+    ],
+  });
+
+  renderStatusCard('status-card-campaign', snapshot.campaign, {
+    eyebrow: 'Fila',
+    title: 'Campanhas',
+    summary: (section) => `Status da fila: ${section.status || 'idle'}.`,
+    metrics: (section) => [
+      statusMetric('Aceitas', section.stats?.accepted ?? 0),
+      statusMetric('Confirmadas', section.stats?.confirmed ?? 0),
+      statusMetric('Sem confirmacao', section.stats?.acceptedUnconfirmed ?? 0),
+      statusMetric('Falhas', section.stats?.failed ?? 0),
+    ],
+    details: (section) => [
+      statusDetail('Taxa confirmacao', `${section.confirmationRate ?? 0}%`),
+      statusDetail('Taxa sem confirmacao', `${section.acceptedUnconfirmedRate ?? 0}%`),
+      statusDetail('Rota dominante', section.dominantRouteKind || '--'),
+      statusDetail('Ultimo alvo', section.recentResolvedTargets?.[0]?.resolvedTarget || '--'),
+    ],
+  });
+
+  renderStatusCard('status-card-ad-research', snapshot.adResearch, {
+    eyebrow: 'Mercado',
+    title: 'Pesquisa Ads',
+    summary: (section) => section.latestJob
+      ? `Ultima busca: ${section.latestJob.query || '--'} (${section.latestJob.status || '--'}).`
+      : 'Nenhuma busca recente consolidada.',
+    metrics: (section) => [
+      statusMetric('Coletor', section.collectorReady === null ? 'Nao validado' : section.collectorReady ? 'Pronto' : 'Falhou'),
+      statusMetric('Ultima busca', section.latestJob?.query || '--'),
+      statusMetric('Avisos', section.latestJob?.warnings ?? 0),
+    ],
+    details: (section) => [
+      statusDetail('Falha fatal', section.latestJob?.fatalReason || 'Nenhuma'),
+      statusDetail('Ultima validacao', formatStatusDate(section.lastCollectorCheck?.checkedAt)),
+      statusDetail('Mensagem', section.lastCollectorCheck?.message || '--'),
+    ],
+  });
+
+  renderStatusCard('status-card-automations', snapshot.automations, {
+    eyebrow: 'Rotinas',
+    title: 'Automacoes',
+    summary: (section) => `Follow-up ${section.followUpEnabled ? 'ativo' : 'desligado'} e relatorio ${section.reportEnabled ? 'ativo' : 'desligado'}.`,
+    metrics: (section) => [
+      statusMetric('Follow-up', section.followUpEnabled ? 'Ativo' : 'Off'),
+      statusMetric('Relatorio', section.reportEnabled ? 'Ativo' : 'Off'),
+      statusMetric('Horario', section.reportHour || '--'),
+    ],
+    details: (section) => [
+      statusDetail('1o follow-up', `${section.followUp1Hours ?? 0}h`),
+      statusDetail('2o follow-up', `${section.followUp2Hours ?? 0}h`),
+      statusDetail('Frio apos', `${section.followUpColdHours ?? 0}h`),
+    ],
+  });
+
+  renderStatusCard('status-card-storage', snapshot.storage, {
+    eyebrow: 'Persistencia',
+    title: 'Storage',
+    summary: (section) => `Diretorio efetivo: ${section.root || '--'}.`,
+    metrics: (section) => [
+      statusMetric('Auth', section.authPresent ? 'OK' : 'Ausente'),
+      statusMetric('Config', section.configPresent ? 'OK' : 'Ausente'),
+      statusMetric('Leads', section.leadsPresent ? 'OK' : 'Ausente'),
+      statusMetric('Docs', section.docsPresent ? `${section.docsCount || 0} arquivos` : 'Ausente'),
+    ],
+    details: (section) => [
+      statusDetail('Data dir', section.dataDir || '--'),
+      statusDetail('Auth dir', section.authDir || '--'),
+      statusDetail('Docs dir', section.docsDir || '--'),
+    ],
+  });
+
+  renderStatusEvents(snapshot.recentEvents || []);
+}
+
+function handleSystemStatusUpdate(snapshot) {
+  state.systemStatus = snapshot;
+  if (Object.keys(aiConfig || {}).length > 0) {
+    renderAIEffectiveSummary();
+  }
+  renderSystemStatus();
+}
+
+async function loadSystemStatus() {
+  try {
+    const response = await fetch('/api/system/status');
+    const snapshot = await response.json();
+    handleSystemStatusUpdate(snapshot);
+  } catch (error) {
+    console.error('Failed to load system status:', error);
+  }
+}
+
+async function refreshSystemStatus() {
+  try {
+    const response = await fetch('/api/system/status/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checks: [] }),
+    });
+    const snapshot = await response.json();
+    handleSystemStatusUpdate(snapshot);
+    showToast('Diagnostico atualizado.', 'success');
+  } catch (error) {
+    showToast('Erro ao atualizar diagnostico: ' + error.message, 'error');
+  }
+}
+
+async function testEffectiveAIStatus() {
+  try {
+    const response = await fetch('/api/system/status/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checks: ['ai'] }),
+    });
+    const snapshot = await response.json();
+    handleSystemStatusUpdate(snapshot);
+    const message = snapshot?.ai?.lastKeyTest?.message || 'Teste concluido.';
+    const ok = snapshot?.ai?.lastKeyTest?.status === 'ok';
+    showToast(message, ok ? 'success' : 'error');
+  } catch (error) {
+    showToast('Erro ao testar a IA efetiva: ' + error.message, 'error');
+  }
+}
+
+async function revalidateAdsCollector() {
+  try {
+    const response = await fetch('/api/system/status/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checks: ['ads'] }),
+    });
+    const snapshot = await response.json();
+    handleSystemStatusUpdate(snapshot);
+    showToast('Coletor de anuncios revalidado.', 'success');
+  } catch (error) {
+    showToast('Erro ao revalidar o coletor: ' + error.message, 'error');
+  }
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1349,7 +1667,7 @@ function getAdResearchEmptyStateMessage() {
 let aiConfig = {};
 let consultorCount = 0;
 const AI_PROVIDER_DEFAULTS = {
-  groq: 'llama-3.1-8b-instant',
+  groq: 'llama-3.3-70b-versatile',
   gemini: 'gemini-2.5-flash',
 };
 
@@ -1357,18 +1675,31 @@ function getProviderDefaultModel(provider = 'groq') {
   return AI_PROVIDER_DEFAULTS[provider] || AI_PROVIDER_DEFAULTS.groq;
 }
 
-function updateKeyField(inputId, statusId, hasKey, maskedKey, defaultPlaceholder) {
+function updateKeyField(inputId, statusId, hasSavedKey, maskedKey, defaultPlaceholder, effectiveInfo = {}) {
   const input = document.getElementById(inputId);
   const status = document.getElementById(statusId);
   if (!input) return;
 
   input.value = '';
-  input.placeholder = hasKey && maskedKey ? maskedKey : defaultPlaceholder;
+  input.placeholder = hasSavedKey && maskedKey ? maskedKey : defaultPlaceholder;
 
   if (status) {
-    status.textContent = hasKey
-      ? `Chave salva: ${maskedKey || 'preenchida'}. Deixe em branco para manter.`
-      : 'Nenhuma chave salva ainda.';
+    if (hasSavedKey) {
+      status.textContent = `Chave salva: ${maskedKey || 'preenchida'}. Deixe em branco para manter.`;
+      return;
+    }
+
+    if (effectiveInfo.hasEffectiveKey) {
+      const sourceLabel = effectiveInfo.keySource === 'default'
+        ? 'padrao'
+        : effectiveInfo.keySource === 'env'
+          ? 'env'
+          : effectiveInfo.keySource || 'ativa';
+      status.textContent = `Sem chave salva. Chave efetiva ativa via ${sourceLabel}.`;
+      return;
+    }
+
+    status.textContent = 'Nenhuma chave efetiva disponivel ainda.';
   }
 }
 
@@ -1396,6 +1727,32 @@ function updateModelFields(provider, resetValues = true) {
   if (qualificationHint) {
     qualificationHint.textContent = 'Deixe em branco para reaproveitar o modelo principal. Preencha somente se quiser um modelo separado para extracao e qualificacao.';
   }
+}
+
+function renderAIEffectiveSummary() {
+  const box = document.getElementById('ai-effective-summary');
+  if (!box) return;
+
+  const aiState = state.systemStatus?.ai || {};
+  const provider = aiConfig.effectiveProvider || aiState.effectiveProvider || aiConfig.aiProvider || 'groq';
+  const model = aiConfig.effectiveAiModel || aiState.effectiveAiModel || getProviderDefaultModel(provider);
+  const keySource = aiConfig.effectiveKeySource || aiState.effectiveKeySource || 'missing';
+  const keySourceLabel = keySource === 'saved'
+    ? 'salva'
+    : keySource === 'env'
+      ? 'env'
+      : keySource === 'default'
+        ? 'padrao'
+        : 'ausente';
+  const hasEffectiveKey = aiConfig.hasEffectiveKey ?? aiState.hasEffectiveKey;
+  const keyText = hasEffectiveKey
+    ? `chave ativa (${keySourceLabel})`
+    : 'sem chave efetiva';
+
+  box.innerHTML = `
+    <h3>Configuracao efetiva</h3>
+    <p><strong>Provedor:</strong> ${escapeHtml(provider)} | <strong>Modelo:</strong> ${escapeHtml(model)} | <strong>Chave:</strong> ${escapeHtml(keyText)}</p>
+  `;
 }
 
 function resetPDFUploadArea() {
@@ -1428,13 +1785,20 @@ async function loadAIConfig() {
     switchAIProvider(provider, false);
 
     // Keys
-    updateKeyField('ai-groq-key', 'groq-key-status', !!aiConfig.hasGroqKey, aiConfig.groqKeyMasked, 'gsk_...');
-    updateKeyField('ai-gemini-key', 'gemini-key-status', !!aiConfig.hasGeminiKey, aiConfig.geminiKeyMasked, 'AIza...');
+    updateKeyField('ai-groq-key', 'groq-key-status', !!aiConfig.hasGroqKey, aiConfig.groqKeyMasked, 'gsk_...', {
+      hasEffectiveKey: !!aiConfig.hasEffectiveGroqKey,
+      keySource: aiConfig.groqKeySource,
+    });
+    updateKeyField('ai-gemini-key', 'gemini-key-status', !!aiConfig.hasGeminiKey, aiConfig.geminiKeyMasked, 'AIza...', {
+      hasEffectiveKey: !!aiConfig.hasEffectiveGeminiKey,
+      keySource: aiConfig.geminiKeySource,
+    });
 
     // Models
-    document.getElementById('ai-model').value = aiConfig.aiModel || getProviderDefaultModel(provider);
+    document.getElementById('ai-model').value = aiConfig.aiModel || aiConfig.effectiveAiModel || getProviderDefaultModel(provider);
     document.getElementById('qualification-model').value = aiConfig.qualificationModel || '';
     updateModelFields(provider, false);
+    renderAIEffectiveSummary();
 
     // Rest of fields
     document.getElementById('ai-agent-name').value = aiConfig.agentName || '';
@@ -1469,6 +1833,7 @@ async function loadAIConfig() {
     resetPDFUploadArea();
     await loadDocs();
     await updateAIStats();
+    if (state.systemStatus) renderSystemStatus();
   } catch (err) {
     console.error('Failed to load AI config:', err);
   }
@@ -1503,7 +1868,9 @@ function toggleAIEnabled() {
   const typedKey = provider === 'gemini'
     ? document.getElementById('ai-gemini-key').value.trim()
     : document.getElementById('ai-groq-key').value.trim();
-  const savedKey = provider === 'gemini' ? !!aiConfig.hasGeminiKey : !!aiConfig.hasGroqKey;
+  const savedKey = provider === 'gemini'
+    ? !!aiConfig.hasEffectiveGeminiKey
+    : !!aiConfig.hasEffectiveGroqKey;
 
   if (enabled && !typedKey && !savedKey) {
     updateAIStatusUI(false);
@@ -1569,7 +1936,9 @@ function selectBehaviorCard(group, radioEl) {
 
 async function saveAIConfig() {
   const data = collectAIFormData();
-  const savedKeyAvailable = data.aiProvider === 'groq' ? !!aiConfig.hasGroqKey : !!aiConfig.hasGeminiKey;
+  const savedKeyAvailable = data.aiProvider === 'groq'
+    ? !!aiConfig.hasEffectiveGroqKey
+    : !!aiConfig.hasEffectiveGeminiKey;
   const hasKey = data.aiProvider === 'groq'
     ? !!data.groqKey || savedKeyAvailable
     : !!data.geminiKey || savedKeyAvailable;
@@ -1599,7 +1968,9 @@ async function testAIKey() {
   const key = provider === 'gemini'
     ? document.getElementById('ai-gemini-key').value.trim()
     : document.getElementById('ai-groq-key').value.trim();
-  const hasSavedKey = provider === 'gemini' ? !!aiConfig.hasGeminiKey : !!aiConfig.hasGroqKey;
+  const hasSavedKey = provider === 'gemini'
+    ? !!aiConfig.hasEffectiveGeminiKey
+    : !!aiConfig.hasEffectiveGroqKey;
   const model = document.getElementById('ai-model').value.trim() || getProviderDefaultModel(provider);
   if (!key && !hasSavedKey) { showToast('Informe uma API Key primeiro.', 'warning'); return; }
   const btn = document.getElementById(provider === 'gemini' ? 'btn-test-key-gem' : 'btn-test-key');

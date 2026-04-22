@@ -102,6 +102,10 @@ class WhatsAppManager extends EventEmitter {
         this._preferredJidByPhone = new Map();
         this._outboundRecords = new Map();
         this._messageCache = new Map();
+        this._recentOutbound = [];
+        this._routeStats = { pn: 0, lid: 0, unknown: 0 };
+        this._lastInboundRoute = null;
+        this._reconnectCount = 0;
         this._baileysVersionRange = readBaileysVersionRange();
         this._latestWebVersion = null;
         this._envVersionOverride = parseVersionOverride(process.env.WA_WEB_VERSION_OVERRIDE);
@@ -166,6 +170,7 @@ class WhatsAppManager extends EventEmitter {
     }
 
     _broadcastStatus(status = this.status) {
+        this.emit('status-change', this.getStatus());
         this.broadcast({ type: 'status', status, details: this.lastDisconnect });
     }
 
@@ -295,7 +300,12 @@ class WhatsAppManager extends EventEmitter {
 
     _emitOutboundStatus(record) {
         const snapshot = this._snapshotOutbound(record);
-        if (snapshot) this.emit('outbound-status', snapshot);
+        if (!snapshot) return;
+        this._recentOutbound.push(snapshot);
+        if (this._recentOutbound.length > 12) {
+            this._recentOutbound = this._recentOutbound.slice(-12);
+        }
+        this.emit('outbound-status', snapshot);
     }
 
     _scheduleOutboundCleanup(messageId) {
@@ -546,6 +556,7 @@ class WhatsAppManager extends EventEmitter {
                     this.qrCode = null;
                     this.sock = null;
                     this.reconnecting = false;
+                    if (shouldReconnect) this._reconnectCount += 1;
                     this._broadcastStatus('disconnected');
                     if (shouldReconnect) {
                         console.log('[WhatsApp] Reconectando em 3s...');
@@ -602,6 +613,18 @@ class WhatsAppManager extends EventEmitter {
                     if (remoteJidAlt || addressingMode) {
                         console.log(`[WA] inbound route remoteJid=${remoteJid} remoteJidAlt=${remoteJidAlt || '-'} addressingMode=${addressingMode || '-'}`);
                     }
+                    const routeKey = addressingMode === 'lid' ? 'lid' : addressingMode === 'pn' ? 'pn' : 'unknown';
+                    this._routeStats[routeKey] = (this._routeStats[routeKey] || 0) + 1;
+                    this._lastInboundRoute = {
+                        remoteJid,
+                        remoteJidAlt: remoteJidAlt || '',
+                        addressingMode: addressingMode || 'unknown',
+                        at: new Date().toISOString(),
+                    };
+                    this.emit('route-update', {
+                        routeStats: { ...this._routeStats },
+                        lastInboundRoute: this._lastInboundRoute,
+                    });
 
                     if (this.onMessage) {
                         try {
@@ -774,12 +797,19 @@ class WhatsAppManager extends EventEmitter {
     }
 
     getStatus() {
+        const predominantRoute = Object.entries(this._routeStats)
+            .sort((left, right) => right[1] - left[1])[0]?.[0] || 'unknown';
         return {
             status: this.status,
             qrCode: this.qrCode,
             webVersion: this._getVersionLabel(this._activeConnectVersion || this._getCurrentConnectVersion()),
             baileysVersion: this._baileysVersionRange,
             lastDisconnect: this.lastDisconnect,
+            reconnectCount: this._reconnectCount,
+            routeStats: { ...this._routeStats },
+            predominantRoute,
+            lastInboundRoute: this._lastInboundRoute,
+            recentOutbound: this._recentOutbound.slice(-8).reverse(),
         };
     }
 

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { callAI } from '../ai/gemini.js';
+import { resolveEffectiveAIConfig } from '../data/config-manager.js';
 import { collectMetaAds, preflightMetaCollector } from './meta-collector.js';
 import { expandSearchQuery } from './query-expander.js';
 import { rankAds, sortRankedAds } from './ranker.js';
@@ -57,8 +58,9 @@ function summarizeCompletion(job, finalResults) {
 }
 
 async function enrichSummariesWithAI(results, config) {
-  const provider = config.aiProvider || 'groq';
-  const hasKey = provider === 'gemini' ? !!config.geminiKey : !!config.groqKey;
+  const effectiveConfig = resolveEffectiveAIConfig(config);
+  const provider = effectiveConfig.effectiveProvider || 'groq';
+  const hasKey = !!effectiveConfig.hasEffectiveKey;
   if (!hasKey || results.length === 0) return results;
 
   const topResults = results.slice(0, 6);
@@ -79,7 +81,7 @@ async function enrichSummariesWithAI(results, config) {
       ].filter(Boolean).join('\n');
 
       const response = await callAI(
-        config,
+        effectiveConfig,
         { systemPrompt, history: [], userMessage },
         { purpose: 'qualification' },
       );
@@ -98,8 +100,18 @@ async function enrichSummariesWithAI(results, config) {
   return results.map((result, index) => enriched[index] || result);
 }
 
-export function createAdResearchService({ loadConfig, broadcast }) {
+export function createAdResearchService({ loadConfig, broadcast, onStatusEvent }) {
   const jobs = new Map();
+  let statusReporter = typeof onStatusEvent === 'function' ? onStatusEvent : null;
+
+  function reportStatusEvent(event = {}) {
+    if (!statusReporter) return;
+    statusReporter({
+      scope: 'ad-research',
+      ts: new Date().toISOString(),
+      ...event,
+    });
+  }
 
   function emit(job) {
     broadcast({ type: 'ad_research_update', job: sanitizeJob(job) });
@@ -116,6 +128,15 @@ export function createAdResearchService({ loadConfig, broadcast }) {
   function updateJob(job, updates = {}) {
     Object.assign(job, updates, { updatedAt: new Date().toISOString() });
     emit(job);
+    if (updates.status || updates.error) {
+      reportStatusEvent({
+        type: 'job-update',
+        severity: updates.status === 'failed' ? 'error' : updates.status === 'partial' ? 'warning' : 'info',
+        title: 'Pesquisa Ads',
+        message: updates.error || updates.progress?.message || `Busca ${job.status}.`,
+        job: sanitizeJob(job),
+      });
+    }
   }
 
   async function failJob(job, message, diagnostics = {}) {
@@ -353,6 +374,10 @@ export function createAdResearchService({ loadConfig, broadcast }) {
   }
 
   return {
+    setStatusReporter(reporter) {
+      statusReporter = typeof reporter === 'function' ? reporter : null;
+    },
+
     startSearch({ query, region = '', sort = 'popular' }) {
       const safeSort = SORT_MODES.has(sort) ? sort : 'popular';
       const job = {
@@ -390,6 +415,13 @@ export function createAdResearchService({ loadConfig, broadcast }) {
 
       jobs.set(job.jobId, job);
       emit(job);
+      reportStatusEvent({
+        type: 'job-update',
+        severity: 'info',
+        title: 'Pesquisa Ads',
+        message: `Nova busca iniciada para ${job.query}.`,
+        job: sanitizeJob(job),
+      });
       setTimeout(() => {
         runJob(job).catch((error) => {
           void failJob(job, error.message || 'Erro inesperado ao iniciar a busca.', {

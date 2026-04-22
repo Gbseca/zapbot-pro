@@ -1,4 +1,4 @@
-import { loadConfig } from '../data/config-manager.js';
+import { loadConfig, resolveEffectiveAIConfig } from '../data/config-manager.js';
 import { getLead, saveLead } from '../data/leads-manager.js';
 import { buildContext, buildQualificationContext } from './context-builder.js';
 import { callAI } from './gemini.js';
@@ -266,11 +266,11 @@ async function persistSimpleReply(wa, leadId, lead, target, reply, extraUpdates 
 export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
 
-  const config = loadConfig();
+  const config = resolveEffectiveAIConfig(loadConfig());
   if (!config.aiEnabled) return;
 
-  const provider = config.aiProvider || 'groq';
-  const hasKey = provider === 'gemini' ? !!config.geminiKey : !!config.groqKey;
+  const provider = config.effectiveProvider || 'groq';
+  const hasKey = !!config.hasEffectiveKey;
   if (!hasKey) {
     console.warn(`[Agent] No API key for "${provider}"`);
     return;

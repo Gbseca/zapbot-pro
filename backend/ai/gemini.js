@@ -1,16 +1,17 @@
 /**
- * AI provider module — supports Groq and Google Gemini.
+ * AI provider module - supports Groq and Google Gemini.
  * Reply and qualification can use different models.
  */
 
-import { getDefaultModel } from '../data/config-manager.js';
+import { getDefaultModel, resolveEffectiveAIConfig } from '../data/config-manager.js';
 
 function resolveModel(config, purpose = 'reply') {
-  const provider = config.aiProvider || 'groq';
-  if (purpose === 'qualification' && config.qualificationModel) {
-    return config.qualificationModel;
+  const effective = resolveEffectiveAIConfig(config);
+  const provider = effective.effectiveProvider || 'groq';
+  if (purpose === 'qualification' && effective.qualificationModel) {
+    return effective.qualificationModel;
   }
-  return config.aiModel || getDefaultModel(provider);
+  return effective.effectiveAiModel || getDefaultModel(provider);
 }
 
 function buildHistory(history = []) {
@@ -21,9 +22,9 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, opt
   const jsonMode = options.purpose === 'qualification';
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...buildHistory(history).map(h => ({
-      role: h.role === 'assistant' ? 'assistant' : 'user',
-      content: h.content,
+    ...buildHistory(history).map((item) => ({
+      role: item.role === 'assistant' ? 'assistant' : 'user',
+      content: item.content,
     })),
     { role: 'user', content: userMessage },
   ];
@@ -40,7 +41,7 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, opt
     body.response_format = { type: 'json_object' };
   }
 
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -49,18 +50,18 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, opt
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Groq ${res.status}: ${err}`);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Groq ${response.status}: ${errorText}`);
   }
 
-  const data = await res.json();
+  const data = await response.json();
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
 async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -70,16 +71,18 @@ async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
       }),
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return { ok: false, message: err?.error?.message || `Erro ${res.status}` };
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      return { ok: false, message: errorPayload?.error?.message || `Erro ${response.status}` };
     }
 
-    const data = await res.json();
-    const label = model === 'llama-3.1-8b-instant' ? 'Groq OK — Llama 3.1 8B ativo!' : `Groq OK — ${model} ativo!`;
+    const data = await response.json();
+    const label = model === 'llama-3.3-70b-versatile'
+      ? 'Groq OK - Llama 3.3 70B ativo!'
+      : `Groq OK - ${model} ativo!`;
     return { ok: true, message: `${label} (${data.choices?.[0]?.message?.content?.trim() || 'OK'})` };
-  } catch (err) {
-    return { ok: false, message: err.message };
+  } catch (error) {
+    return { ok: false, message: error.message };
   }
 }
 
@@ -103,12 +106,12 @@ async function callGemini(apiKey, { systemPrompt, history = [], userMessage }, o
     generationConfig,
   });
 
-  const gcHistory = buildHistory(history).map(h => ({
-    role: h.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: h.content }],
+  const chatHistory = buildHistory(history).map((item) => ({
+    role: item.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: item.content }],
   }));
 
-  const chat = model.startChat({ history: gcHistory });
+  const chat = model.startChat({ history: chatHistory });
   const result = await chat.sendMessage(userMessage);
   return result.response.text().trim();
 }
@@ -117,24 +120,25 @@ async function testGeminiKey(apiKey, model = getDefaultModel('gemini')) {
   try {
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(apiKey);
-    const gm = genAI.getGenerativeModel({ model });
-    const result = await gm.generateContent('Responda só com: OK');
-    return { ok: true, message: `Gemini OK — ${model} ativo! (${result.response.text().trim()})` };
-  } catch (err) {
-    return { ok: false, message: err.message };
+    const modelClient = genAI.getGenerativeModel({ model });
+    const result = await modelClient.generateContent('Responda so com: OK');
+    return { ok: true, message: `Gemini OK - ${model} ativo! (${result.response.text().trim()})` };
+  } catch (error) {
+    return { ok: false, message: error.message };
   }
 }
 
 export async function callAI(config, context, options = {}) {
-  const provider = config.aiProvider || 'groq';
+  const effective = resolveEffectiveAIConfig(config);
+  const provider = effective.effectiveProvider || 'groq';
   const purpose = options.purpose || 'reply';
-  const model = options.model || resolveModel(config, purpose);
+  const model = options.model || resolveModel(effective, purpose);
 
   if (provider === 'gemini') {
-    return callGemini(config.geminiKey, context, { ...options, model, purpose });
+    return callGemini(effective.effectiveGeminiKey, context, { ...options, model, purpose });
   }
 
-  return callGroq(config.groqKey, context, { ...options, model, purpose });
+  return callGroq(effective.effectiveGroqKey, context, { ...options, model, purpose });
 }
 
 export async function testAPIKey(provider, apiKey, model) {

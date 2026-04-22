@@ -1,4 +1,5 @@
 import { callAI } from '../ai/gemini.js';
+import { resolveEffectiveAIConfig } from '../data/config-manager.js';
 import { normalizeText, tokenizeText, uniqueStrings } from './utils.js';
 
 const NICHE_PACKS = [
@@ -40,8 +41,8 @@ const NICHE_PACKS = [
 ];
 
 function hasResearchAI(config = {}) {
-  const provider = config.aiProvider || 'groq';
-  return provider === 'gemini' ? !!config.geminiKey : !!config.groqKey;
+  const effective = resolveEffectiveAIConfig(config);
+  return !!effective.hasEffectiveKey;
 }
 
 function getPackTerms(query) {
@@ -124,6 +125,7 @@ async function expandWithAI({ query, region, config }) {
 }
 
 export async function expandSearchQuery({ query, region = '', config = {} }) {
+  const effectiveConfig = resolveEffectiveAIConfig(config);
   const fallbackSearchTerms = uniqueStrings([
     query,
     ...getPackTerms(query),
@@ -137,7 +139,7 @@ export async function expandSearchQuery({ query, region = '', config = {} }) {
   ], 24);
 
   const expansion = {
-    provider: config.aiProvider || 'groq',
+    provider: effectiveConfig.effectiveProvider || 'groq',
     usedAI: false,
     intentSummary: '',
     angles: [],
@@ -146,13 +148,13 @@ export async function expandSearchQuery({ query, region = '', config = {} }) {
     warnings: [],
   };
 
-  if (!hasResearchAI(config)) {
+  if (!hasResearchAI(effectiveConfig)) {
     expansion.warnings.push('Busca sem IA: usando expansao heuristica local.');
     return expansion;
   }
 
   try {
-    const aiExpansion = await expandWithAI({ query, region, config });
+    const aiExpansion = await expandWithAI({ query, region, config: effectiveConfig });
     expansion.usedAI = true;
     expansion.intentSummary = aiExpansion.intentSummary;
     expansion.angles = aiExpansion.angles;

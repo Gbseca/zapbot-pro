@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { callAI } from './ai/gemini.js';
+import { resolveEffectiveAIConfig } from './data/config-manager.js';
 import { normalizePhone } from './ai/lead-detector.js';
 
 const ACTIVE_COLLECTIONS_STATUSES = new Set(['running', 'paused']);
@@ -218,8 +219,7 @@ function setActiveCampaignState(nextState = {}) {
 }
 
 function hasAIKey(config = {}) {
-  const provider = config.aiProvider || 'groq';
-  return provider === 'gemini' ? !!config.geminiKey : !!config.groqKey;
+  return !!resolveEffectiveAIConfig(config).hasEffectiveKey;
 }
 
 async function classifyCampaignIntentWithAI(message = '', config = {}) {
