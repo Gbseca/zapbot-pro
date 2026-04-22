@@ -1,10 +1,11 @@
 import { EventEmitter } from 'events';
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import { fileURLToPath } from 'url';
+import { inspect } from 'util';
 import { AUTH_DIR } from './storage/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,6 +60,18 @@ function ensureTrackedError(error, extras = {}) {
         if (value !== undefined && value !== null) err[key] = value;
     });
     return err;
+}
+
+function describeSignalSessionError(error) {
+    const dump = inspect(error, { depth: 3 });
+    const text = [
+        error?.message || '',
+        error?.stack || '',
+        dump,
+    ].join('\n');
+
+    const matched = /closing stale open session|closing session:\s*sessionentry|prekey|sessionentry/i.test(text);
+    return { matched, dump };
 }
 
 function normalizeListPayload(payload) {
@@ -419,6 +432,10 @@ class WhatsAppManager extends EventEmitter {
         this.reconnecting = true;
         try {
             const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
+            const authState = {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, this.logger),
+            };
             const selectedVersion = this._getCurrentConnectVersion();
             const usingEnvOverride = !!this._envVersionOverride && sameVersion(selectedVersion, this._envVersionOverride);
             const versionLabel = this._getVersionLabel(selectedVersion);
@@ -429,7 +446,7 @@ class WhatsAppManager extends EventEmitter {
             console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${versionLabel}${usingEnvOverride ? ' (override)' : ''}`);
 
             const socketConfig = {
-                auth: state,
+                auth: authState,
                 logger: this.logger,
                 browser: Browsers.ubuntu('Chrome'),
                 generateHighQualityLinkPreview: false,
@@ -583,20 +600,50 @@ class WhatsAppManager extends EventEmitter {
         const targetInfo = this.resolveOutboundTarget(target);
         console.log(`[WA] ${kind} targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind}`);
 
-        try {
-            const result = await builder(targetInfo.resolvedJid);
-            const accepted = this._registerAcceptedOutbound(kind, targetInfo, result);
-            console.log(`[WA] ${kind} accepted targetOriginal=${targetInfo.originalTarget} targetResolved=${accepted.resolvedJid} targetKind=${accepted.targetKind} messageId=${accepted.messageId}`);
-            return accepted;
-        } catch (error) {
-            const err = ensureTrackedError(error, {
-                targetOriginal: targetInfo.originalTarget,
-                targetResolved: targetInfo.resolvedJid,
-                targetKind: targetInfo.targetKind,
-                resolvedPhone: targetInfo.resolvedPhone || null,
-            });
-            console.error(`[WA] ${kind} failed targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind}: ${err.message}`);
-            throw err;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+            try {
+                const result = await builder(targetInfo.resolvedJid);
+                const accepted = this._registerAcceptedOutbound(kind, targetInfo, result);
+                console.log(`[WA] ${kind} accepted targetOriginal=${targetInfo.originalTarget} targetResolved=${accepted.resolvedJid} targetKind=${accepted.targetKind} messageId=${accepted.messageId}`);
+                return accepted;
+            } catch (error) {
+                const err = ensureTrackedError(error, {
+                    targetOriginal: targetInfo.originalTarget,
+                    targetResolved: targetInfo.resolvedJid,
+                    targetKind: targetInfo.targetKind,
+                    resolvedPhone: targetInfo.resolvedPhone || null,
+                });
+                const signalSession = describeSignalSessionError(err);
+                const errorSummary = {
+                    name: err.name || 'Error',
+                    code: err.code || null,
+                    message: err.message,
+                    data: err.data || null,
+                    output: err.output?.payload || null,
+                    stack: err.stack ? err.stack.split('\n').slice(0, 4).join(' | ') : null,
+                };
+
+                if (signalSession.matched && attempt < 2) {
+                    console.warn(`[WA] ${kind} signal session retry targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} attempt=${attempt}`, errorSummary);
+                    this.broadcast({
+                        type: 'log',
+                        level: 'warning',
+                        message: 'WhatsApp encontrou uma sessao antiga desta conversa e vai tentar reenviar automaticamente.',
+                    });
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    continue;
+                }
+
+                console.error(`[WA] ${kind} failed targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind}`, errorSummary);
+                if (signalSession.matched) {
+                    this.broadcast({
+                        type: 'log',
+                        level: 'error',
+                        message: 'WhatsApp falhou ao cifrar a mensagem desta conversa (erro de sessao Signal/prekey).',
+                    });
+                }
+                throw err;
+            }
         }
     }
 
