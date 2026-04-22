@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
@@ -9,8 +10,67 @@ import { AUTH_DIR } from './storage/paths.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-class WhatsAppManager {
+const DEFAULT_CONFIRMATION_TIMEOUT_MS = 25_000;
+const OUTBOUND_RECORD_TTL_MS = 5 * 60 * 1000;
+
+function readBaileysVersionRange() {
+    try {
+        const pkgPath = path.resolve(__dirname, '..', 'package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        return pkg?.dependencies?.['@whiskeysockets/baileys'] || 'unknown';
+    } catch {
+        return 'unknown';
+    }
+}
+
+function parseVersionOverride(raw) {
+    const parts = String(raw || '')
+        .split(/[^\d]+/)
+        .map(part => Number(part))
+        .filter(Number.isFinite);
+
+    return parts.length >= 3 ? parts.slice(0, 3) : null;
+}
+
+function stringifyVersion(version) {
+    return Array.isArray(version) ? version.join('.') : String(version || 'unknown');
+}
+
+function toBaseId(value) {
+    return String(value || '').split('@')[0].split(':')[0];
+}
+
+function normalizePhoneCandidate(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return null;
+    if (/^55\d{10,11}$/.test(digits)) return digits;
+    if (/^\d{10,11}$/.test(digits)) return `55${digits}`;
+    return null;
+}
+
+function ensureTrackedError(error, extras = {}) {
+    const err = error instanceof Error ? error : new Error(String(error || 'Unknown error'));
+    Object.entries(extras).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) err[key] = value;
+    });
+    return err;
+}
+
+function normalizeListPayload(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (payload == null) return [];
+    return [payload];
+}
+
+function createUnresolvedLidError(target) {
+    const err = new Error(`Nao foi possivel resolver o numero real para ${target}`);
+    err.code = 'UNRESOLVED_LID_TARGET';
+    return err;
+}
+
+class WhatsAppManager extends EventEmitter {
     constructor(wss) {
+        super();
         this.sock = null;
         this.qrCode = null;
         this.status = 'disconnected';
@@ -18,34 +78,25 @@ class WhatsAppManager {
         this.authPath = AUTH_DIR;
         this.reconnecting = false;
         this.logger = pino({ level: 'silent' });
-        this.onMessage = null; // AI agent callback — set externally
-        this._contactMap = new Map(); // lid-number → real phone number
+        this.onMessage = null;
+        this._contactMap = new Map();
+        this._outboundRecords = new Map();
+        this._baileysVersionRange = readBaileysVersionRange();
+        this._latestWebVersion = null;
     }
 
-    // Build the correct WhatsApp JID from a number or full JID
-    // Handles: "21999990000" → "5521999990000@s.whatsapp.net"
-    //          "5521999990000" → "5521999990000@s.whatsapp.net" (no double 55)
-    //          "5521999990000@s.whatsapp.net" → unchanged
     static buildJid(number) {
-        const s = String(number);
-        if (s.includes('@')) return s; // Already a full JID
+        const s = String(number || '');
+        if (s.includes('@')) return s;
         const clean = s.replace(/\D/g, '');
         if (clean.startsWith('55')) return `${clean}@s.whatsapp.net`;
         return `55${clean}@s.whatsapp.net`;
     }
 
-    /**
-     * Resolves the best display phone number from a Baileys JID or LID.
-     * Priority: manual map → valid BR number as-is → raw id
-     */
     resolvePhone(jid) {
-        const baseId = String(jid).split('@')[0].split(':')[0];
-        // Manual map (built from contacts.upsert events)
+        const baseId = toBaseId(jid);
         if (this._contactMap.has(baseId)) return this._contactMap.get(baseId);
-        // Already a valid BR number (e.g. "5521972969475")
-        if (/^55\d{10,11}$/.test(baseId)) return baseId;
-        // Last resort: return as-is (LID)
-        return baseId;
+        return normalizePhoneCandidate(baseId) || baseId;
     }
 
     broadcast(data) {
@@ -55,12 +106,274 @@ class WhatsAppManager {
         });
     }
 
+    _registerPhoneAlias(alias, phone, source = 'unknown') {
+        const baseAlias = toBaseId(alias);
+        const normalizedPhone = normalizePhoneCandidate(phone);
+        if (!baseAlias || !normalizedPhone) return false;
+
+        this._contactMap.set(baseAlias, normalizedPhone);
+        this._contactMap.set(normalizedPhone, normalizedPhone);
+        this.emit('contact-map-update', { alias: baseAlias, phone: normalizedPhone, source });
+        return true;
+    }
+
+    _extractPhoneCandidates(msg) {
+        const rawCandidates = [
+            msg?.senderPn,
+            msg?.participantPn,
+            msg?.key?.participant,
+            msg?.participant,
+            msg?.key?.remoteJid,
+            msg?.message?.extendedTextMessage?.contextInfo?.participant,
+            msg?.message?.imageMessage?.contextInfo?.participant,
+            msg?.message?.videoMessage?.contextInfo?.participant,
+            msg?.message?.documentMessage?.contextInfo?.participant,
+        ];
+
+        return [...new Set(rawCandidates.map(normalizePhoneCandidate).filter(Boolean))];
+    }
+
+    resolveOutboundTarget(target) {
+        const originalTarget = String(target || '').trim();
+        if (!originalTarget) {
+            const err = new Error('Destino de WhatsApp invalido');
+            err.code = 'INVALID_TARGET';
+            throw err;
+        }
+
+        if (!originalTarget.includes('@')) {
+            const normalizedPhone = normalizePhoneCandidate(originalTarget);
+            if (!normalizedPhone) {
+                const err = new Error(`Numero invalido para envio: ${originalTarget}`);
+                err.code = 'INVALID_PHONE_TARGET';
+                throw err;
+            }
+            return {
+                originalTarget,
+                baseId: normalizedPhone,
+                resolvedJid: WhatsAppManager.buildJid(normalizedPhone),
+                resolvedPhone: normalizedPhone,
+                targetKind: 'phone',
+                resolutionSource: 'direct_input',
+            };
+        }
+
+        const baseId = toBaseId(originalTarget);
+
+        if (originalTarget.includes('@lid')) {
+            const mappedPhone = this._contactMap.get(baseId) || normalizePhoneCandidate(baseId);
+            if (!mappedPhone) throw createUnresolvedLidError(originalTarget);
+
+            return {
+                originalTarget,
+                baseId,
+                resolvedJid: WhatsAppManager.buildJid(mappedPhone),
+                resolvedPhone: mappedPhone,
+                targetKind: 'lid_mapped',
+                resolutionSource: this._contactMap.has(baseId) ? 'contact_map' : 'inline_digits',
+            };
+        }
+
+        const normalizedPhone = normalizePhoneCandidate(baseId);
+        return {
+            originalTarget,
+            baseId,
+            resolvedJid: normalizedPhone ? WhatsAppManager.buildJid(normalizedPhone) : originalTarget,
+            resolvedPhone: normalizedPhone || this._contactMap.get(baseId) || null,
+            targetKind: normalizedPhone ? 'jid_phone' : 'jid',
+            resolutionSource: normalizedPhone ? 'jid_digits' : 'full_jid',
+        };
+    }
+
+    _snapshotOutbound(record) {
+        if (!record) return null;
+        return {
+            messageId: record.messageId,
+            status: record.status,
+            kind: record.kind,
+            targetOriginal: record.targetOriginal,
+            targetResolved: record.targetResolved,
+            resolvedPhone: record.resolvedPhone,
+            targetKind: record.targetKind,
+            resolutionSource: record.resolutionSource,
+            ackStatus: record.ackStatus ?? null,
+            createdAt: record.createdAt,
+            acceptedAt: record.acceptedAt || null,
+            updatedAt: record.updatedAt || null,
+            error: record.error || null,
+        };
+    }
+
+    _emitOutboundStatus(record) {
+        const snapshot = this._snapshotOutbound(record);
+        if (snapshot) this.emit('outbound-status', snapshot);
+    }
+
+    _scheduleOutboundCleanup(messageId) {
+        const record = this._outboundRecords.get(messageId);
+        if (!record) return;
+
+        if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
+        record.cleanupTimer = setTimeout(() => {
+            const stale = this._outboundRecords.get(messageId);
+            if (!stale) return;
+            if (stale.timeoutHandle) clearTimeout(stale.timeoutHandle);
+            this._outboundRecords.delete(messageId);
+        }, OUTBOUND_RECORD_TTL_MS);
+    }
+
+    _finalizeOutbound(messageId, status, extra = {}) {
+        const record = this._outboundRecords.get(messageId);
+        if (!record) return null;
+        if (['confirmed', 'failed', 'delivery_timeout'].includes(record.status)) {
+            return this._snapshotOutbound(record);
+        }
+
+        record.status = status;
+        record.updatedAt = new Date().toISOString();
+        if (extra.ackStatus !== undefined) record.ackStatus = extra.ackStatus;
+        if (extra.error) record.error = extra.error;
+        if (record.timeoutHandle) {
+            clearTimeout(record.timeoutHandle);
+            record.timeoutHandle = null;
+        }
+
+        const snapshot = this._snapshotOutbound(record);
+        if (record.resolveFinal) {
+            record.resolveFinal(snapshot);
+            record.resolveFinal = null;
+        }
+        this._emitOutboundStatus(record);
+        this._scheduleOutboundCleanup(messageId);
+        return snapshot;
+    }
+
+    _touchOutbound(messageId, extra = {}) {
+        const record = this._outboundRecords.get(messageId);
+        if (!record) return null;
+        Object.assign(record, extra, { updatedAt: new Date().toISOString() });
+        this._emitOutboundStatus(record);
+        return this._snapshotOutbound(record);
+    }
+
+    _registerAcceptedOutbound(kind, targetInfo, result) {
+        const messageId = result?.key?.id;
+        if (!messageId) {
+            const err = new Error('WhatsApp aceitou o envio, mas nao retornou messageId');
+            err.code = 'MISSING_MESSAGE_ID';
+            throw err;
+        }
+
+        const createdAt = new Date().toISOString();
+        let resolveFinal;
+        const finalPromise = new Promise(resolve => {
+            resolveFinal = resolve;
+        });
+
+        const record = {
+            messageId,
+            kind,
+            status: 'accepted',
+            targetOriginal: targetInfo.originalTarget,
+            targetResolved: targetInfo.resolvedJid,
+            resolvedPhone: targetInfo.resolvedPhone || null,
+            targetKind: targetInfo.targetKind,
+            resolutionSource: targetInfo.resolutionSource,
+            ackStatus: result?.status ?? null,
+            createdAt,
+            acceptedAt: createdAt,
+            updatedAt: createdAt,
+            finalPromise,
+            resolveFinal,
+            timeoutHandle: setTimeout(() => {
+                this._finalizeOutbound(messageId, 'delivery_timeout', {
+                    error: `Sem confirmacao do WhatsApp apos ${Math.round(DEFAULT_CONFIRMATION_TIMEOUT_MS / 1000)}s`,
+                });
+            }, DEFAULT_CONFIRMATION_TIMEOUT_MS),
+            cleanupTimer: null,
+        };
+
+        this._outboundRecords.set(messageId, record);
+        this._emitOutboundStatus(record);
+
+        return {
+            messageId,
+            resolvedJid: targetInfo.resolvedJid,
+            resolvedPhone: targetInfo.resolvedPhone || null,
+            targetKind: targetInfo.targetKind,
+            resolutionSource: targetInfo.resolutionSource,
+            status: 'accepted',
+        };
+    }
+
+    async waitForOutboundFinal(messageId) {
+        const record = this._outboundRecords.get(messageId);
+        if (!record) {
+            return {
+                messageId,
+                status: 'failed',
+                error: 'Outbound nao encontrado para confirmacao',
+            };
+        }
+
+        if (['confirmed', 'failed', 'delivery_timeout'].includes(record.status)) {
+            return this._snapshotOutbound(record);
+        }
+
+        return record.finalPromise;
+    }
+
+    _handleMessagesUpdate(payload) {
+        for (const item of normalizeListPayload(payload)) {
+            const key = item?.key || item?.update?.key;
+            const messageId = key?.id;
+            if (!messageId || !this._outboundRecords.has(messageId)) continue;
+
+            const statusValue = item?.update?.status ?? item?.status;
+            const numericStatus = Number(statusValue);
+            const errorMessage = item?.update?.error?.message
+                || item?.error?.message
+                || item?.update?.error
+                || item?.error;
+
+            if (errorMessage) {
+                this._finalizeOutbound(messageId, 'failed', {
+                    error: String(errorMessage),
+                    ackStatus: Number.isFinite(numericStatus) ? numericStatus : undefined,
+                });
+                continue;
+            }
+
+            if (!Number.isFinite(numericStatus)) continue;
+            if (numericStatus >= 3) {
+                this._finalizeOutbound(messageId, 'confirmed', { ackStatus: numericStatus });
+                continue;
+            }
+
+            this._touchOutbound(messageId, { ackStatus: numericStatus });
+        }
+    }
+
+    _handleReceiptUpdate(payload) {
+        for (const item of normalizeListPayload(payload)) {
+            const messageId = item?.key?.id || item?.id || item?.messageId || item?.update?.key?.id;
+            if (!messageId || !this._outboundRecords.has(messageId)) continue;
+            this._finalizeOutbound(messageId, 'confirmed', { ackStatus: 3 });
+        }
+    }
+
     async connect() {
         if (this.reconnecting) return;
         this.reconnecting = true;
         try {
             const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
-            const { version } = await fetchLatestBaileysVersion();
+            const latest = await fetchLatestBaileysVersion();
+            const latestVersion = latest?.version || [];
+            const overrideVersion = parseVersionOverride(process.env.WA_WEB_VERSION_OVERRIDE);
+            const version = overrideVersion || latestVersion;
+            this._latestWebVersion = version;
+
+            console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${stringifyVersion(version)}${overrideVersion ? ` (override, latest ${stringifyVersion(latestVersion)})` : ''}`);
 
             this.sock = makeWASocket({
                 version,
@@ -69,6 +382,7 @@ class WhatsAppManager {
                 browser: ['ZapBot Pro', 'Chrome', '120.0.0'],
                 generateHighQualityLinkPreview: false,
                 syncFullHistory: false,
+                emitOwnEvents: true,
             });
 
             this.sock.ev.on('connection.update', async (update) => {
@@ -98,7 +412,7 @@ class WhatsAppManager {
                         console.log('[WhatsApp] Reconectando em 3s...');
                         setTimeout(() => this.connect(), 3000);
                     } else {
-                        this.broadcast({ type: 'log', level: 'warning', message: '⚠️ Sessão encerrada. Reconecte escaneando o QR.' });
+                        this.broadcast({ type: 'log', level: 'warning', message: 'Sessao encerrada. Reconecte escaneando o QR.' });
                     }
                 }
 
@@ -108,47 +422,35 @@ class WhatsAppManager {
                     this.reconnecting = false;
                     console.log('[WhatsApp] Conectado com sucesso!');
                     this.broadcast({ type: 'status', status: 'connected' });
-                    this.broadcast({ type: 'log', level: 'success', message: '✅ WhatsApp conectado com sucesso!' });
+                    this.broadcast({ type: 'log', level: 'success', message: 'WhatsApp conectado com sucesso!' });
                 }
             });
 
             this.sock.ev.on('creds.update', saveCreds);
 
-            // ── Build LID → real phone map from contact events ───────────
             this.sock.ev.on('contacts.upsert', (contacts) => {
                 let mapped = 0;
                 for (const contact of contacts) {
-                    const phoneJid = (contact.id  || '');
-                    const lidJid   = (contact.lid || '');
-                    const phone = phoneJid.split('@')[0].split(':')[0];
-                    const lid   = lidJid.split('@')[0].split(':')[0];
+                    const phoneJid = contact?.id || '';
+                    const lidJid = contact?.lid || '';
+                    const phone = normalizePhoneCandidate(phoneJid);
+                    const lid = toBaseId(lidJid);
 
-                    if (phone && /^55\d{10,11}$/.test(phone)) {
-                        if (lid && lid !== phone) {
-                            this._contactMap.set(lid, phone);
-                            mapped++;
-                        }
-                        this._contactMap.set(phone, phone);
-                    }
+                    if (phone && this._registerPhoneAlias(phone, phone, 'contacts.upsert:phone')) mapped++;
+                    if (phone && lid && lid !== phone && this._registerPhoneAlias(lid, phone, 'contacts.upsert:lid')) mapped++;
                 }
                 if (mapped > 0) {
                     console.log(`[WA] Contacts synced: ${mapped} mapped (total in map: ${this._contactMap.size})`);
                 }
             });
 
-            // ── Incoming message listener (AI Agent) ─────────────────────
             this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
                 if (type !== 'notify') return;
                 for (const msg of messages) {
-                    // Try to extract real phone from message metadata
-                    const remoteJid = msg.key?.remoteJid || '';
-                    const lid = remoteJid.split('@')[0].split(':')[0];
-                    // Some message events include the real verifiedJid
-                    const verifiedPhone = msg.key?.participant?.split('@')[0]
-                        || msg.verifiedBizName
-                        || null;
-                    if (verifiedPhone && /^55\d{10,11}$/.test(verifiedPhone)) {
-                        this._contactMap.set(lid, verifiedPhone);
+                    const remoteJid = msg?.key?.remoteJid || '';
+                    const baseId = toBaseId(remoteJid);
+                    for (const phone of this._extractPhoneCandidates(msg)) {
+                        this._registerPhoneAlias(baseId, phone, 'messages.upsert');
                     }
 
                     if (this.onMessage) {
@@ -161,67 +463,114 @@ class WhatsAppManager {
                 }
             });
 
+            this.sock.ev.on('messages.update', (updates) => this._handleMessagesUpdate(updates));
+            this.sock.ev.on('message-receipt.update', (updates) => this._handleReceiptUpdate(updates));
+
         } catch (error) {
             this.reconnecting = false;
             console.error('[WhatsApp] Erro ao conectar:', error.message);
-            this.broadcast({ type: 'log', level: 'error', message: `Erro de conexão: ${error.message}` });
+            this.broadcast({ type: 'log', level: 'error', message: `Erro de conexao: ${error.message}` });
             setTimeout(() => this.connect(), 5000);
         }
     }
 
-    async sendMessage(number, text, imageBuffer = null) {
+    async _sendTrackedPayload(kind, target, builder) {
         if (!this.sock || this.status !== 'connected') {
-            throw new Error('WhatsApp não está conectado');
+            throw new Error('WhatsApp nao esta conectado');
         }
-        const jid = WhatsAppManager.buildJid(number);
-        console.log(`[WA] Sending to ${jid}`);
-        if (imageBuffer) {
-            await this.sock.sendMessage(jid, {
-                image: Buffer.isBuffer(imageBuffer) ? imageBuffer : Buffer.from(imageBuffer),
-                caption: text || ''
+
+        const targetInfo = this.resolveOutboundTarget(target);
+        console.log(`[WA] ${kind} targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind}`);
+
+        try {
+            const result = await builder(targetInfo.resolvedJid);
+            const accepted = this._registerAcceptedOutbound(kind, targetInfo, result);
+            console.log(`[WA] ${kind} accepted targetOriginal=${targetInfo.originalTarget} targetResolved=${accepted.resolvedJid} targetKind=${accepted.targetKind} messageId=${accepted.messageId}`);
+            return accepted;
+        } catch (error) {
+            const err = ensureTrackedError(error, {
+                targetOriginal: targetInfo.originalTarget,
+                targetResolved: targetInfo.resolvedJid,
+                targetKind: targetInfo.targetKind,
+                resolvedPhone: targetInfo.resolvedPhone || null,
             });
-        } else {
-            await this.sock.sendMessage(jid, { text });
+            console.error(`[WA] ${kind} failed targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind}: ${err.message}`);
+            throw err;
         }
     }
 
-    // Envia enquete nativa do WhatsApp (usuário toca para votar)
-    async sendPoll(number, question, options) {
-        if (!this.sock || this.status !== 'connected') {
-            throw new Error('WhatsApp não está conectado');
-        }
-        const jid = WhatsAppManager.buildJid(number);
-        const cleanOptions = options.filter(o => o && o.trim()).slice(0, 12);
-        if (cleanOptions.length < 2) throw new Error('Enquete precisa de pelo menos 2 opções');
-
-        await this.sock.sendMessage(jid, {
-            poll: {
-                name: question.substring(0, 255),
-                values: cleanOptions,
-                selectableCount: 1
+    async sendMessage(number, text, imageBuffer = null) {
+        return this._sendTrackedPayload('message', number, async (jid) => {
+            if (imageBuffer) {
+                return this.sock.sendMessage(jid, {
+                    image: Buffer.isBuffer(imageBuffer) ? imageBuffer : Buffer.from(imageBuffer),
+                    caption: text || '',
+                });
             }
+            return this.sock.sendMessage(jid, { text });
         });
     }
 
+    async sendPoll(number, question, options) {
+        const cleanOptions = options.filter(o => o && o.trim()).slice(0, 12);
+        if (cleanOptions.length < 2) throw new Error('Enquete precisa de pelo menos 2 opcoes');
+
+        return this._sendTrackedPayload('poll', number, async (jid) => (
+            this.sock.sendMessage(jid, {
+                poll: {
+                    name: question.substring(0, 255),
+                    values: cleanOptions,
+                    selectableCount: 1,
+                },
+            })
+        ));
+    }
+
     async sendTyping(number, duration = 2500) {
-        if (!this.sock || this.status !== 'connected') return;
-        const jid = WhatsAppManager.buildJid(number);
+        if (!this.sock || this.status !== 'connected') return null;
+
+        let targetInfo;
         try {
-            await this.sock.sendPresenceUpdate('composing', jid);
+            targetInfo = this.resolveOutboundTarget(number);
+        } catch (error) {
+            if (error?.code === 'UNRESOLVED_LID_TARGET') {
+                console.warn(`[WA] typing skipped targetOriginal=${number} reason=${error.code}`);
+                return null;
+            }
+            throw error;
+        }
+
+        try {
+            await this.sock.sendPresenceUpdate('composing', targetInfo.resolvedJid);
             await new Promise(r => setTimeout(r, duration));
-            await this.sock.sendPresenceUpdate('paused', jid);
-        } catch (e) { /* ignora */ }
+            await this.sock.sendPresenceUpdate('paused', targetInfo.resolvedJid);
+            return targetInfo;
+        } catch {
+            return null;
+        }
     }
 
     getStatus() {
-        return { status: this.status, qrCode: this.qrCode };
+        return {
+            status: this.status,
+            qrCode: this.qrCode,
+            webVersion: stringifyVersion(this._latestWebVersion),
+            baileysVersion: this._baileysVersionRange,
+        };
     }
 
     async clearSession() {
         if (this.sock) {
-            try { await this.sock.logout(); } catch (e) { /* ignora */ }
+            try { await this.sock.logout(); } catch { /* ignore */ }
             this.sock = null;
         }
+
+        for (const record of this._outboundRecords.values()) {
+            if (record.timeoutHandle) clearTimeout(record.timeoutHandle);
+            if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
+        }
+        this._outboundRecords.clear();
+
         this.status = 'disconnected';
         this.qrCode = null;
         this.reconnecting = false;
@@ -229,7 +578,7 @@ class WhatsAppManager {
             fs.rmSync(this.authPath, { recursive: true, force: true });
         }
         this.broadcast({ type: 'status', status: 'disconnected' });
-        this.broadcast({ type: 'log', level: 'info', message: '🔄 Sessão encerrada. Aguardando novo QR Code...' });
+        this.broadcast({ type: 'log', level: 'info', message: 'Sessao encerrada. Aguardando novo QR Code...' });
     }
 }
 

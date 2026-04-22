@@ -797,13 +797,19 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .queue-item-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .dot-pending { background: var(--text-3); }
 .dot-sending { background: var(--yellow); animation: pulse-dot 1s infinite; }
+.dot-accepted { background: #60a5fa; animation: pulse-dot 1s infinite; }
 .dot-sent { background: var(--green); }
+.dot-confirmed { background: var(--green); }
 .dot-failed { background: var(--red); }
+.dot-timeout { background: var(--yellow); }
 .queue-item-num { flex: 1; font-family: var(--mono); color: var(--text-2); }
 .queue-item-status { font-size: 11px; color: var(--text-3); }
 .queue-item-status.sent { color: var(--green); }
+.queue-item-status.confirmed { color: var(--green); }
 .queue-item-status.failed { color: var(--red); }
 .queue-item-status.sending { color: var(--yellow); }
+.queue-item-status.accepted { color: #60a5fa; }
+.queue-item-status.timeout { color: var(--yellow); }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; } 50% { opacity: .3; }
@@ -941,6 +947,19 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .lead-info { flex: 1; min-width: 0; }
 .lead-name { font-size: 13.5px; font-weight: 600; color: var(--text-1); }
 .lead-number { font-size: 11px; color: var(--text-3); font-family: var(--mono); margin-top: 2px; }
+.lead-delivery-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .2px;
+}
+.lead-delivery-badge.pending { background: rgba(250,204,21,.12); color: var(--yellow); }
+.lead-delivery-badge.failed { background: rgba(239,68,68,.12); color: var(--red); }
+.lead-delivery-badge.accepted { background: rgba(96,165,250,.12); color: #60a5fa; }
 .lead-vehicle { text-align: right; flex-shrink: 0; }
 .lead-model { font-size: 12px; color: var(--text-2); font-weight: 500; }
 .lead-plate {
@@ -1020,6 +1039,11 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   border-radius: 12px 12px 2px 12px;
 }
 .chat-ts { font-size: 10px; color: var(--text-3); margin-top: 3px; }
+.chat-delivery { font-weight: 600; }
+.chat-delivery.accepted { color: #60a5fa; }
+.chat-delivery.confirmed { color: var(--green); }
+.chat-delivery.delivery_timeout { color: var(--yellow); }
+.chat-delivery.failed { color: var(--red); }
 
 /* ── Utilities ─────────────────────────────────────────────── */
 .hidden { display: none !important; }

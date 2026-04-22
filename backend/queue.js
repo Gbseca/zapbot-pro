@@ -5,10 +5,35 @@ import {
     updateActiveCampaignStatus,
 } from './campaign-state.js';
 
+const MAX_CONSECUTIVE_FAILURES = 3;
+
 function normalizeCampaignNumber(raw) {
     const digits = String(raw || '').replace(/\D/g, '');
     if (!digits) return null;
     return digits.startsWith('55') ? digits : `55${digits}`;
+}
+
+function createStats(total = 0) {
+    return {
+        total,
+        accepted: 0,
+        confirmed: 0,
+        sent: 0,
+        failed: 0,
+        pending: total,
+    };
+}
+
+function buildAssistantHistoryEntry(content, delivery = {}) {
+    return {
+        role: 'assistant',
+        content,
+        ts: Date.now(),
+        deliveryStatus: delivery.status || 'confirmed',
+        messageId: delivery.messageId || null,
+        targetJid: delivery.targetJid || null,
+        error: delivery.error || null,
+    };
 }
 
 class MessageQueue {
@@ -21,8 +46,9 @@ class MessageQueue {
         this.currentIndex = 0;
         this.config = null;
         this.timer = null;
-        this.stats = { total: 0, sent: 0, failed: 0, pending: 0 };
+        this.stats = createStats(0);
         this.dailySent = 0;
+        this.consecutiveFailures = 0;
     }
 
     broadcast(data) {
@@ -38,12 +64,15 @@ class MessageQueue {
         console.log(`[${level.toUpperCase()}] ${message}`);
     }
 
-    // Inicializa a campanha com suporte a enquetes nativas
     initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction }) {
         this.status = 'idle';
         this.currentIndex = 0;
         this.dailySent = 0;
-        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        this.consecutiveFailures = 0;
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
 
         this.queue = numbers.map(n => ({
             number: n,
@@ -54,12 +83,14 @@ class MessageQueue {
             pollQuestion: pollQuestion || '',
             status: 'pending',
             sentAt: null,
-            error: null
+            error: null,
+            messageId: null,
+            resolvedTarget: null,
         }));
 
         this.config = { scheduleConfig, antiRestriction };
         const total = numbers.length;
-        this.stats = { total, sent: 0, failed: 0, pending: total };
+        this.stats = createStats(total);
         registerActiveCampaign({
             numbers,
             message: String(message || pollQuestion || '').trim(),
@@ -69,38 +100,48 @@ class MessageQueue {
         this.broadcast({
             type: 'campaign_loaded',
             stats: this.stats,
-            queue: this.queue.map(q => ({ number: q.number, status: q.status }))
+            queue: this.queue.map(q => ({
+                number: q.number,
+                status: q.status,
+                sentAt: q.sentAt,
+                error: q.error,
+                messageId: q.messageId,
+                resolvedTarget: q.resolvedTarget,
+            })),
         });
 
         const pollInfo = pollEnabled ? ' + enquete nativa' : '';
-        this.log('info', `📋 Campanha carregada com ${total} contatos${pollInfo}.`);
+        this.log('info', `Campanha carregada com ${total} contatos${pollInfo}.`);
     }
 
-    // Limpa toda a fila e redefine estado
     clear() {
         if (this.status === 'running') {
-            this.log('warning', '⛔ Pare a campanha antes de limpar o histórico.');
+            this.log('warning', 'Pare a campanha antes de limpar o historico.');
             return false;
         }
-        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
         this.queue = [];
         this.currentIndex = 0;
-        this.stats = { total: 0, sent: 0, failed: 0, pending: 0 };
+        this.stats = createStats(0);
         this.status = 'idle';
+        this.consecutiveFailures = 0;
         clearActiveCampaign('Campanha limpa manualmente.');
         this.broadcast({ type: 'campaign_cleared' });
-        this.log('info', '🗑️ Histórico da fila limpo.');
+        this.log('info', 'Historico da fila limpo.');
         return true;
     }
 
     getRandomDelay(minSec, maxSec) {
-        const min = parseInt(minSec) || 20;
-        const max = parseInt(maxSec) || 60;
+        const min = parseInt(minSec, 10) || 20;
+        const max = parseInt(maxSec, 10) || 60;
         return Math.floor((Math.random() * (max - min) + min) * 1000);
     }
 
     getFixedDelay(seconds) {
-        return (parseInt(seconds) || 30) * 1000;
+        return (parseInt(seconds, 10) || 30) * 1000;
     }
 
     isInTimeWindow() {
@@ -116,7 +157,7 @@ class MessageQueue {
     isDailyLimitReached() {
         const ar = this.config?.antiRestriction;
         if (!ar?.useLimit) return false;
-        return this.dailySent >= (parseInt(ar.dailyLimit) || 50);
+        return this.dailySent >= (parseInt(ar.dailyLimit, 10) || 50);
     }
 
     addVariation(text) {
@@ -130,7 +171,7 @@ class MessageQueue {
         return text.replace(/\{\{numero\}\}/gi, number);
     }
 
-    seedCampaignLead(number, message) {
+    seedCampaignLead(number, message, delivery = {}) {
         const normalized = normalizeCampaignNumber(number);
         if (!normalized) return;
 
@@ -142,7 +183,7 @@ class MessageQueue {
         if (cleanMessage) {
             const lastEntry = history[history.length - 1];
             if (!lastEntry || lastEntry.role !== 'assistant' || lastEntry.content !== cleanMessage) {
-                history.push({ role: 'assistant', content: cleanMessage, ts: Date.now() });
+                history.push(buildAssistantHistoryEntry(cleanMessage, delivery));
             }
         }
 
@@ -172,40 +213,126 @@ class MessageQueue {
     async start() {
         if (this.status === 'running') return;
         if (this.queue.length === 0) {
-            this.log('error', '❌ Nenhum contato na fila!');
+            this.log('error', 'Nenhum contato na fila.');
             return;
         }
         this.status = 'running';
         updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
-        this.log('info', `🚀 Campanha iniciada! ${this.stats.total} mensagens na fila.`);
+        this.log('info', `Campanha iniciada! ${this.stats.total} mensagens na fila.`);
         await this.processNext();
     }
 
-    pause() {
+    pause(reason = 'Campanha pausada.') {
         if (this.status !== 'running') return;
         this.status = 'paused';
-        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
         updateActiveCampaignStatus('paused');
         this.broadcast({ type: 'campaign_status', status: 'paused' });
-        this.log('warning', '⏸️ Campanha pausada.');
+        this.log('warning', reason);
     }
 
     resume() {
         if (this.status !== 'paused') return;
         this.status = 'running';
+        this.consecutiveFailures = 0;
         updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
-        this.log('info', '▶️ Campanha retomada.');
+        this.log('info', 'Campanha retomada.');
         this.processNext();
     }
 
     stop() {
         this.status = 'stopped';
-        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
         updateActiveCampaignStatus('stopped');
         this.broadcast({ type: 'campaign_status', status: 'stopped' });
-        this.log('warning', '🛑 Campanha interrompida pelo usuário.');
+        this.log('warning', 'Campanha interrompida pelo usuario.');
+    }
+
+    _syncSentAlias() {
+        this.stats.sent = this.stats.confirmed;
+    }
+
+    _broadcastStats() {
+        this._syncSentAlias();
+        this.broadcast({ type: 'stats', stats: this.stats });
+    }
+
+    _markConsecutiveFailure(item, status, errorMessage) {
+        this.consecutiveFailures += 1;
+        if (this.consecutiveFailures < MAX_CONSECUTIVE_FAILURES || this.status !== 'running') return;
+
+        this.pause(`Falhas seguidas demais (${MAX_CONSECUTIVE_FAILURES}). Campanha pausada para seguranca.`);
+        item.error = errorMessage || item.error;
+        this.broadcast({
+            type: 'queue_update',
+            index: this.currentIndex,
+            status,
+            error: item.error,
+            messageId: item.messageId,
+            resolvedTarget: item.resolvedTarget,
+        });
+    }
+
+    _normalizeDeliveryResult(acceptedRecords, finalRecords) {
+        const lastAccepted = acceptedRecords[acceptedRecords.length - 1] || null;
+        const firstProblem = finalRecords.find(record => record.status === 'failed' || record.status === 'delivery_timeout');
+        if (firstProblem) {
+            return {
+                status: firstProblem.status,
+                error: firstProblem.error || 'Falha na confirmacao do WhatsApp',
+                messageId: firstProblem.messageId || lastAccepted?.messageId || null,
+                targetJid: firstProblem.targetResolved || lastAccepted?.resolvedJid || null,
+                resolvedTarget: firstProblem.targetResolved || lastAccepted?.resolvedJid || null,
+            };
+        }
+
+        return {
+            status: 'confirmed',
+            error: null,
+            messageId: lastAccepted?.messageId || null,
+            targetJid: lastAccepted?.resolvedJid || null,
+            resolvedTarget: lastAccepted?.resolvedJid || null,
+        };
+    }
+
+    async _sendCampaignItem(item, text) {
+        const acceptedRecords = [];
+
+        if (this.config?.antiRestriction?.typing) {
+            this.log('info', `Simulando digitacao para ${item.number}...`);
+            await this.wa.sendTyping(item.number);
+        }
+
+        const hasPoll = item.pollEnabled && item.pollOptions && item.pollOptions.length >= 2;
+
+        if (hasPoll) {
+            if (item.imageBuffer) {
+                acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer));
+            } else if (text && text.trim()) {
+                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null));
+            }
+
+            const pollQ = (item.pollQuestion && item.pollQuestion.trim())
+                ? item.pollQuestion.trim()
+                : (text.substring(0, 100) || 'Selecione uma opcao:');
+            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions));
+        } else {
+            acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer));
+        }
+
+        const finalRecords = await Promise.all(
+            acceptedRecords.map(accepted => this.wa.waitForOutboundFinal(accepted.messageId))
+        );
+
+        return this._normalizeDeliveryResult(acceptedRecords, finalRecords);
     }
 
     async processNext() {
@@ -215,82 +342,111 @@ class MessageQueue {
             this.status = 'completed';
             updateActiveCampaignStatus('completed');
             this.broadcast({ type: 'campaign_status', status: 'completed' });
-            this.log('success', `🎉 Concluída! ✅ ${this.stats.sent} enviadas | ❌ ${this.stats.failed} falhas`);
+            this.log('success', `Concluida! Confirmadas: ${this.stats.confirmed} | Falhas: ${this.stats.failed}`);
             return;
         }
 
         if (!this.isInTimeWindow()) {
-            this.log('warning', '⏰ Fora da janela de horário. Verificando em 60s...');
+            this.log('warning', 'Fora da janela de horario. Verificando em 60s...');
             this.timer = setTimeout(() => this.processNext(), 60000);
             return;
         }
 
         if (this.isDailyLimitReached()) {
-            this.log('warning', '⚠️ Limite diário atingido. Campanha pausada.');
-            this.status = 'paused';
-            updateActiveCampaignStatus('paused');
-            this.broadcast({ type: 'campaign_status', status: 'paused' });
+            this.log('warning', 'Limite diario atingido. Campanha pausada.');
+            this.pause('Limite diario atingido. Campanha pausada.');
             return;
         }
 
         const item = this.queue[this.currentIndex];
         item.status = 'sending';
+        item.error = null;
         this.broadcast({ type: 'queue_update', index: this.currentIndex, status: 'sending' });
 
         try {
             let text = this.personalize(item.message, item.number);
-
             if (this.config?.antiRestriction?.variation && text) {
                 text = this.addVariation(text);
             }
 
-            if (this.config?.antiRestriction?.typing) {
-                this.log('info', `✍️ Simulando digitação para ${item.number}...`);
-                await this.wa.sendTyping(item.number);
-            }
+            const delivery = await this._sendCampaignItem(item, text);
+            item.messageId = delivery.messageId;
+            item.resolvedTarget = delivery.resolvedTarget;
 
-            const hasPoll = item.pollEnabled && item.pollOptions && item.pollOptions.length >= 2;
+            this.stats.accepted += 1;
+            this.stats.pending = Math.max(0, this.stats.pending - 1);
+            item.status = 'accepted';
+            this.broadcast({
+                type: 'queue_update',
+                index: this.currentIndex,
+                status: 'accepted',
+                messageId: item.messageId,
+                resolvedTarget: item.resolvedTarget,
+            });
+            this._broadcastStats();
 
-            if (hasPoll) {
-                // 1. Envia imagem ou texto primeiro (contexto)
-                if (item.imageBuffer) {
-                    await this.wa.sendMessage(item.number, text, item.imageBuffer);
-                } else if (text && text.trim()) {
-                    await this.wa.sendMessage(item.number, text, null);
-                }
-                // 2. Envia a enquete nativa do WhatsApp
-                const pollQ = (item.pollQuestion && item.pollQuestion.trim())
-                    ? item.pollQuestion.trim()
-                    : (text.substring(0, 100) || 'Selecione uma opção:');
-                await this.wa.sendPoll(item.number, pollQ, item.pollOptions);
-                this.log('info', `📊 Enquete enviada para ${item.number}`);
+            if (delivery.status !== 'confirmed') {
+                item.status = delivery.status;
+                item.error = delivery.error;
+                this.stats.failed += 1;
+                this.log(
+                    delivery.status === 'delivery_timeout' ? 'warning' : 'error',
+                    `${delivery.status === 'delivery_timeout' ? 'Sem confirmacao' : 'Falha'} para ${item.number}: ${delivery.error}`
+                );
+                this.broadcast({
+                    type: 'queue_update',
+                    index: this.currentIndex,
+                    status: item.status,
+                    error: item.error,
+                    messageId: item.messageId,
+                    resolvedTarget: item.resolvedTarget,
+                });
+                this._markConsecutiveFailure(item, item.status, item.error);
             } else {
-                // Envio normal (texto / imagem)
-                await this.wa.sendMessage(item.number, text, item.imageBuffer);
+                item.status = 'confirmed';
+                item.sentAt = new Date().toISOString();
+                this.stats.confirmed += 1;
+                this.dailySent += 1;
+                this.consecutiveFailures = 0;
+                this.seedCampaignLead(item.number, text || item.pollQuestion || '', {
+                    status: 'confirmed',
+                    messageId: item.messageId,
+                    targetJid: item.resolvedTarget,
+                });
+
+                this.log('success', `Confirmado para +55 ${item.number}`);
+                this.broadcast({
+                    type: 'queue_update',
+                    index: this.currentIndex,
+                    status: 'confirmed',
+                    sentAt: item.sentAt,
+                    messageId: item.messageId,
+                    resolvedTarget: item.resolvedTarget,
+                });
             }
-
-            item.status = 'sent';
-            item.sentAt = new Date().toISOString();
-            this.stats.sent++;
-            this.stats.pending--;
-            this.dailySent++;
-            this.seedCampaignLead(item.number, text || item.pollQuestion || '');
-
-            this.log('success', `✅ Enviado para +55 ${item.number}`);
-            this.broadcast({ type: 'queue_update', index: this.currentIndex, status: 'sent', sentAt: item.sentAt });
 
         } catch (err) {
             item.status = 'failed';
             item.error = err.message;
-            this.stats.failed++;
-            this.stats.pending--;
+            item.messageId = err.messageId || item.messageId || null;
+            item.resolvedTarget = err.targetResolved || item.resolvedTarget || null;
+            this.stats.failed += 1;
+            this.stats.pending = Math.max(0, this.stats.pending - 1);
 
-            this.log('error', `❌ Falha para ${item.number}: ${err.message}`);
-            this.broadcast({ type: 'queue_update', index: this.currentIndex, status: 'failed', error: err.message });
+            this.log('error', `Falha para ${item.number}: ${err.message}`);
+            this.broadcast({
+                type: 'queue_update',
+                index: this.currentIndex,
+                status: 'failed',
+                error: err.message,
+                messageId: item.messageId,
+                resolvedTarget: item.resolvedTarget,
+            });
+            this._markConsecutiveFailure(item, 'failed', err.message);
         }
 
-        this.broadcast({ type: 'stats', stats: this.stats });
-        this.currentIndex++;
+        this._broadcastStats();
+        this.currentIndex += 1;
 
         if (this.currentIndex >= this.queue.length) {
             await this.processNext();
@@ -303,12 +459,13 @@ class MessageQueue {
                 ? this.getRandomDelay(sc.intervalMin, sc.intervalMax)
                 : this.getFixedDelay(sc.intervalFixed);
 
-            this.log('info', `⏳ Aguardando ${(delay / 1000).toFixed(0)}s...`);
+            this.log('info', `Aguardando ${(delay / 1000).toFixed(0)}s...`);
             this.timer = setTimeout(() => this.processNext(), delay);
         }
     }
 
     getProgress() {
+        this._syncSentAlias();
         return {
             status: this.status,
             stats: this.stats,
@@ -316,9 +473,11 @@ class MessageQueue {
                 number: q.number,
                 status: q.status,
                 sentAt: q.sentAt,
-                error: q.error
+                error: q.error,
+                messageId: q.messageId,
+                resolvedTarget: q.resolvedTarget,
             })),
-            currentIndex: this.currentIndex
+            currentIndex: this.currentIndex,
         };
     }
 }

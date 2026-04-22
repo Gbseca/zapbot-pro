@@ -8,75 +8,40 @@ import { executeHandoff } from './handoff.js';
 import { getCollectionsContextForPhone } from '../campaign-state.js';
 
 const messageBuffers = new Map();
+const sessionTimers = new Map();
 const ANTIFLOOD_MS = 3500;
 
-const sessionTimers = new Map();
-
-function normalizeText(text) {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 const STRONG_REFUSAL_PATTERNS = [
-  /^n(a|ao|ão)?o?$/,
+  /^n(a|ao)?o?$/,
   /^nao\s*(quero|preciso|obrigad)/,
-  /^não\s*(quero|preciso|obrigad)/,
+  /^nao\s*tenho\s*interesse/,
   /sem\s*interesse/,
-  /nao\s*tenho\s*interesse/,
-  /não\s*tenho\s*interesse/,
   /to\s*procurando\s*nao/,
   /tou\s*procurando\s*nao/,
   /nao\s*senhora/,
-  /não\s*senhora/,
   /pode\s*parar/,
   /nao\s*precisa/,
-  /não\s*precisa/,
   /deixa\s*quieto/,
   /me\s*tira\s*da\s*lista/,
   /para\s*de\s*me\s*mandar/,
   /bloquei/,
   /denuncia/,
   /nao\s*quero\s*mais/,
-  /não\s*quero\s*mais/,
   /chega/,
 ];
 
 const SOFT_REFUSAL_PATTERNS = [
-  /ja\s*tenho\s*(seguro|protecao|proteção|proteção\s*veicular|cobertura)/,
-  /já\s*tenho\s*(seguro|protecao|proteção|proteção\s*veicular|cobertura)/,
+  /ja\s*tenho\s*(seguro|protecao|protecao\s*veicular|cobertura)/,
   /ja\s*sou\s*(segurado|associado|cliente)/,
-  /já\s*sou\s*(segurado|associado|cliente)/,
   /nao\s*estou\s*procurando/,
-  /não\s*estou\s*procurando/,
   /nao\s*to\s*precisando/,
-  /não\s*to\s*precisando/,
   /nao\s*to\s*procurando/,
-  /não\s*to\s*procurando/,
   /meu\s*irmao\s*e\s*(meu\s*)?(corretor|agente)/,
-  /meu\s*irmão\s*e\s*(meu\s*)?(corretor|agente)/,
 ];
 
 const INTERJECTION_PATTERNS = [
-  /^(oxi|ata|uai|eita|po|puts|ih|ué|ue|hm|hmm|hum|kkk+|haha|rsrs+|rs|noo+|eee+|aaa+)$/,
+  /^(oxi|ata|uai|eita|po|puts|ih|ue|hm|hmm|hum|kkk+|haha|rsrs+|rs|noo+|eee+|aaa+)$/,
 ];
-
-function isStrongRefusal(normalizedText) {
-  return STRONG_REFUSAL_PATTERNS.some(pattern => pattern.test(normalizedText));
-}
-
-function isSoftRefusal(normalizedText) {
-  return SOFT_REFUSAL_PATTERNS.some(pattern => pattern.test(normalizedText));
-}
-
-function isAmbiguousInterjection(normalizedText) {
-  if (normalizedText.split(' ').length > 4) return false;
-  return INTERJECTION_PATTERNS.some(pattern => pattern.test(normalizedText));
-}
 
 const REENGAGEMENT_PATTERNS = [
   /quero\s*(cotar|saber|fazer|ver|entender|conhecer)/,
@@ -91,31 +56,54 @@ const REENGAGEMENT_PATTERNS = [
   /como\s*(funciona|contrato|ader)/,
 ];
 
-function isReengagement(normalizedText) {
-  return REENGAGEMENT_PATTERNS.some(pattern => pattern.test(normalizedText));
-}
-
 const REFUSAL_RESPONSES = [
-  'Tudo bem! Fico à disposição caso mude de ideia. Até mais 😊',
-  'Perfeito, sem problema. Não vou insistir. Se um dia quiser comparar, é só chamar.',
-  'Entendido! Qualquer coisa é só mandar mensagem. Até mais 👋',
-  'Ok, sem problemas. Boa sorte e qualquer dúvida pode chamar!',
+  'Tudo bem! Fico a disposicao caso mude de ideia. Ate mais.',
+  'Perfeito, sem problema. Nao vou insistir. Se um dia quiser comparar, e so chamar.',
+  'Entendido! Qualquer coisa e so mandar mensagem. Ate mais.',
+  'Ok, sem problemas. Boa sorte e qualquer duvida pode chamar.',
 ];
 
 const SOFT_REFUSAL_RESPONSES = [
-  'Entendo! Cada caso é um caso né 😊 Se um dia quiser comparar valores ou coberturas, é só chamar. Abraço!',
-  'Faz sentido! Se algum dia quiser ver se a Moove faz mais sentido pra você, estaremos aqui. Até mais 👋',
-  'Tranquilo! Qualquer dúvida no futuro pode chamar sem compromisso 😊',
+  'Entendo! Cada caso e um caso. Se um dia quiser comparar valores ou coberturas, e so chamar.',
+  'Faz sentido! Se algum dia quiser ver se a Moove faz mais sentido pra voce, estaremos aqui.',
+  'Tranquilo! Qualquer duvida no futuro pode chamar sem compromisso.',
 ];
 
 const CLARIFICATION_RESPONSES = [
-  'Rsrs — isso foi só uma reação ou você quis me dizer alguma coisa sobre seu veículo?',
-  'Entendi a reação 😄 Me conta mais, o que você tá procurando?',
-  'Haha — pode falar! O que você precisava?',
+  'Rsrs, isso foi so uma reacao ou voce quis me dizer alguma coisa sobre seu veiculo?',
+  'Entendi a reacao. Me conta mais, o que voce ta procurando?',
+  'Haha, pode falar! O que voce precisava?',
 ];
+
+function normalizeText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function randomFrom(items) {
   return items[Math.floor(Math.random() * items.length)];
+}
+
+function isStrongRefusal(normalizedText) {
+  return STRONG_REFUSAL_PATTERNS.some(pattern => pattern.test(normalizedText));
+}
+
+function isSoftRefusal(normalizedText) {
+  return SOFT_REFUSAL_PATTERNS.some(pattern => pattern.test(normalizedText));
+}
+
+function isAmbiguousInterjection(normalizedText) {
+  if (normalizedText.split(' ').length > 4) return false;
+  return INTERJECTION_PATTERNS.some(pattern => pattern.test(normalizedText));
+}
+
+function isReengagement(normalizedText) {
+  return REENGAGEMENT_PATTERNS.some(pattern => pattern.test(normalizedText));
 }
 
 function isBusinessHours(config) {
@@ -129,10 +117,10 @@ function isBusinessHours(config) {
 
 function extractText(msg) {
   return (
-    msg?.message?.conversation ||
-    msg?.message?.extendedTextMessage?.text ||
-    msg?.message?.imageMessage?.caption ||
-    ''
+    msg?.message?.conversation
+    || msg?.message?.extendedTextMessage?.text
+    || msg?.message?.imageMessage?.caption
+    || ''
   ).trim();
 }
 
@@ -182,12 +170,40 @@ function resolveConversationModeContext(config, lead, conversationPhone, jidId) 
 function sanitizeReply(text) {
   const reply = String(text || '').trim();
   if (!reply) {
-    return 'Oi! Me conta um pouco mais sobre o seu veículo pra eu te ajudar melhor.';
+    return 'Oi! Me conta um pouco mais sobre o seu veiculo pra eu te ajudar melhor.';
   }
   return reply
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
+}
+
+function buildAssistantHistoryEntry(content, delivery = {}) {
+  return {
+    role: 'assistant',
+    content,
+    ts: Date.now(),
+    deliveryStatus: delivery.status || 'confirmed',
+    messageId: delivery.messageId || null,
+    targetJid: delivery.targetJid || null,
+    error: delivery.error || null,
+  };
+}
+
+function appendAssistantMessage(lead, content, delivery) {
+  lead.history = lead.history || [];
+  lead.history.push(buildAssistantHistoryEntry(content, delivery));
+}
+
+async function sendSingleReplyTracked(wa, target, text) {
+  const accepted = await wa.sendMessage(target, text, null);
+  const final = await wa.waitForOutboundFinal(accepted.messageId);
+  return {
+    status: final?.status || 'failed',
+    messageId: accepted.messageId,
+    targetJid: accepted.resolvedJid || final?.targetResolved || null,
+    error: final?.error || null,
+  };
 }
 
 function resetSessionTimer(leadId, config) {
@@ -203,7 +219,7 @@ function resetSessionTimer(leadId, config) {
       lead.history = [];
       lead.status = 'new';
       saveLead(leadId, lead);
-      console.log(`[Agent] 🕐 Session expired for ${leadId} — history cleared`);
+      console.log(`[Agent] Session expired for ${leadId} - history cleared`);
     }
   }, timeoutMs);
 
@@ -230,6 +246,21 @@ function createNewLead(leadId, displayNum, pushName, fallbackPhone = null) {
     followUp2Sent: false,
     campaignLoopHandled: false,
   };
+}
+
+async function persistSimpleReply(wa, leadId, lead, target, reply, extraUpdates = () => ({})) {
+  try {
+    const delivery = await sendSingleReplyTracked(wa, target, reply);
+    appendAssistantMessage(lead, reply, delivery);
+    Object.assign(lead, extraUpdates(delivery));
+  } catch (err) {
+    appendAssistantMessage(lead, reply, {
+      status: 'failed',
+      targetJid: err.targetResolved || null,
+      error: err.message,
+    });
+  }
+  saveLead(leadId, lead);
 }
 
 export async function handleIncomingMessage(wa, rawMsg) {
@@ -262,18 +293,18 @@ export async function handleIncomingMessage(wa, rawMsg) {
   if (existingLead?.status === 'blocked') return;
 
   if (existingLead?.campaignSentAt && !existingLead?.campaignLoopHandled && config.campaignLoopEnabled === false) {
-    console.log(`[Agent] Campaign loop disabled — ignoring reply from ${leadId}`);
+    console.log(`[Agent] Campaign loop disabled - ignoring reply from ${leadId}`);
     return;
   }
 
   if (existingLead?.status === 'no_interest' && !collectionsContext) {
     const normForReeng = normalizeText(text);
     if (!isReengagement(normForReeng)) {
-      console.log(`[Agent] ⏭️ Silencing no_interest lead ${leadId}: "${text.slice(0, 40)}"`);
+      console.log(`[Agent] Silencing no_interest lead ${leadId}: "${text.slice(0, 40)}"`);
       return;
     }
 
-    console.log(`[Agent] 🔄 Re-engagement detected for ${leadId}: "${text.slice(0, 40)}"`);
+    console.log(`[Agent] Re-engagement detected for ${leadId}: "${text.slice(0, 40)}"`);
     existingLead.status = 'talking';
     existingLead.softRefusalSent = false;
     if (conversationPhone && !existingLead.phone) {
@@ -288,10 +319,11 @@ export async function handleIncomingMessage(wa, rawMsg) {
     if (existingLead?.lastOutOfHoursMsg !== today) {
       const [sh] = (config.businessHoursStart || '08:00').split(':');
       const [eh] = (config.businessHoursEnd || '22:00').split(':');
-      const msg = `Oi! 😊 Nosso horário de atendimento é das ${sh}h às ${eh}h. Estarei aqui quando voltar! Até logo 👋`;
-      await wa.sendMessage(fullJid, msg, null);
+      const msg = `Oi! Nosso horario de atendimento e das ${sh}h as ${eh}h. Estarei aqui quando voltar! Ate logo.`;
       const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
-      saveLead(leadId, { ...lead, lastOutOfHoursMsg: today });
+      await persistSimpleReply(wa, leadId, lead, fullJid, msg, (delivery) => (
+        delivery.status === 'confirmed' ? { lastOutOfHoursMsg: today } : {}
+      ));
     }
     return;
   }
@@ -301,44 +333,39 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const norm = normalizeText(text);
 
   if (isStrongRefusal(norm)) {
-    console.log(`[Agent] 🚫 Strong refusal detected from ${leadId}: "${text}"`);
+    console.log(`[Agent] Strong refusal detected from ${leadId}: "${text}"`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.status = 'no_interest';
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    saveLead(leadId, lead);
-    await wa.sendMessage(fullJid, randomFrom(REFUSAL_RESPONSES), null);
+    await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(REFUSAL_RESPONSES));
     return;
   }
 
   if (!collectionsContext && isSoftRefusal(norm)) {
-    const alreadyPitched = existingLead?.softRefusalSent;
-    if (alreadyPitched) {
-      console.log(`[Agent] 🚫 2nd soft refusal — closing ${leadId}`);
+    if (existingLead?.softRefusalSent) {
+      console.log(`[Agent] 2nd soft refusal - closing ${leadId}`);
       const lead = existingLead;
       lead.status = 'no_interest';
-      saveLead(leadId, lead);
-      await wa.sendMessage(fullJid, randomFrom(REFUSAL_RESPONSES), null);
+      await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(REFUSAL_RESPONSES));
       return;
     }
 
-    console.log(`[Agent] 💬 Soft refusal from ${leadId} — sending gentle pitch`);
+    console.log(`[Agent] Soft refusal from ${leadId} - sending gentle pitch`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.softRefusalSent = true;
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    saveLead(leadId, lead);
-    await wa.sendMessage(fullJid, randomFrom(SOFT_REFUSAL_RESPONSES), null);
+    await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(SOFT_REFUSAL_RESPONSES));
     return;
   }
 
   if (!collectionsContext && isAmbiguousInterjection(norm)) {
-    console.log(`[Agent] ❓ Ambiguous interjection from ${leadId}: "${text}"`);
+    console.log(`[Agent] Ambiguous interjection from ${leadId}: "${text}"`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    saveLead(leadId, lead);
-    await wa.sendMessage(fullJid, randomFrom(CLARIFICATION_RESPONSES), null);
+    await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(CLARIFICATION_RESPONSES));
     return;
   }
 
@@ -417,7 +444,6 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   }
 
   const alreadyTransferred = lead.status === 'transferred';
-
   saveLead(leadId, lead);
 
   const replyContext = await buildContext(
@@ -428,6 +454,14 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   );
 
   let cleanResponse = '';
+  let extraction = {
+    qualified: false,
+    plate: lead.plate || null,
+    model: lead.model || null,
+    name: lead.name || null,
+    phone: lead.phone || null,
+    profileCaptured: !!lead.profileCaptured,
+  };
 
   if (conversationModeContext) {
     try {
@@ -451,15 +485,6 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
     cleanResponse = sanitizeReply(replyResult.value);
 
-    let extraction = {
-      qualified: false,
-      plate: lead.plate || null,
-      model: lead.model || null,
-      name: lead.name || null,
-      phone: lead.phone || null,
-      profileCaptured: !!lead.profileCaptured,
-    };
-
     if (qualificationResult.status === 'fulfilled') {
       extraction = detectAndExtract(qualificationResult.value, lead);
     } else {
@@ -475,36 +500,41 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
       lead.displayNumber = extraction.phone;
       console.log(`[Agent] Phone from extraction: ${extraction.phone}`);
     }
-
-    console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);
-    try {
-      await sendHumanized(wa, fullJid, cleanResponse, combinedText);
-    } catch (err) {
-      console.error(`[Agent] Failed to send to ${fullJid}:`, err.message);
-      return;
-    }
-
-    lead.history.push({ role: 'assistant', content: cleanResponse, ts: Date.now() });
-
-    if (extraction.qualified && !alreadyTransferred) {
-      lead.status = 'qualified';
-      lead.qualifiedAt = new Date().toISOString();
-      saveLead(leadId, lead);
-      await executeHandoff(wa, lead, config);
-    } else {
-      saveLead(leadId, lead);
-    }
-    return;
   }
 
   console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);
+  let delivery;
   try {
-    await sendHumanized(wa, fullJid, cleanResponse, combinedText);
+    delivery = await sendHumanized(wa, fullJid, cleanResponse, combinedText);
   } catch (err) {
-    console.error(`[Agent] Failed to send to ${fullJid}:`, err.message);
+    delivery = {
+      status: 'failed',
+      messageId: null,
+      targetJid: err.targetResolved || null,
+      error: err.message,
+    };
+  }
+
+  appendAssistantMessage(lead, cleanResponse, delivery);
+
+  if (delivery.status !== 'confirmed') {
+    saveLead(leadId, lead);
+    console.error(`[Agent] Delivery not confirmed for ${leadId}: ${delivery.error || delivery.status}`);
     return;
   }
 
-  lead.history.push({ role: 'assistant', content: cleanResponse, ts: Date.now() });
+  if (conversationModeContext) {
+    saveLead(leadId, lead);
+    return;
+  }
+
+  if (extraction.qualified && !alreadyTransferred) {
+    lead.status = 'qualified';
+    lead.qualifiedAt = new Date().toISOString();
+    saveLead(leadId, lead);
+    await executeHandoff(wa, lead, config);
+    return;
+  }
+
   saveLead(leadId, lead);
 }

@@ -14,7 +14,7 @@ const state = {
   reactionCount: 1,
   pollMode: false,
   queue: [],
-  stats: { total: 0, sent: 0, failed: 0, pending: 0 },
+  stats: { total: 0, accepted: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 },
   adResearch: {
     jobId: '',
     status: 'idle',
@@ -101,12 +101,12 @@ function handleWsMessage(data) {
     case 'qr':           handleQRCode(data.qr); break;
     case 'log':          appendLog(data.level, data.message); break;
     case 'stats':        updateStats(data.stats); break;
-    case 'queue_update': updateQueueItem(data.index, data.status, data.sentAt, data.error); break;
+    case 'queue_update': updateQueueItem(data.index, data.status, data.sentAt, data.error, data.messageId, data.resolvedTarget); break;
     case 'campaign_status': handleCampaignStatus(data.status); break;
     case 'campaign_loaded': handleCampaignLoaded(data); break;
     case 'campaign_cleared':
       state.queue = [];
-      state.stats = { total: 0, sent: 0, failed: 0, pending: 0 };
+      state.stats = { total: 0, accepted: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 };
       renderQueueList();
       updateStats(state.stats);
       handleCampaignStatus('idle');
@@ -676,6 +676,9 @@ function handleCampaignLoaded(data) {
   state.stats = data.stats;
   state.queue = data.queue;
   renderQueueList();
+  state.queue.forEach((item, index) => {
+    updateQueueItem(index, item.status, item.sentAt, item.error, item.messageId, item.resolvedTarget);
+  });
   updateStats(data.stats);
 }
 
@@ -722,31 +725,67 @@ function handleCampaignStatus(status) {
 
 function updateStats(stats) {
   state.stats = stats;
+  const accepted = stats.accepted ?? 0;
+  const confirmed = stats.confirmed ?? stats.sent ?? 0;
   document.getElementById('stat-total').textContent = stats.total;
-  document.getElementById('stat-sent').textContent = stats.sent;
+  document.getElementById('stat-accepted').textContent = accepted;
+  document.getElementById('stat-confirmed').textContent = confirmed;
   document.getElementById('stat-failed').textContent = stats.failed;
   document.getElementById('stat-pending').textContent = stats.pending;
 
-  const pct = stats.total > 0 ? Math.round(((stats.sent + stats.failed) / stats.total) * 100) : 0;
+  const pct = stats.total > 0 ? Math.round(((confirmed + stats.failed) / stats.total) * 100) : 0;
   document.getElementById('progress-bar').style.width = `${pct}%`;
   document.getElementById('progress-pct').textContent = `${pct}%`;
 }
 
-function updateQueueItem(index, status, sentAt, error) {
+function queueStatusMeta(status) {
+  switch (status) {
+    case 'sending':
+      return { label: 'Enviando...', className: 'sending' };
+    case 'accepted':
+      return { label: 'Aceito pelo WhatsApp', className: 'accepted' };
+    case 'confirmed':
+    case 'sent':
+      return { label: 'Confirmado', className: 'confirmed' };
+    case 'delivery_timeout':
+      return { label: 'Sem confirmacao', className: 'timeout' };
+    case 'failed':
+      return { label: 'Falha', className: 'failed' };
+    default:
+      return { label: 'Pendente', className: 'pending' };
+  }
+}
+
+function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget) {
   if (index >= state.queue.length) return;
-  state.queue[index] = { ...state.queue[index], status, sentAt, error };
+  state.queue[index] = { ...state.queue[index], status, sentAt, error, messageId, resolvedTarget };
 
   const item = document.getElementById(`qi-${index}`);
   if (!item) {
     renderQueueList();
+    const rerenderedItem = document.getElementById(`qi-${index}`);
+    if (rerenderedItem) updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget);
     return;
   }
 
   const dot = item.querySelector('.queue-item-dot');
   const statusEl = item.querySelector('.queue-item-status');
-  dot.className = `queue-item-dot dot-${status}`;
+  dot.className = `queue-item-dot dot-${status === 'confirmed' ? 'sent' : status === 'delivery_timeout' ? 'failed' : status}`;
 
-  if (status === 'sent') {
+  if (status === 'accepted') {
+    statusEl.textContent = 'Aceito pelo WhatsApp';
+    statusEl.className = 'queue-item-status accepted';
+    item.classList.add('active-item');
+    item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  } else if (status === 'confirmed') {
+    statusEl.textContent = 'Confirmado';
+    statusEl.className = 'queue-item-status confirmed';
+    item.classList.remove('active-item');
+  } else if (status === 'delivery_timeout') {
+    statusEl.textContent = 'Sem confirmacao';
+    statusEl.className = 'queue-item-status timeout';
+    item.classList.remove('active-item');
+  } else if (status === 'sent') {
     statusEl.textContent = 'âœ… Enviado';
     statusEl.className = 'queue-item-status sent';
     item.classList.remove('active-item');
@@ -770,9 +809,9 @@ function renderQueueList() {
   }
   list.innerHTML = state.queue.map((item, i) => `
     <div class="queue-item" id="qi-${i}">
-      <span class="queue-item-dot dot-${item.status}"></span>
+      <span class="queue-item-dot dot-${item.status === 'confirmed' ? 'sent' : item.status === 'delivery_timeout' ? 'failed' : item.status}"></span>
       <span class="queue-item-num">+55 ${item.number}</span>
-      <span class="queue-item-status ${item.status === 'sent' ? 'sent' : item.status === 'failed' ? 'failed' : ''}">
+      <span class="queue-item-status ${item.status === 'accepted' ? 'accepted' : item.status === 'confirmed' || item.status === 'sent' ? 'confirmed' : item.status === 'delivery_timeout' ? 'timeout' : item.status === 'failed' ? 'failed' : item.status === 'sending' ? 'sending' : ''}">
         ${item.status === 'sent' ? 'âœ… Enviado' : item.status === 'failed' ? 'âŒ Falha' : item.status === 'sending' ? 'ðŸ“¤ Enviando...' : 'â³ Pendente'}
       </span>
     </div>
@@ -1696,6 +1735,34 @@ function renderLeadsStats() {
   document.getElementById('ls-rate').textContent = rate + '%';
 }
 
+function deliveryStatusMeta(status) {
+  switch (status) {
+    case 'accepted':
+      return { label: 'Aceita', className: 'accepted' };
+    case 'confirmed':
+    case 'sent':
+      return { label: 'Confirmada', className: 'confirmed' };
+    case 'delivery_timeout':
+      return { label: 'Sem confirmacao', className: 'delivery_timeout' };
+    case 'failed':
+      return { label: 'Falhou', className: 'failed' };
+    default:
+      return null;
+  }
+}
+
+function getLatestAssistantDelivery(lead) {
+  const history = Array.isArray(lead?.history) ? lead.history : [];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const msg = history[i];
+    if (msg?.role !== 'assistant' || !msg.deliveryStatus) continue;
+    const meta = deliveryStatusMeta(msg.deliveryStatus);
+    if (!meta || meta.className === 'confirmed') continue;
+    return meta;
+  }
+  return null;
+}
+
 function renderLeadsList(filter) {
   const list = document.getElementById('leads-list');
   let leads = filter === 'all' ? allLeads : allLeads.filter(l => l.status === filter);
@@ -1708,12 +1775,14 @@ function renderLeadsList(filter) {
   list.innerHTML = leads.map(lead => {
     const dotClass = `status-dot-${lead.status || 'new'}`;
     const timeAgo = timeSince(lead.updatedAt || lead.createdAt);
+    const deliveryMeta = getLatestAssistantDelivery(lead);
     return `
       <div class="lead-card" onclick="openLeadModal('${lead.number}')">
         <div class="lead-status-dot ${dotClass}"></div>
         <div class="lead-info">
           <div class="lead-name">${lead.name || 'Desconhecido'}</div>
           <div class="lead-number">${formatLeadPhone(lead)}</div>
+          ${deliveryMeta ? `<div class="lead-delivery-badge ${deliveryMeta.className === 'delivery_timeout' ? 'pending' : deliveryMeta.className}">${deliveryMeta.label}</div>` : ''}
         </div>
         <div class="lead-vehicle">
           ${lead.model ? `<div class="lead-model">ðŸš— ${lead.model}</div>` : ''}
@@ -1783,11 +1852,34 @@ function openLeadModal(number) {
   const chat = document.getElementById('modal-chat');
   const history = lead.history || [];
   if (history.length === 0) {
+    chat.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:20px;">Sem historico de conversa.</div>';
+  } else {
+    chat.innerHTML = history.map(msg => {
+      const isUser = msg.role === 'user';
+      const time = msg.ts ? new Date(msg.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+      const deliveryMeta = !isUser ? deliveryStatusMeta(msg.deliveryStatus) : null;
+      return `
+        <div class="chat-bubble-wrap ${isUser ? '' : 'outgoing'}">
+          <div class="chat-bubble">${escapeHtml(msg.content)}</div>
+          <div class="chat-ts">${isUser ? 'Cliente' : 'Bot'} ${time}</div>
+          ${deliveryMeta ? `<div class="chat-ts"><span class="chat-delivery ${deliveryMeta.className}">${deliveryMeta.label}</span></div>` : ''}
+          ${!isUser && msg.error ? `<div class="chat-ts">${escapeHtml(msg.error)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+    setTimeout(() => { chat.scrollTop = chat.scrollHeight; }, 50);
+  }
+
+  document.getElementById('lead-modal').classList.remove('hidden');
+  return;
+
+  if (history.length === 0) {
     chat.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:20px;">Sem histÃ³rico de conversa.</div>';
   } else {
     chat.innerHTML = history.map(msg => {
       const isUser = msg.role === 'user';
       const time = msg.ts ? new Date(msg.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+      const deliveryMeta = !isUser ? deliveryStatusMeta(msg.deliveryStatus) : null;
       return `
         <div class="chat-bubble-wrap ${isUser ? '' : 'outgoing'}">
           <div class="chat-bubble">${escapeHtml(msg.content)}</div>
