@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore, generateWAMessage } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -685,8 +685,35 @@ class WhatsAppManager extends EventEmitter {
         }
     }
 
-    async sendMessage(number, text, imageBuffer = null) {
+    async _sendFreshRelay(jid, content, relayOptions = {}) {
+        if (!this.sock || !this.sock.user?.id || typeof this.sock.relayMessage !== 'function') {
+            throw new Error('Sock do WhatsApp nao suporta relayMessage neste momento');
+        }
+
+        const fullMsg = await generateWAMessage(jid, content, {
+            logger: this.logger,
+            userJid: this.sock.user.id,
+            getProfilePicUrl: this.sock.profilePictureUrl?.bind(this.sock),
+            getCallLink: this.sock.createCallLink?.bind(this.sock),
+        });
+
+        await this.sock.relayMessage(jid, fullMsg.message, {
+            messageId: fullMsg.key.id,
+            useUserDevicesCache: relayOptions.useUserDevicesCache,
+            useCachedGroupMetadata: relayOptions.useCachedGroupMetadata,
+            additionalAttributes: relayOptions.additionalAttributes,
+            additionalNodes: relayOptions.additionalNodes,
+            statusJidList: relayOptions.statusJidList,
+        });
+
+        return fullMsg;
+    }
+
+    async sendMessage(number, text, imageBuffer = null, options = {}) {
         return this._sendTrackedPayload('message', number, async (jid) => {
+            if (options?.freshDevices && !imageBuffer) {
+                return this._sendFreshRelay(jid, { text }, { useUserDevicesCache: false });
+            }
             if (imageBuffer) {
                 return this.sock.sendMessage(jid, {
                     image: Buffer.isBuffer(imageBuffer) ? imageBuffer : Buffer.from(imageBuffer),
@@ -697,19 +724,29 @@ class WhatsAppManager extends EventEmitter {
         });
     }
 
-    async sendPoll(number, question, options) {
+    async sendPoll(number, question, options, sendOptions = {}) {
         const cleanOptions = options.filter(o => o && o.trim()).slice(0, 12);
         if (cleanOptions.length < 2) throw new Error('Enquete precisa de pelo menos 2 opcoes');
 
-        return this._sendTrackedPayload('poll', number, async (jid) => (
-            this.sock.sendMessage(jid, {
+        return this._sendTrackedPayload('poll', number, async (jid) => {
+            if (sendOptions?.freshDevices) {
+                return this._sendFreshRelay(jid, {
+                    poll: {
+                        name: question.substring(0, 255),
+                        values: cleanOptions,
+                        selectableCount: 1,
+                    },
+                }, { useUserDevicesCache: false });
+            }
+
+            return this.sock.sendMessage(jid, {
                 poll: {
                     name: question.substring(0, 255),
                     values: cleanOptions,
                     selectableCount: 1,
                 },
-            })
-        ));
+            });
+        });
     }
 
     async sendTyping(number, duration = 2500) {

@@ -317,15 +317,20 @@ class MessageQueue {
             if (item.imageBuffer) {
                 acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer));
             } else if (text && text.trim()) {
-                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null));
+                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null, { freshDevices: true }));
             }
 
             const pollQ = (item.pollQuestion && item.pollQuestion.trim())
                 ? item.pollQuestion.trim()
                 : (text.substring(0, 100) || 'Selecione uma opcao:');
-            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions));
+            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions, { freshDevices: true }));
         } else {
-            acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer));
+            acceptedRecords.push(await this.wa.sendMessage(
+                item.number,
+                text,
+                item.imageBuffer,
+                item.imageBuffer ? {} : { freshDevices: true }
+            ));
         }
 
         const finalRecords = await Promise.all(
