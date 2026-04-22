@@ -7,6 +7,7 @@ const state = {
   ws: null,
   wsRetry: 0,
   waStatus: 'disconnected',
+  waDetails: null,
   campaignStatus: 'idle',
   validNumbers: [],
   selectedImage: null,
@@ -97,7 +98,7 @@ function initWebSocket() {
 
 function handleWsMessage(data) {
   switch (data.type) {
-    case 'status':       handleStatusUpdate(data.status); break;
+    case 'status':       handleStatusUpdate(data.status, data.details || null); break;
     case 'qr':           handleQRCode(data.qr); break;
     case 'log':          appendLog(data.level, data.message); break;
     case 'stats':        updateStats(data.stats); break;
@@ -122,21 +123,43 @@ function handleWsMessage(data) {
 }
 
 // â”€â”€ WhatsApp Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function handleStatusUpdate(status) {
+function getConnectionDetailText(details) {
+  if (!details) return '';
+  if (details.statusCode === 405) {
+    if (details.retryVersion) {
+      return `Pareamento recusado antes do QR usando ${details.versionLabel || 'a versao atual'}. Tentando modo compativel ${details.retryVersion}...`;
+    }
+    return 'O WhatsApp Web recusou a criacao de uma nova sessao antes do QR (erro 405). Tente novamente mais tarde ou reutilize uma sessao ja autenticada.';
+  }
+
+  const parts = [];
+  if (details.message) parts.push(details.message);
+  if (details.statusCode) parts.push(`codigo ${details.statusCode}`);
+  return parts.join(' - ');
+}
+
+function handleStatusUpdate(status, details = null) {
   state.waStatus = status;
+  state.waDetails = details;
   const dot = document.getElementById('pill-dot');
   const text = document.getElementById('pill-text');
   const statusEl = document.getElementById('status-text');
+  const statusDetailEl = document.getElementById('status-detail');
   const qrImg = document.getElementById('qr-image');
   const qrPH = document.getElementById('qr-placeholder');
   const qrConn = document.getElementById('qr-connected');
   const badge = document.getElementById('badge-connection');
+  const detailText = getConnectionDetailText(details);
 
   dot.className = 'pill-dot';
   qrImg.classList.add('hidden');
   qrPH.style.display = 'none';
   qrConn.classList.add('hidden');
   badge.classList.remove('visible');
+  if (statusDetailEl) {
+    statusDetailEl.textContent = detailText;
+    statusDetailEl.classList.toggle('hidden', !detailText);
+  }
 
   if (status === 'connected') {
     dot.classList.add('connected');
@@ -159,7 +182,11 @@ function handleStatusUpdate(status) {
     statusEl.textContent = 'â— Desconectado';
     statusEl.className = 'status-value status-disconnected';
     qrPH.style.display = 'flex';
-    qrPH.innerHTML = '<div class="qr-spinner-ring"></div><p>Conectando ao servidor...</p>';
+    if (detailText) {
+      qrPH.innerHTML = `<p style="color:#f59e0b;font-size:13px;line-height:1.5;text-align:center">${detailText}</p>`;
+    } else {
+      qrPH.innerHTML = '<div class="qr-spinner-ring"></div><p>Conectando ao servidor...</p>';
+    }
   }
 }
 

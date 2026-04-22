@@ -55,7 +55,7 @@ wa.connect();
 // Send current state to newly connected WebSocket clients
 wss.on('connection', (ws) => {
   const waStatus = wa.getStatus();
-  ws.send(JSON.stringify({ type: 'status', status: waStatus.status }));
+  ws.send(JSON.stringify({ type: 'status', status: waStatus.status, details: waStatus.lastDisconnect || null }));
   if (waStatus.qrCode) ws.send(JSON.stringify({ type: 'qr', qr: waStatus.qrCode }));
 
   const progress = queue.getProgress();

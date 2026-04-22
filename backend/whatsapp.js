@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename);
 
 const DEFAULT_CONFIRMATION_TIMEOUT_MS = 25_000;
 const OUTBOUND_RECORD_TTL_MS = 5 * 60 * 1000;
+const KNOWN_QR_FALLBACK_VERSION = [2, 3000, 1035194821];
 
 function readBaileysVersionRange() {
     try {
@@ -34,6 +35,10 @@ function parseVersionOverride(raw) {
 
 function stringifyVersion(version) {
     return Array.isArray(version) ? version.join('.') : String(version || 'unknown');
+}
+
+function sameVersion(a, b) {
+    return stringifyVersion(a) === stringifyVersion(b);
 }
 
 function toBaseId(value) {
@@ -84,6 +89,13 @@ class WhatsAppManager extends EventEmitter {
         this._messageCache = new Map();
         this._baileysVersionRange = readBaileysVersionRange();
         this._latestWebVersion = null;
+        this._envVersionOverride = parseVersionOverride(process.env.WA_WEB_VERSION_OVERRIDE);
+        this._versionCandidates = this._envVersionOverride
+            ? [this._envVersionOverride]
+            : [null, KNOWN_QR_FALLBACK_VERSION];
+        this._versionCursor = 0;
+        this._activeConnectVersion = this._versionCandidates[0] || null;
+        this.lastDisconnect = null;
     }
 
     static buildJid(number) {
@@ -105,6 +117,41 @@ class WhatsAppManager extends EventEmitter {
         this.wss.clients.forEach(client => {
             if (client.readyState === 1) client.send(JSON.stringify(data));
         });
+    }
+
+    _getCurrentConnectVersion() {
+        return this._versionCandidates[this._versionCursor] ?? null;
+    }
+
+    _getVersionLabel(version = this._getCurrentConnectVersion()) {
+        return version ? stringifyVersion(version) : 'default-internal-v7';
+    }
+
+    _setLastDisconnect(error, extras = {}) {
+        const statusCode = extras.statusCode
+            ?? error?.output?.statusCode
+            ?? error?.statusCode
+            ?? null;
+
+        this.lastDisconnect = {
+            statusCode,
+            message: error?.output?.payload?.message || error?.message || extras.message || '',
+            reason: error?.data?.reason || extras.reason || '',
+            location: error?.data?.location || extras.location || '',
+            failedBeforeQr: !!extras.failedBeforeQr,
+            retryVersion: extras.retryVersion || '',
+            versionLabel: extras.versionLabel || this._getVersionLabel(this._activeConnectVersion),
+            at: new Date().toISOString(),
+        };
+        return this.lastDisconnect;
+    }
+
+    _clearLastDisconnect() {
+        this.lastDisconnect = null;
+    }
+
+    _broadcastStatus(status = this.status) {
+        this.broadcast({ type: 'status', status, details: this.lastDisconnect });
     }
 
     _registerPhoneAlias(alias, phone, source = 'unknown') {
@@ -372,10 +419,14 @@ class WhatsAppManager extends EventEmitter {
         this.reconnecting = true;
         try {
             const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
-            const overrideVersion = parseVersionOverride(process.env.WA_WEB_VERSION_OVERRIDE);
-            this._latestWebVersion = overrideVersion || null;
+            const selectedVersion = this._getCurrentConnectVersion();
+            const usingEnvOverride = !!this._envVersionOverride && sameVersion(selectedVersion, this._envVersionOverride);
+            const versionLabel = this._getVersionLabel(selectedVersion);
+            const attemptState = { sawQr: false };
+            this._activeConnectVersion = selectedVersion || null;
+            this._latestWebVersion = selectedVersion || null;
 
-            console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${overrideVersion ? stringifyVersion(overrideVersion) : 'default-internal-v7'}${overrideVersion ? ' (override)' : ''}`);
+            console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${versionLabel}${usingEnvOverride ? ' (override)' : ''}`);
 
             const socketConfig = {
                 auth: state,
@@ -392,8 +443,8 @@ class WhatsAppManager extends EventEmitter {
                 },
             };
 
-            if (overrideVersion) {
-                socketConfig.version = overrideVersion;
+            if (selectedVersion) {
+                socketConfig.version = selectedVersion;
             }
 
             this.sock = makeWASocket(socketConfig);
@@ -403,10 +454,12 @@ class WhatsAppManager extends EventEmitter {
 
                 if (qr) {
                     try {
+                        attemptState.sawQr = true;
                         this.qrCode = await qrcode.toDataURL(qr, { width: 280, margin: 2 });
                         this.status = 'qr_ready';
+                        this._clearLastDisconnect();
                         this.broadcast({ type: 'qr', qr: this.qrCode });
-                        this.broadcast({ type: 'status', status: 'qr_ready' });
+                        this._broadcastStatus('qr_ready');
                         console.log('[WhatsApp] QR Code gerado. Aguardando escaneamento...');
                     } catch (e) {
                         console.error('[WhatsApp] Erro ao gerar QR:', e);
@@ -415,12 +468,40 @@ class WhatsAppManager extends EventEmitter {
 
                 if (connection === 'close') {
                     const statusCode = lastDisconnect?.error?.output?.statusCode;
-                    const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                    let shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                    const details = this._setLastDisconnect(lastDisconnect?.error, {
+                        statusCode,
+                        failedBeforeQr: !attemptState.sawQr,
+                        versionLabel,
+                    });
+
+                    if (statusCode === 405 && !attemptState.sawQr && !this._envVersionOverride) {
+                        const nextVersion = this._versionCandidates[this._versionCursor + 1];
+                        if (nextVersion) {
+                            this._versionCursor += 1;
+                            details.retryVersion = this._getVersionLabel(nextVersion);
+                            console.warn(`[WhatsApp] Pairing rejected with 405 before QR using ${versionLabel}. Retrying with ${details.retryVersion}...`);
+                            this.broadcast({
+                                type: 'log',
+                                level: 'warning',
+                                message: `WhatsApp rejeitou o pareamento antes do QR usando ${versionLabel}. Tentando modo compativel ${details.retryVersion}...`,
+                            });
+                        } else {
+                            shouldReconnect = false;
+                            console.error(`[WhatsApp] Pairing blocked before QR even after fallback attempts. Last version: ${versionLabel}`);
+                            this.broadcast({
+                                type: 'log',
+                                level: 'error',
+                                message: 'WhatsApp bloqueou a criacao de uma nova sessao antes do QR (erro 405).',
+                            });
+                        }
+                    }
+
                     this.status = 'disconnected';
                     this.qrCode = null;
                     this.sock = null;
                     this.reconnecting = false;
-                    this.broadcast({ type: 'status', status: 'disconnected' });
+                    this._broadcastStatus('disconnected');
                     if (shouldReconnect) {
                         console.log('[WhatsApp] Reconectando em 3s...');
                         setTimeout(() => this.connect(), 3000);
@@ -433,8 +514,9 @@ class WhatsAppManager extends EventEmitter {
                     this.status = 'connected';
                     this.qrCode = null;
                     this.reconnecting = false;
+                    this._clearLastDisconnect();
                     console.log('[WhatsApp] Conectado com sucesso!');
-                    this.broadcast({ type: 'status', status: 'connected' });
+                    this._broadcastStatus('connected');
                     this.broadcast({ type: 'log', level: 'success', message: 'WhatsApp conectado com sucesso!' });
                 }
             });
@@ -481,7 +563,13 @@ class WhatsAppManager extends EventEmitter {
 
         } catch (error) {
             this.reconnecting = false;
+            this.status = 'disconnected';
+            this._setLastDisconnect(error, {
+                message: error.message,
+                versionLabel: this._getVersionLabel(this._activeConnectVersion),
+            });
             console.error('[WhatsApp] Erro ao conectar:', error.message);
+            this._broadcastStatus('disconnected');
             this.broadcast({ type: 'log', level: 'error', message: `Erro de conexao: ${error.message}` });
             setTimeout(() => this.connect(), 5000);
         }
@@ -567,8 +655,9 @@ class WhatsAppManager extends EventEmitter {
         return {
             status: this.status,
             qrCode: this.qrCode,
-            webVersion: stringifyVersion(this._latestWebVersion),
+            webVersion: this._getVersionLabel(this._activeConnectVersion || this._getCurrentConnectVersion()),
             baileysVersion: this._baileysVersionRange,
+            lastDisconnect: this.lastDisconnect,
         };
     }
 
@@ -588,10 +677,11 @@ class WhatsAppManager extends EventEmitter {
         this.status = 'disconnected';
         this.qrCode = null;
         this.reconnecting = false;
+        this._clearLastDisconnect();
         if (fs.existsSync(this.authPath)) {
             fs.rmSync(this.authPath, { recursive: true, force: true });
         }
-        this.broadcast({ type: 'status', status: 'disconnected' });
+        this._broadcastStatus('disconnected');
         this.broadcast({ type: 'log', level: 'info', message: 'Sessao encerrada. Aguardando novo QR Code...' });
     }
 }
