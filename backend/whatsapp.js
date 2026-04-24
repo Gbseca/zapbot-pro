@@ -6,7 +6,7 @@ import fs from 'fs';
 import pino from 'pino';
 import { fileURLToPath } from 'url';
 import { inspect } from 'util';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { AUTH_DIR } from './storage/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -107,6 +107,23 @@ function compactMessageContent(content = {}) {
         hasImage: !!content.image,
         hasPoll: !!content.poll,
     };
+}
+
+function explainOutboundDecision(record) {
+    if (!record) return 'Sem registro de envio.';
+    if (record.status === 'confirmed') {
+        return 'Confirmado por update posterior do WhatsApp (messages.update ou receipt).';
+    }
+    if (record.status === 'delivery_timeout') {
+        return 'O WhatsApp aceitou o envio e retornou messageId, mas nao enviou confirmacao dentro do timeout.';
+    }
+    if (record.status === 'failed') {
+        return record.error || 'Falha explicita antes ou durante o envio.';
+    }
+    if (record.status === 'accepted') {
+        return 'O WhatsApp aceitou o envio e retornou messageId. A confirmacao continua sendo rastreada em segundo plano.';
+    }
+    return `Estado atual do envio: ${record.status || 'desconhecido'}.`;
 }
 
 function compactOutboundUpdate(item) {
@@ -521,6 +538,8 @@ class WhatsAppManager extends EventEmitter {
     _snapshotOutbound(record) {
         if (!record) return null;
         return {
+            attemptId: record.attemptId,
+            context: record.context || 'outbound',
             messageId: record.messageId,
             status: record.status,
             kind: record.kind,
@@ -538,6 +557,13 @@ class WhatsAppManager extends EventEmitter {
             updates: Array.isArray(record.updates) ? record.updates.slice(-8) : [],
             createdAt: record.createdAt,
             acceptedAt: record.acceptedAt || null,
+            confirmedAt: record.confirmedAt || null,
+            timedOutAt: record.timedOutAt || null,
+            connectionStatus: record.connectionStatus || this.status,
+            webVersion: record.webVersion || this._getVersionLabel(this._activeConnectVersion || this._latestWebVersion),
+            baileysVersion: record.baileysVersion || this._baileysVersionRange,
+            decision: record.status,
+            explanation: explainOutboundDecision(record),
             updatedAt: record.updatedAt || null,
             error: record.error || null,
         };
@@ -547,8 +573,8 @@ class WhatsAppManager extends EventEmitter {
         const snapshot = this._snapshotOutbound(record);
         if (!snapshot) return;
         this._recentOutbound.push(snapshot);
-        if (this._recentOutbound.length > 12) {
-            this._recentOutbound = this._recentOutbound.slice(-12);
+        if (this._recentOutbound.length > 100) {
+            this._recentOutbound = this._recentOutbound.slice(-100);
         }
         this.emit('outbound-status', snapshot);
     }
@@ -578,6 +604,8 @@ class WhatsAppManager extends EventEmitter {
         record.updatedAt = new Date().toISOString();
         if (extra.ackStatus !== undefined) record.ackStatus = extra.ackStatus;
         if (extra.error) record.error = extra.error;
+        if (status === 'confirmed') record.confirmedAt = record.updatedAt;
+        if (status === 'delivery_timeout') record.timedOutAt = record.updatedAt;
         if (record.timeoutHandle) {
             clearTimeout(record.timeoutHandle);
             record.timeoutHandle = null;
@@ -616,6 +644,8 @@ class WhatsAppManager extends EventEmitter {
         });
 
         const record = {
+            attemptId: meta.attemptId || randomUUID(),
+            context: meta.context || (meta.campaignContext ? 'campaign' : (String(meta.routeLabel || '').startsWith('agent_') ? 'ai' : 'outbound')),
             messageId,
             kind,
             status: 'accepted',
@@ -638,6 +668,11 @@ class WhatsAppManager extends EventEmitter {
             updates: [],
             createdAt,
             acceptedAt: createdAt,
+            confirmedAt: null,
+            timedOutAt: null,
+            connectionStatus: this.status,
+            webVersion: this._getVersionLabel(this._activeConnectVersion || this._latestWebVersion),
+            baileysVersion: this._baileysVersionRange,
             updatedAt: createdAt,
             finalPromise,
             resolveFinal,
@@ -932,14 +967,18 @@ class WhatsAppManager extends EventEmitter {
                 forcePhoneJid: !!options.forcePhoneJid,
                 freshDevices: !!options.freshDevices,
                 peerPrimary: !!options.peerPrimary,
+                noInternalRetry: !!options.noInternalRetry,
             },
             routeLabel: options.routeLabel || '',
+            context: options.context || (options.campaignContext ? 'campaign' : undefined),
+            attemptId: options.attemptId || null,
             campaignContext: options.campaignContext || null,
             contentSummary: compactMessageContent(options.contentForDiagnostics || {}),
         };
         console.log(`[WA] ${kind} targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind} route=${sendMeta.routeLabel || 'default'} textLen=${sendMeta.contentSummary.textLength} textHash=${sendMeta.contentSummary.textHash || '-'}`);
 
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const maxAttempts = options.noInternalRetry ? 1 : 2;
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
                 const result = await builder(targetInfo.resolvedJid);
                 const accepted = this._registerAcceptedOutbound(kind, targetInfo, result, sendMeta);
@@ -962,7 +1001,7 @@ class WhatsAppManager extends EventEmitter {
                     stack: err.stack ? err.stack.split('\n').slice(0, 4).join(' | ') : null,
                 };
 
-                if (signalSession.matched && attempt < 2) {
+                if (signalSession.matched && attempt < maxAttempts) {
                     console.warn(`[WA] ${kind} signal session retry targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} attempt=${attempt}`, errorSummary);
                     this.broadcast({
                         type: 'log',
@@ -1132,7 +1171,7 @@ class WhatsAppManager extends EventEmitter {
             routeStats: { ...this._routeStats },
             predominantRoute,
             lastInboundRoute: this._lastInboundRoute,
-            recentOutbound: this._recentOutbound.slice(-20).reverse(),
+            recentOutbound: this._recentOutbound.slice(-50).reverse(),
         };
     }
 

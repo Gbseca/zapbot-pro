@@ -122,6 +122,7 @@ class MessageQueue {
 
         this.queue = numbers.map(n => ({
             number: n,
+            normalizedNumber: normalizeCampaignNumber(n),
             message,
             imageBuffer: imageBuffer || null,
             pollEnabled: pollEnabled || false,
@@ -152,6 +153,7 @@ class MessageQueue {
             precheck: this.precheck,
             queue: this.queue.map(q => ({
                 number: q.number,
+                normalizedNumber: q.normalizedNumber,
                 status: q.status,
                 sentAt: q.sentAt,
                 error: q.error,
@@ -549,12 +551,14 @@ class MessageQueue {
         const target = targetInfo.target;
         const routeMode = CAMPAIGN_ROUTE_MODE;
         const forcePhoneForTarget = !String(target || '').includes('@lid');
+        item.normalizedNumber = targetInfo.normalized || item.normalizedNumber || null;
 
         if (targetInfo.source === 'lead_jid') {
             this.log('info', `Usando JID salvo do lead para ${item.number}: ${target}.`);
         } else {
             this.log('info', `Modo de rota da campanha para ${item.number}: ${routeMode}.`);
         }
+        this.log('info', `Preparando envio: original=${item.number} normalizado=${targetInfo.normalized || '--'} alvo=${target} origem=${targetInfo.source}.`);
 
         if (routeMode === 'lid_first' && typeof this.wa.preferStoredLidForTarget === 'function') {
             const preferred = await this.wa.preferStoredLidForTarget(item.number);
@@ -586,8 +590,11 @@ class MessageQueue {
             const routeOptions = {
                 ...attempt.options,
                 routeLabel: attempt.label,
+                context: 'campaign',
                 campaignContext: {
                     number: item.number,
+                    normalized: targetInfo.normalized || null,
+                    target,
                     targetSource: targetInfo.source,
                     routeMode,
                 },
@@ -853,6 +860,7 @@ class MessageQueue {
             stats: this.stats,
             queue: this.queue.map(q => ({
                 number: q.number,
+                normalizedNumber: q.normalizedNumber,
                 status: q.status,
                 sentAt: q.sentAt,
                 error: q.error,

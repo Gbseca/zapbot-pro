@@ -866,6 +866,56 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .log-warning { color: var(--yellow); }
 .log-error { color: var(--red); }
 
+.campaign-diagnostic-panel {
+  margin-top: 12px;
+  border: 1px solid rgba(59,130,246,.22);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, rgba(59,130,246,.08), rgba(15,23,42,.42));
+  padding: 12px;
+}
+.campaign-diagnostic-title {
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.campaign-diagnostic-empty,
+.campaign-diagnostic-note {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.campaign-diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.campaign-diagnostic-grid div {
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  background: rgba(255,255,255,.025);
+  padding: 8px;
+  min-width: 0;
+}
+.campaign-diagnostic-grid span {
+  display: block;
+  color: var(--text-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 4px;
+}
+.campaign-diagnostic-grid strong {
+  display: block;
+  color: var(--text-1);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 /* ── Toast Notifications ───────────────────────────────────── */
 .toast-container {
   position: fixed;

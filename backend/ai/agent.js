@@ -142,7 +142,7 @@ function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone) {
   if (altPhone) {
     return {
       target: altPhone,
-      options: { forcePhoneJid: true, routeLabel: 'agent_remote_jid_alt' },
+      options: { forcePhoneJid: true, routeLabel: 'agent_remote_jid_alt', context: 'ai', noInternalRetry: true },
       source: 'remoteJidAlt',
     };
   }
@@ -150,7 +150,7 @@ function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone) {
   if (conversationPhone) {
     return {
       target: conversationPhone,
-      options: { forcePhoneJid: true, routeLabel: 'agent_phone' },
+      options: { forcePhoneJid: true, routeLabel: 'agent_phone', context: 'ai', noInternalRetry: true },
       source: 'conversationPhone',
     };
   }
@@ -158,14 +158,14 @@ function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone) {
   if (String(fullJid || '').includes('@lid')) {
     return {
       target: fullJid,
-      options: { forcePhoneJid: true, routeLabel: 'agent_lid_forced_phone' },
+      options: { forcePhoneJid: true, routeLabel: 'agent_lid_forced_phone', context: 'ai', noInternalRetry: true },
       source: 'lid_forced_phone',
     };
   }
 
   return {
     target: fullJid,
-    options: { routeLabel: 'agent_jid' },
+    options: { routeLabel: 'agent_jid', context: 'ai', noInternalRetry: true },
     source: 'jid',
   };
 }
@@ -216,7 +216,7 @@ function buildAssistantHistoryEntry(content, delivery = {}) {
     role: 'assistant',
     content,
     ts: Date.now(),
-    deliveryStatus: delivery.status || 'confirmed',
+    deliveryStatus: delivery.status || 'accepted',
     messageId: delivery.messageId || null,
     targetJid: delivery.targetJid || null,
     error: delivery.error || null,
@@ -230,12 +230,11 @@ function appendAssistantMessage(lead, content, delivery) {
 
 async function sendSingleReplyTracked(wa, target, text, sendOptions = {}) {
   const accepted = await wa.sendMessage(target, text, null, sendOptions);
-  const final = await wa.waitForOutboundFinal(accepted.messageId);
   return {
-    status: final?.status || 'failed',
+    status: accepted.status || 'accepted',
     messageId: accepted.messageId,
-    targetJid: accepted.resolvedJid || final?.targetResolved || null,
-    error: final?.error || null,
+    targetJid: accepted.resolvedJid || null,
+    error: null,
   };
 }
 
@@ -358,7 +357,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
       const msg = `Oi! Nosso horario de atendimento e das ${sh}h as ${eh}h. Estarei aqui quando voltar! Ate logo.`;
       const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
       await persistSimpleReply(wa, leadId, lead, replyRoute.target, msg, (delivery) => (
-        delivery.status === 'confirmed' ? { lastOutOfHoursMsg: today } : {}
+        delivery.status !== 'failed' ? { lastOutOfHoursMsg: today } : {}
       ), replyRoute.options);
     }
     return;
@@ -557,9 +556,9 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
   appendAssistantMessage(lead, cleanResponse, delivery);
 
-  if (delivery.status !== 'confirmed') {
+  if (delivery.status === 'failed') {
     saveLead(leadId, lead);
-    console.error(`[Agent] Delivery not confirmed for ${leadId}: ${delivery.error || delivery.status}`);
+    console.error(`[Agent] Delivery failed for ${leadId}: ${delivery.error || delivery.status}`);
     return;
   }
 

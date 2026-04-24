@@ -4,11 +4,11 @@ function calcNaturalDelay(receivedText = '', responseText = '') {
   const wordsReceived = receivedText.trim().split(/\s+/).filter(Boolean).length;
   const wordsResponse = responseText.trim().split(/\s+/).filter(Boolean).length;
 
-  const readingTime = Math.min(wordsReceived * 90, 900);
-  const typingTime = Math.min(wordsResponse * 55, 2200);
+  const readingTime = Math.min(wordsReceived * 18, 180);
+  const typingTime = Math.min(wordsResponse * 22, 520);
   const variation = 0.85 + Math.random() * 0.35;
 
-  return Math.max(450, Math.round((readingTime + typingTime) * variation));
+  return Math.max(180, Math.round((readingTime + typingTime) * variation));
 }
 
 function splitIntoChunks(text, forceSingle = false) {
@@ -54,9 +54,9 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
     if (i === 0) {
       delay = calcNaturalDelay(receivedText, chunk);
     } else {
-      delay = Math.min(chunkWords * 70, 1800);
+      delay = Math.min(chunkWords * 24, 650);
       delay = Math.round(delay * (0.9 + Math.random() * 0.25));
-      await sleep(280 + Math.random() * 320);
+      await sleep(120 + Math.random() * 180);
     }
 
     await wa.sendTyping(number, delay, sendOptions);
@@ -75,28 +75,21 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
     };
   }
 
-  const finalizedChunks = await Promise.all(
-    acceptedChunks.map(async (accepted) => {
-      const final = await wa.waitForOutboundFinal(accepted.messageId);
-      return {
-        chunk: accepted.chunk,
-        messageId: accepted.messageId,
-        resolvedJid: accepted.resolvedJid,
-        status: final?.status || 'failed',
-        error: final?.error || null,
-      };
-    })
-  );
-
-  const firstProblem = finalizedChunks.find(chunk => chunk.status === 'failed' || chunk.status === 'delivery_timeout');
-  const lastChunk = finalizedChunks[finalizedChunks.length - 1];
+  const acceptedOnlyChunks = acceptedChunks.map((accepted) => ({
+    chunk: accepted.chunk,
+    messageId: accepted.messageId,
+    resolvedJid: accepted.resolvedJid,
+    status: accepted.status || 'accepted',
+    error: null,
+  }));
+  const lastChunk = acceptedOnlyChunks[acceptedOnlyChunks.length - 1];
 
   return {
-    status: firstProblem ? firstProblem.status : 'confirmed',
+    status: 'accepted',
     messageId: lastChunk?.messageId || null,
-    messageIds: finalizedChunks.map(chunk => chunk.messageId).filter(Boolean),
+    messageIds: acceptedOnlyChunks.map(chunk => chunk.messageId).filter(Boolean),
     targetJid: lastChunk?.resolvedJid || null,
-    error: firstProblem?.error || null,
-    chunks: finalizedChunks,
+    error: null,
+    chunks: acceptedOnlyChunks,
   };
 }

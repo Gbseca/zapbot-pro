@@ -58,9 +58,9 @@ export async function executeHandoff(wa, lead, config) {
   // 1. Farewell to client (humanized — wait a bit before this one)
   await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
   const farewellMsg = `Perfeito${lead.name ? `, ${lead.name}` : ''}! 🙌\n\nJá anotei tudo aqui. Um dos nossos consultores vai entrar em contato com você em breve com as melhores opções${lead.model ? ` pra o seu ${lead.model}` : ''}.\n\nQualquer dúvida é só falar! 😊`;
-  // Use stored fullJid if available (handles non-standard WhatsApp JIDs)
-  const clientTarget = lead.jid || lead.number;
-  await wa.sendMessage(clientTarget, farewellMsg, null);
+  // Prefer the same fast reply target chosen by the agent instead of raw @lid.
+  const clientTarget = lead.replyTargetJid || lead.phone || lead.displayNumber || lead.number || lead.jid;
+  await wa.sendMessage(clientTarget, farewellMsg, null, { forcePhoneJid: true, routeLabel: 'agent_handoff_client', context: 'ai', noInternalRetry: true });
 
   // 2. Notify consultor
   if (consultor) {
@@ -87,7 +87,7 @@ export async function executeHandoff(wa, lead, config) {
     console.log(`[Handoff] Notifying consultor: ${consultor.name} → raw="${consultor.number}" clean="${cNum}"`);
 
     try {
-      await wa.sendMessage(cNum, consultorMsg, null);
+      await wa.sendMessage(cNum, consultorMsg, null, { forcePhoneJid: true, routeLabel: 'agent_handoff_consultor', context: 'ai', noInternalRetry: true });
       console.log(`[Handoff] ✅ Consultor notified: ${consultor.name} (${cNum})`);
     } catch (err) {
       console.error(`[Handoff] ❌ FAILED to notify consultor ${consultor.name} (${cNum}): ${err.message}`);

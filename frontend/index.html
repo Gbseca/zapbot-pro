@@ -665,11 +665,17 @@
               <span class="card-icon">💻</span>
               <h2 class="card-title">Log em Tempo Real</h2>
               <div class="card-actions">
+                <button class="btn btn-outline btn-sm" onclick="copyCampaignLog()">Copiar log</button>
+                <button class="btn btn-outline btn-sm" onclick="copyLastCampaignDiagnostic()">Copiar ultimo envio</button>
                 <button class="btn btn-outline btn-sm" onclick="clearLog()">🗑️ Limpar</button>
               </div>
             </div>
             <div class="log-console" id="log-console">
               <div class="log-line log-info">[Sistema] ZapBot Pro iniciado. Aguardando conexão WhatsApp...</div>
+            </div>
+            <div class="campaign-diagnostic-panel" id="campaign-diagnostic-panel">
+              <div class="campaign-diagnostic-title">Diagnostico do ultimo envio</div>
+              <div class="campaign-diagnostic-empty">Rode uma campanha para preencher rota, alvo, ACK, messageId e decisao final aqui.</div>
             </div>
           </div>
         </div>
@@ -1132,6 +1138,8 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
             <button class="btn btn-outline" onclick="testEffectiveAIStatus()">Testar IA efetiva</button>
             <button class="btn btn-outline" onclick="revalidateAdsCollector()">Revalidar coletor de anuncios</button>
             <button class="btn btn-outline" onclick="copySystemDiagnostic()">Copiar log diagnostico</button>
+            <button class="btn btn-outline" onclick="copyLastOutboundByContext('ai')">Copiar ultimo envio IA</button>
+            <button class="btn btn-outline" onclick="copyLastOutboundByContext('campaign')">Copiar ultimo envio Campanha</button>
             <button class="btn btn-primary" onclick="refreshSystemStatus()">Atualizar diagnostico agora</button>
           </div>
         </div>

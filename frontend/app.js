@@ -19,6 +19,9 @@ const state = {
   stats: { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0, dailyOutboundAttempts: 0 },
   campaignFlow: null,
   campaignWaitReason: null,
+  campaignLogs: [],
+  lastCampaignDiagnostic: null,
+  lastAiDiagnostic: null,
   systemStatus: null,
   adResearch: {
     jobId: '',
@@ -117,7 +120,9 @@ function handleWsMessage(data) {
       state.stats = { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0, dailyOutboundAttempts: 0 };
       state.campaignFlow = null;
       state.campaignWaitReason = null;
+      state.lastCampaignDiagnostic = null;
       renderQueueList();
+      renderCampaignDiagnosticPanel();
       updateStats(state.stats, null, null);
       handleCampaignStatus('idle');
       break;
@@ -1013,6 +1018,7 @@ function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget
     item.classList.add('active-item');
     item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
+  renderCampaignDiagnosticPanel();
 }
 
 function renderQueueList() {
@@ -1050,7 +1056,15 @@ function renderQueueList() {
 
 // â”€â”€ Log Console â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function appendLog(level, message) {
+  state.campaignLogs.push({
+    at: new Date().toISOString(),
+    level,
+    message,
+  });
+  state.campaignLogs = state.campaignLogs.slice(-300);
+
   const console_ = document.getElementById('log-console');
+  if (!console_) return;
   const line = document.createElement('div');
   line.className = `log-line log-${level}`;
   line.textContent = message;
@@ -1059,7 +1073,156 @@ function appendLog(level, message) {
 }
 
 function clearLog() {
-  document.getElementById('log-console').innerHTML = '';
+  state.campaignLogs = [];
+  const console_ = document.getElementById('log-console');
+  if (console_) console_.innerHTML = '';
+}
+
+async function writeClipboardText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
+function outboundMatchesContext(item, context) {
+  if (!item) return false;
+  if (item.context === context) return true;
+  if (context === 'campaign') return !!item.campaignContext;
+  if (context === 'ai') return String(item.routeLabel || '').startsWith('agent_');
+  return false;
+}
+
+function getRecentOutboundByContext(context) {
+  const items = state.systemStatus?.whatsapp?.recentOutbound || [];
+  return items.find(item => outboundMatchesContext(item, context)) || null;
+}
+
+function updateLastDiagnosticsFromStatus(snapshot = state.systemStatus) {
+  const outbound = snapshot?.whatsapp?.recentOutbound || [];
+  state.lastCampaignDiagnostic = outbound.find(item => outboundMatchesContext(item, 'campaign')) || state.lastCampaignDiagnostic;
+  state.lastAiDiagnostic = outbound.find(item => outboundMatchesContext(item, 'ai')) || state.lastAiDiagnostic;
+}
+
+function compactDiagnosticForCopy(item) {
+  if (!item) return null;
+  return {
+    attemptId: item.attemptId,
+    context: item.context,
+    status: item.status,
+    decision: item.decision,
+    explanation: item.explanation,
+    kind: item.kind,
+    messageId: item.messageId,
+    ackStatus: item.ackStatus,
+    targetOriginal: item.targetOriginal,
+    targetResolved: item.targetResolved,
+    resolvedPhone: item.resolvedPhone,
+    targetKind: item.targetKind,
+    resolutionSource: item.resolutionSource,
+    routeLabel: item.routeLabel,
+    routeOptions: item.routeOptions,
+    campaignContext: item.campaignContext,
+    resultKey: item.resultKey,
+    contentSummary: item.contentSummary,
+    timestamps: {
+      createdAt: item.createdAt,
+      acceptedAt: item.acceptedAt,
+      confirmedAt: item.confirmedAt,
+      timedOutAt: item.timedOutAt,
+      updatedAt: item.updatedAt,
+    },
+    environment: {
+      connectionStatus: item.connectionStatus,
+      webVersion: item.webVersion,
+      baileysVersion: item.baileysVersion,
+    },
+    updates: item.updates || [],
+    error: item.error || null,
+  };
+}
+
+function buildOutboundDiagnosticText(item, label = 'envio') {
+  if (!item) return `Sem diagnostico de ${label} disponivel ainda.`;
+  return JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    label,
+    outbound: compactDiagnosticForCopy(item),
+    campaign: state.systemStatus?.campaign || null,
+    whatsapp: {
+      status: state.systemStatus?.whatsapp?.status,
+      predominantRoute: state.systemStatus?.whatsapp?.predominantRoute,
+      lastInboundRoute: state.systemStatus?.whatsapp?.lastInboundRoute,
+    },
+  }, null, 2);
+}
+
+async function copyCampaignLog() {
+  const lines = state.campaignLogs.map(entry => `[${entry.at}] [${entry.level}] ${entry.message}`);
+  if (!lines.length) lines.push('Nenhum log de campanha capturado nesta sessao do navegador.');
+  try {
+    await writeClipboardText(lines.join('\n'));
+    showToast('Log da campanha copiado.', 'success');
+  } catch (error) {
+    showToast('Nao foi possivel copiar o log: ' + error.message, 'error');
+  }
+}
+
+async function copyLastCampaignDiagnostic() {
+  try {
+    await refreshSystemStatus();
+    const item = getRecentOutboundByContext('campaign') || state.lastCampaignDiagnostic;
+    await writeClipboardText(buildOutboundDiagnosticText(item, 'ultimo envio de campanha'));
+    showToast('Diagnostico do ultimo envio da campanha copiado.', item ? 'success' : 'warning');
+  } catch (error) {
+    showToast('Nao foi possivel copiar o diagnostico: ' + error.message, 'error');
+  }
+}
+
+async function copyLastOutboundByContext(context) {
+  const label = context === 'ai' ? 'ultimo envio IA' : context === 'campaign' ? 'ultimo envio Campanha' : 'ultimo envio';
+  try {
+    await refreshSystemStatus();
+    const fallback = context === 'ai' ? state.lastAiDiagnostic : state.lastCampaignDiagnostic;
+    const item = getRecentOutboundByContext(context) || fallback;
+    await writeClipboardText(buildOutboundDiagnosticText(item, label));
+    showToast(`${label} copiado.`, item ? 'success' : 'warning');
+  } catch (error) {
+    showToast('Nao foi possivel copiar o diagnostico: ' + error.message, 'error');
+  }
+}
+
+function renderCampaignDiagnosticPanel() {
+  const panel = document.getElementById('campaign-diagnostic-panel');
+  if (!panel) return;
+  const item = state.lastCampaignDiagnostic || getRecentOutboundByContext('campaign');
+  if (!item) {
+    panel.innerHTML = `
+      <div class="campaign-diagnostic-title">Diagnostico do ultimo envio</div>
+      <div class="campaign-diagnostic-empty">Rode uma campanha para preencher rota, alvo, ACK, messageId e decisao final aqui.</div>
+    `;
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="campaign-diagnostic-title">Diagnostico do ultimo envio</div>
+    <div class="campaign-diagnostic-grid">
+      <div><span>Status</span><strong>${escapeHtml(item.status || '--')}</strong></div>
+      <div><span>ACK</span><strong>${escapeHtml(String(item.ackStatus ?? '--'))}</strong></div>
+      <div><span>Rota</span><strong>${escapeHtml(item.targetKind || '--')}</strong></div>
+      <div><span>Origem</span><strong>${escapeHtml(item.resolutionSource || '--')}</strong></div>
+      <div><span>Message ID</span><strong>${escapeHtml(item.messageId || '--')}</strong></div>
+      <div><span>Alvo</span><strong>${escapeHtml(item.targetResolved || item.targetOriginal || '--')}</strong></div>
+    </div>
+    <div class="campaign-diagnostic-note">${escapeHtml(item.explanation || item.error || 'Sem explicacao disponivel.')}</div>
+  `;
 }
 
 // â”€â”€ Toast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1161,7 +1324,9 @@ function renderOutboundMiniList(items = []) {
           <div class="status-mini-body">
             ${escapeHtml(item.targetResolved || item.targetOriginal || '--')}
             <br>
-            rota ${escapeHtml(item.targetKind || '--')} | ack ${escapeHtml(String(item.ackStatus ?? '--'))} | hash ${escapeHtml(item.contentSummary?.textHash || '--')}
+            contexto ${escapeHtml(item.context || '--')} | rota ${escapeHtml(item.targetKind || '--')} | ack ${escapeHtml(String(item.ackStatus ?? '--'))} | hash ${escapeHtml(item.contentSummary?.textHash || '--')}
+            <br>
+            ${escapeHtml(item.explanation || '')}
           </div>
         </div>
       `).join('')}
@@ -1341,6 +1506,7 @@ function renderSystemStatus() {
 
 function handleSystemStatusUpdate(snapshot) {
   state.systemStatus = snapshot;
+  updateLastDiagnosticsFromStatus(snapshot);
   if (snapshot?.campaign) {
     updateCampaignFlowPanel(snapshot.campaign.flowControl, snapshot.campaign.waitReason);
   }
@@ -1348,6 +1514,7 @@ function handleSystemStatusUpdate(snapshot) {
     renderAIEffectiveSummary();
   }
   renderSystemStatus();
+  renderCampaignDiagnosticPanel();
 }
 
 async function loadSystemStatus() {
@@ -1404,6 +1571,9 @@ function buildSystemDiagnosticText(snapshot = state.systemStatus) {
       precheck: snapshot.campaign?.precheck,
     },
     recentEvents: snapshot.recentEvents || [],
+    lastAiOutbound: compactDiagnosticForCopy(getRecentOutboundByContext('ai') || state.lastAiDiagnostic),
+    lastCampaignOutbound: compactDiagnosticForCopy(getRecentOutboundByContext('campaign') || state.lastCampaignDiagnostic),
+    campaignLogs: state.campaignLogs.slice(-80),
   };
   return JSON.stringify(copy, null, 2);
 }
