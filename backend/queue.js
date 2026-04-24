@@ -6,7 +6,12 @@ import {
 } from './campaign-state.js';
 
 const MAX_CONSECUTIVE_FAILURES = 3;
-const CAMPAIGN_ROUTE_MODE = String(process.env.WA_CAMPAIGN_ROUTE_MODE || 'phone_first').toLowerCase();
+const CAMPAIGN_ROUTE_MODE = String(process.env.WA_CAMPAIGN_ROUTE_MODE || 'lid_first').toLowerCase();
+
+function isLidJid(value) {
+    const text = String(value || '');
+    return text.includes('@lid') || text.includes('@hosted.lid');
+}
 
 function normalizeCampaignNumber(raw) {
     const digits = String(raw || '').replace(/\D/g, '');
@@ -339,10 +344,10 @@ class MessageQueue {
                 ].map(normalizeCampaignNumber).filter(Boolean);
                 return values.includes(normalized);
             });
-        const savedReplyTarget = lead?.replyTargetJid && String(lead.replyTargetJid).includes('@lid')
+        const savedReplyTarget = lead?.replyTargetJid && isLidJid(lead.replyTargetJid)
             ? null
             : lead?.replyTargetJid;
-        const savedSafeJid = lead?.jid && String(lead.jid).includes('@lid')
+        const savedSafeJid = lead?.jid && isLidJid(lead.jid)
             ? null
             : lead?.jid;
         const reusableJid = savedReplyTarget || savedSafeJid;
@@ -550,7 +555,7 @@ class MessageQueue {
         const targetInfo = this.resolveCampaignSendTarget(item);
         const target = targetInfo.target;
         const routeMode = CAMPAIGN_ROUTE_MODE;
-        const forcePhoneForTarget = !String(target || '').includes('@lid');
+        const forcePhoneForTarget = !isLidJid(target);
         item.normalizedNumber = targetInfo.normalized || item.normalizedNumber || null;
 
         if (targetInfo.source === 'lead_jid') {
@@ -560,16 +565,22 @@ class MessageQueue {
         }
         this.log('info', `Preparando envio: original=${item.number} normalizado=${targetInfo.normalized || '--'} alvo=${target} origem=${targetInfo.source}.`);
 
+        let preferredLookup = null;
         if (routeMode === 'lid_first' && typeof this.wa.preferStoredLidForTarget === 'function') {
             const preferred = await this.wa.preferStoredLidForTarget(item.number);
-            if (preferred?.preferredJid?.includes('@lid')) {
+            preferredLookup = preferred?.lookup || null;
+            this.log('info', `onWhatsApp para ${item.number}: exists=${preferredLookup?.exists ?? '--'} jid=${preferredLookup?.jid || '--'} lid=${preferredLookup?.lid || '--'} fonte=${preferred?.source || '--'}.`);
+            if (preferred?.preferredJid?.includes('@lid') || preferred?.preferredJid?.includes('@hosted.lid')) {
                 this.log('info', `Rota LID preferida para ${item.number}: ${preferred.preferredJid}.`);
+            } else {
+                this.log('warning', `Nenhuma rota LID confirmada para ${item.number}; a campanha vai usar a melhor rota disponivel.`);
             }
         }
 
         if (this.config?.antiRestriction?.typing) {
             this.log('info', `Simulando digitacao para ${item.number}...`);
-            await this.wa.sendTyping(target, 2500, forcePhoneForTarget ? { forcePhoneJid: true } : {});
+            const typingOptions = routeMode === 'lid_first' ? {} : (forcePhoneForTarget ? { forcePhoneJid: true } : {});
+            await this.wa.sendTyping(target, 2500, typingOptions);
         }
 
         const routeAttempts = targetInfo.source === 'lead_jid'
@@ -597,6 +608,7 @@ class MessageQueue {
                     target,
                     targetSource: targetInfo.source,
                     routeMode,
+                    onWhatsApp: preferredLookup,
                 },
             };
             if (attemptIndex > 0) {

@@ -1,5 +1,5 @@
 import { loadConfig, resolveEffectiveAIConfig } from '../data/config-manager.js';
-import { getLead, saveLead } from '../data/leads-manager.js';
+import { getAllLeads, getLead, saveLead } from '../data/leads-manager.js';
 import { buildContext, buildQualificationContext } from './context-builder.js';
 import { callAI } from './gemini.js';
 import { sendHumanized } from './humanizer.js';
@@ -133,44 +133,84 @@ function isValidIncoming(msg) {
   return true;
 }
 
-function resolveConversationPhone(displayNum, jidId) {
-  return normalizePhone(displayNum) || normalizePhone(jidId) || null;
+function resolveConversationPhone(displayNum, jidId, inboundRoute = null) {
+  return inboundRoute?.mappedPhone
+    || inboundRoute?.phoneCandidates?.[0]
+    || normalizePhone(displayNum)
+    || normalizePhone(jidId)
+    || null;
 }
 
-function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone) {
+function isLidJid(value) {
+  const text = String(value || '');
+  return text.includes('@lid') || text.includes('@hosted.lid');
+}
+
+function findStoredLeadByJid(fullJid, jidId) {
+  return getAllLeads().find((lead) => (
+    lead?.jid === fullJid
+    || lead?.replyTargetJid === fullJid
+    || lead?.number === jidId
+  )) || null;
+}
+
+function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute = null, existingLead = null) {
   const altPhone = normalizePhone(fullJidAlt);
+  const inboundPhone = inboundRoute?.mappedPhone || inboundRoute?.phoneCandidates?.[0] || null;
+  const leadPhone = normalizePhone(existingLead?.phone)
+    || normalizePhone(existingLead?.displayNumber)
+    || normalizePhone(existingLead?.number)
+    || null;
+  const commonOptions = { context: 'ai', noInternalRetry: true, inboundRoute };
+
   if (altPhone) {
     return {
       target: altPhone,
-      options: { forcePhoneJid: true, routeLabel: 'agent_remote_jid_alt', context: 'ai', noInternalRetry: true },
+      options: { ...commonOptions, forcePhoneJid: true, routeLabel: 'agent_remote_jid_alt' },
       source: 'remoteJidAlt',
+    };
+  }
+
+  if (inboundPhone) {
+    return {
+      target: inboundPhone,
+      options: { ...commonOptions, forcePhoneJid: true, routeLabel: 'agent_inbound_phone' },
+      source: 'inboundPhone',
+    };
+  }
+
+  if (leadPhone) {
+    return {
+      target: leadPhone,
+      options: { ...commonOptions, forcePhoneJid: true, routeLabel: 'agent_lead_phone' },
+      source: 'leadPhone',
     };
   }
 
   if (conversationPhone) {
     return {
       target: conversationPhone,
-      options: { forcePhoneJid: true, routeLabel: 'agent_phone', context: 'ai', noInternalRetry: true },
+      options: { ...commonOptions, forcePhoneJid: true, routeLabel: 'agent_phone' },
       source: 'conversationPhone',
     };
   }
 
-  if (String(fullJid || '').includes('@lid')) {
+  if (isLidJid(fullJid)) {
     return {
       target: fullJid,
-      options: { forcePhoneJid: true, routeLabel: 'agent_lid_forced_phone', context: 'ai', noInternalRetry: true },
-      source: 'lid_forced_phone',
+      options: { ...commonOptions, allowRawLid: true, skipTyping: true, routeLabel: 'agent_raw_lid' },
+      source: 'raw_lid_allowed',
     };
   }
 
   return {
     target: fullJid,
-    options: { routeLabel: 'agent_jid', context: 'ai', noInternalRetry: true },
+    options: { ...commonOptions, routeLabel: 'agent_jid' },
     source: 'jid',
   };
 }
 
-function resolveLeadIdentity(jidId, conversationPhone) {
+function resolveLeadIdentity(jidId, conversationPhone, fullJid) {
   const preferredId = conversationPhone || jidId;
   const preferredLead = getLead(preferredId);
   if (preferredLead) return { leadId: preferredId, lead: preferredLead };
@@ -179,6 +219,9 @@ function resolveLeadIdentity(jidId, conversationPhone) {
     const legacyLead = getLead(jidId);
     if (legacyLead) return { leadId: jidId, lead: legacyLead };
   }
+
+  const storedLead = findStoredLeadByJid(fullJid, jidId);
+  if (storedLead) return { leadId: storedLead.number || preferredId, lead: storedLead };
 
   return { leadId: preferredId, lead: null };
 }
@@ -311,15 +354,16 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const fullJid = rawMsg.key.remoteJid;
   const fullJidAlt = rawMsg.key.remoteJidAlt || '';
   const jidId = fullJid.split('@')[0].split(':')[0];
-  const displayNum = wa.resolvePhone(fullJidAlt || fullJid);
-  const conversationPhone = resolveConversationPhone(displayNum, jidId);
-  const replyRoute = resolveReplyRoute(fullJid, fullJidAlt, conversationPhone);
-  const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone);
+  const inboundRoute = typeof wa.getInboundRouteContext === 'function' ? wa.getInboundRouteContext(rawMsg) : null;
+  const displayNum = inboundRoute?.mappedPhone || inboundRoute?.phoneCandidates?.[0] || wa.resolvePhone(fullJidAlt || fullJid);
+  const conversationPhone = resolveConversationPhone(displayNum, jidId, inboundRoute);
+  const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone, fullJid);
+  const replyRoute = resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute, leadFromStore);
   const text = extractText(rawMsg);
   const pushName = rawMsg.pushName || null;
 
   console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${text.slice(0, 60)}"`);
-  console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source})`);
+  console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source}) candidates=${inboundRoute?.phoneCandidates?.join(',') || '-'} mapped=${inboundRoute?.mappedPhone || '-'}`);
   if (!text) return;
 
   const existingLead = leadFromStore;
@@ -434,10 +478,10 @@ function accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, conf
 
 async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts, pushName, config, replyRoute = null) {
   const combinedText = texts.join('\n');
-  const conversationPhone = resolveConversationPhone(displayNum, jidId);
-  const route = replyRoute || resolveReplyRoute(fullJid, '', conversationPhone);
+  const conversationPhone = resolveConversationPhone(displayNum, jidId, replyRoute?.options?.inboundRoute || null);
 
   let lead = getLead(leadId) || createNewLead(leadId, displayNum, pushName, conversationPhone);
+  const route = replyRoute || resolveReplyRoute(fullJid, '', conversationPhone, null, lead);
 
   lead.number = leadId;
   lead.jid = fullJid;

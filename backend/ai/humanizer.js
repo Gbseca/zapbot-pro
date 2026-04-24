@@ -59,7 +59,9 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
       await sleep(120 + Math.random() * 180);
     }
 
-    await wa.sendTyping(number, delay, sendOptions);
+    if (!sendOptions?.skipTyping) {
+      await wa.sendTyping(number, delay, sendOptions);
+    }
     const accepted = await wa.sendMessage(number, chunk, null, sendOptions);
     acceptedChunks.push({ ...accepted, chunk });
   }

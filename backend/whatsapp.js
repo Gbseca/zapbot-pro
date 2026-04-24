@@ -47,6 +47,11 @@ function toBaseId(value) {
     return String(value || '').split('@')[0].split(':')[0];
 }
 
+function isLidJid(value) {
+    const text = String(value || '');
+    return text.includes('@lid') || text.includes('@hosted.lid');
+}
+
 function normalizePhoneCandidate(value) {
     const digits = String(value || '').replace(/\D/g, '');
     if (!digits) return null;
@@ -153,6 +158,7 @@ class WhatsAppManager extends EventEmitter {
         this._contactMap = new Map();
         this._lidByPhone = new Map();
         this._preferredJidByPhone = new Map();
+        this._lastOnWhatsAppByPhone = new Map();
         this._outboundRecords = new Map();
         this._messageCache = new Map();
         this._recentOutbound = [];
@@ -234,8 +240,8 @@ class WhatsAppManager extends EventEmitter {
 
         this._contactMap.set(baseAlias, normalizedPhone);
         this._contactMap.set(normalizedPhone, normalizedPhone);
-        if (String(alias || '').includes('@lid')) {
-            const lidJid = `${baseAlias}@lid`;
+        if (isLidJid(alias)) {
+            const lidJid = String(alias || '').includes('@hosted.lid') ? `${baseAlias}@hosted.lid` : `${baseAlias}@lid`;
             this._lidByPhone.set(normalizedPhone, lidJid);
             this._preferredJidByPhone.set(normalizedPhone, lidJid);
         } else if (!this._preferredJidByPhone.has(normalizedPhone)) {
@@ -251,11 +257,20 @@ class WhatsAppManager extends EventEmitter {
         if (!normalizedPhone || !normalizedJid.includes('@')) return false;
 
         this._preferredJidByPhone.set(normalizedPhone, normalizedJid);
-        if (normalizedJid.includes('@lid')) {
+        if (isLidJid(normalizedJid)) {
             this._lidByPhone.set(normalizedPhone, normalizedJid);
+            this._registerPhoneAlias(normalizedJid, normalizedPhone, `${source}:alias`);
         }
         this.emit('contact-map-update', { alias: normalizedJid, phone: normalizedPhone, source });
         return true;
+    }
+
+    _normalizeLidJid(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        if (raw.includes('@lid') || raw.includes('@hosted.lid')) return raw;
+        const baseId = toBaseId(raw);
+        return baseId ? `${baseId}@lid` : '';
     }
 
     _getSignalSessionPrefixesForJid(jid) {
@@ -301,18 +316,30 @@ class WhatsAppManager extends EventEmitter {
         const phoneJid = WhatsAppManager.buildJid(targetInfo.resolvedPhone);
         try {
             const [result] = await this.sock.onWhatsApp(phoneJid);
+            const resultLid = this._normalizeLidJid(result?.lid);
+            const lookup = {
+                target: targetInfo.originalTarget,
+                exists: !!result?.exists,
+                jid: result?.jid || '',
+                lid: resultLid,
+                at: new Date().toISOString(),
+            };
+            this._lastOnWhatsAppByPhone.set(targetInfo.resolvedPhone, lookup);
+            console.log(`[WA] onWhatsApp target=${targetInfo.originalTarget} exists=${lookup.exists} jid=${lookup.jid || '-'} lid=${lookup.lid || '-'}`);
+
             if (!result?.exists || !result?.jid) return null;
             const existingLid = this._lidByPhone.get(targetInfo.resolvedPhone)
-                || (this._preferredJidByPhone.get(targetInfo.resolvedPhone)?.includes('@lid')
+                || (isLidJid(this._preferredJidByPhone.get(targetInfo.resolvedPhone))
                     ? this._preferredJidByPhone.get(targetInfo.resolvedPhone)
                     : null);
-            if (result.jid.includes('@lid') || result.jid.includes('@hosted.lid')) {
+            if (resultLid) {
+                this._registerPreferredJidForPhone(targetInfo.resolvedPhone, resultLid, 'onWhatsApp:lid');
+            } else if (result.jid.includes('@lid') || result.jid.includes('@hosted.lid')) {
                 this._registerPreferredJidForPhone(targetInfo.resolvedPhone, result.jid, 'onWhatsApp');
             } else if (!existingLid) {
                 this._registerPhoneAlias(result.jid, targetInfo.resolvedPhone, 'onWhatsApp:phone');
             }
-            console.log(`[WA] onWhatsApp target=${targetInfo.originalTarget} exists=${result.exists} jid=${result.jid}`);
-            return result.jid;
+            return resultLid || result.jid;
         } catch (error) {
             console.warn(`[WA] onWhatsApp failed target=${targetInfo.originalTarget}: ${error.message}`);
             return null;
@@ -320,27 +347,31 @@ class WhatsAppManager extends EventEmitter {
     }
 
     async preferStoredLidForTarget(target, options = {}) {
-        if (!this._authKeys) return { preferredJid: null, source: 'auth_unavailable' };
-
         const targetInfo = this.resolveOutboundTarget(target, options);
         if (!targetInfo?.resolvedPhone) return { preferredJid: targetInfo?.resolvedJid || null, source: 'no_phone' };
 
+        const hydratedJid = await this._hydrateOutboundTarget(targetInfo);
+        const lookup = this._lastOnWhatsAppByPhone.get(targetInfo.resolvedPhone) || null;
         const existingLid = this._lidByPhone.get(targetInfo.resolvedPhone)
-            || (this._preferredJidByPhone.get(targetInfo.resolvedPhone)?.includes('@lid')
+            || (isLidJid(this._preferredJidByPhone.get(targetInfo.resolvedPhone))
                 ? this._preferredJidByPhone.get(targetInfo.resolvedPhone)
                 : null);
-        if (existingLid) return { preferredJid: existingLid, source: 'memory_lid' };
+        if (existingLid) return { preferredJid: existingLid, source: 'memory_lid', hydratedJid, lookup };
+
+        if (!this._authKeys) {
+            return { preferredJid: targetInfo.resolvedJid, source: 'auth_unavailable', hydratedJid, lookup };
+        }
 
         try {
             const stored = await this._authKeys.get('lid-mapping', [targetInfo.resolvedPhone]);
             const lidUser = stored?.[targetInfo.resolvedPhone];
-            if (!lidUser) return { preferredJid: targetInfo.resolvedJid, source: 'no_stored_lid' };
+            if (!lidUser) return { preferredJid: targetInfo.resolvedJid, source: 'no_stored_lid', hydratedJid, lookup };
 
             const preferredJid = `${lidUser}@lid`;
             this._registerPreferredJidForPhone(targetInfo.resolvedPhone, preferredJid, 'lid-mapping:stored');
-            return { preferredJid, source: 'stored_lid' };
+            return { preferredJid, source: 'stored_lid', hydratedJid, lookup };
         } catch (error) {
-            return { preferredJid: targetInfo.resolvedJid, source: 'stored_lid_error', error: error.message };
+            return { preferredJid: targetInfo.resolvedJid, source: 'stored_lid_error', error: error.message, hydratedJid, lookup };
         }
     }
 
@@ -433,10 +464,16 @@ class WhatsAppManager extends EventEmitter {
         const rawCandidates = [
             msg?.senderPn,
             msg?.participantPn,
+            msg?.key?.senderPn,
+            msg?.key?.participantPn,
             msg?.key?.participant,
             msg?.participant,
             msg?.key?.remoteJid,
             msg?.key?.remoteJidAlt,
+            msg?.message?.protocolMessage?.key?.remoteJid,
+            msg?.message?.protocolMessage?.key?.participant,
+            msg?.message?.reactionMessage?.key?.remoteJid,
+            msg?.message?.reactionMessage?.key?.participant,
             msg?.message?.extendedTextMessage?.contextInfo?.participant,
             msg?.message?.imageMessage?.contextInfo?.participant,
             msg?.message?.videoMessage?.contextInfo?.participant,
@@ -444,6 +481,59 @@ class WhatsAppManager extends EventEmitter {
         ];
 
         return [...new Set(rawCandidates.map(normalizePhoneCandidate).filter(Boolean))];
+    }
+
+    _buildInboundRouteContext(msg) {
+        const remoteJid = msg?.key?.remoteJid || '';
+        const remoteJidAlt = msg?.key?.remoteJidAlt || '';
+        const addressingMode = msg?.key?.addressingMode || '';
+        const phoneCandidates = this._extractPhoneCandidates(msg);
+        const lidJid = isLidJid(remoteJid)
+            ? remoteJid
+            : isLidJid(remoteJidAlt)
+                ? remoteJidAlt
+                : '';
+        const lidBase = toBaseId(lidJid || remoteJid);
+        const mappedPhone = phoneCandidates[0]
+            || (lidBase ? this._contactMap.get(lidBase) : null)
+            || (remoteJidAlt ? normalizePhoneCandidate(remoteJidAlt) : null)
+            || null;
+
+        return {
+            remoteJid,
+            remoteJidAlt,
+            addressingMode: addressingMode || 'unknown',
+            senderPn: msg?.senderPn || msg?.key?.senderPn || '',
+            participantPn: msg?.participantPn || msg?.key?.participantPn || '',
+            lidJid,
+            lidBase,
+            phoneCandidates,
+            mappedPhone,
+            at: new Date().toISOString(),
+        };
+    }
+
+    _registerInboundRouteContext(context) {
+        if (!context) return;
+        const aliases = [
+            context.remoteJid,
+            context.remoteJidAlt,
+            context.lidJid,
+            context.lidBase,
+        ].filter(Boolean);
+
+        for (const phone of context.phoneCandidates || []) {
+            for (const alias of aliases) {
+                this._registerPhoneAlias(alias, phone, 'messages.upsert:inboundContext');
+            }
+            if (context.lidJid) {
+                this._registerPreferredJidForPhone(phone, context.lidJid, 'messages.upsert:inboundLid');
+            }
+        }
+    }
+
+    getInboundRouteContext(msg) {
+        return msg?.__zapbotRouteContext || this._buildInboundRouteContext(msg);
     }
 
     resolveOutboundTarget(target, options = {}) {
@@ -477,15 +567,25 @@ class WhatsAppManager extends EventEmitter {
                 baseId: normalizedPhone,
                 resolvedJid: preferredJid || WhatsAppManager.buildJid(normalizedPhone),
                 resolvedPhone: normalizedPhone,
-                targetKind: preferredJid?.includes('@lid') ? 'phone_via_lid' : 'phone',
-                resolutionSource: preferredJid?.includes('@lid') ? 'phone_preferred_lid' : 'direct_input',
+                targetKind: isLidJid(preferredJid) ? 'phone_via_lid' : 'phone',
+                resolutionSource: isLidJid(preferredJid) ? 'phone_preferred_lid' : 'direct_input',
             };
         }
 
         const baseId = toBaseId(originalTarget);
 
-        if (originalTarget.includes('@lid')) {
+        if (isLidJid(originalTarget)) {
             const mappedPhone = this._contactMap.get(baseId) || normalizePhoneCandidate(baseId);
+            if (!mappedPhone && options?.allowRawLid) {
+                return {
+                    originalTarget,
+                    baseId,
+                    resolvedJid: originalTarget,
+                    resolvedPhone: null,
+                    targetKind: 'raw_lid_allowed',
+                    resolutionSource: 'raw_lid_unmapped',
+                };
+            }
             if (!mappedPhone) throw createUnresolvedLidError(originalTarget);
             this._registerPreferredJidForPhone(mappedPhone, originalTarget, 'resolveOutboundTarget:lid');
 
@@ -530,8 +630,8 @@ class WhatsAppManager extends EventEmitter {
             baseId,
             resolvedJid: preferredJid || (normalizedPhone ? WhatsAppManager.buildJid(normalizedPhone) : originalTarget),
             resolvedPhone: normalizedPhone || this._contactMap.get(baseId) || null,
-            targetKind: preferredJid?.includes('@lid') ? 'jid_preferred_lid' : (normalizedPhone ? 'jid_phone' : 'jid'),
-            resolutionSource: preferredJid?.includes('@lid') ? 'preferred_lid' : (normalizedPhone ? 'jid_digits' : 'full_jid'),
+            targetKind: isLidJid(preferredJid) ? 'jid_preferred_lid' : (normalizedPhone ? 'jid_phone' : 'jid'),
+            resolutionSource: isLidJid(preferredJid) ? 'preferred_lid' : (normalizedPhone ? 'jid_digits' : 'full_jid'),
         };
     }
 
@@ -552,6 +652,7 @@ class WhatsAppManager extends EventEmitter {
             resultKey: record.resultKey || null,
             routeOptions: record.routeOptions || null,
             routeLabel: record.routeLabel || '',
+            inboundRoute: record.inboundRoute || null,
             campaignContext: record.campaignContext || null,
             contentSummary: record.contentSummary || null,
             updates: Array.isArray(record.updates) ? record.updates.slice(-8) : [],
@@ -663,6 +764,7 @@ class WhatsAppManager extends EventEmitter {
             },
             routeOptions: meta.routeOptions || null,
             routeLabel: meta.routeLabel || '',
+            inboundRoute: meta.inboundRoute || null,
             campaignContext: meta.campaignContext || null,
             contentSummary: meta.contentSummary || null,
             updates: [],
@@ -899,22 +1001,32 @@ class WhatsAppManager extends EventEmitter {
                 }
             });
 
+            this.sock.ev.on('chats.phoneNumberShare', ({ lid, jid }) => {
+                const phone = normalizePhoneCandidate(jid);
+                const lidJid = this._normalizeLidJid(lid);
+                if (!phone || !lidJid) return;
+
+                this._registerPhoneAlias(lidJid, phone, 'chats.phoneNumberShare');
+                this._registerPreferredJidForPhone(phone, lidJid, 'chats.phoneNumberShare');
+                console.log(`[WA] phoneNumberShare lid=${lidJid} phone=${phone}`);
+                this.emit('route-update', {
+                    routeStats: { ...this._routeStats },
+                    lastInboundRoute: this._lastInboundRoute,
+                });
+            });
+
             this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
                 if (type !== 'notify') return;
                 for (const msg of messages) {
                     const remoteJid = msg?.key?.remoteJid || '';
                     const remoteJidAlt = msg?.key?.remoteJidAlt || '';
                     const addressingMode = msg?.key?.addressingMode || '';
-                    const baseId = toBaseId(remoteJid);
-                    for (const phone of this._extractPhoneCandidates(msg)) {
-                        this._registerPhoneAlias(baseId, phone, 'messages.upsert');
-                        if (remoteJidAlt) this._registerPhoneAlias(remoteJidAlt, phone, 'messages.upsert:remoteJidAlt');
-                        if (remoteJid.includes('@lid')) this._registerPreferredJidForPhone(phone, remoteJid, 'messages.upsert:remoteJid');
-                        else if (remoteJidAlt.includes('@lid')) this._registerPreferredJidForPhone(phone, remoteJidAlt, 'messages.upsert:remoteJidAlt');
-                    }
+                    const routeContext = this._buildInboundRouteContext(msg);
+                    this._registerInboundRouteContext(routeContext);
+                    msg.__zapbotRouteContext = routeContext;
 
-                    if (remoteJidAlt || addressingMode) {
-                        console.log(`[WA] inbound route remoteJid=${remoteJid} remoteJidAlt=${remoteJidAlt || '-'} addressingMode=${addressingMode || '-'}`);
+                    if (remoteJidAlt || addressingMode || isLidJid(remoteJid)) {
+                        console.log(`[WA] inbound route remoteJid=${remoteJid} remoteJidAlt=${remoteJidAlt || '-'} addressingMode=${addressingMode || '-'} candidates=${routeContext.phoneCandidates.join(',') || '-'} mapped=${routeContext.mappedPhone || '-'}`);
                     }
                     const routeKey = addressingMode === 'lid' ? 'lid' : addressingMode === 'pn' ? 'pn' : 'unknown';
                     this._routeStats[routeKey] = (this._routeStats[routeKey] || 0) + 1;
@@ -965,13 +1077,16 @@ class WhatsAppManager extends EventEmitter {
         const sendMeta = {
             routeOptions: {
                 forcePhoneJid: !!options.forcePhoneJid,
+                allowRawLid: !!options.allowRawLid,
                 freshDevices: !!options.freshDevices,
                 peerPrimary: !!options.peerPrimary,
                 noInternalRetry: !!options.noInternalRetry,
+                skipTyping: !!options.skipTyping,
             },
             routeLabel: options.routeLabel || '',
             context: options.context || (options.campaignContext ? 'campaign' : undefined),
             attemptId: options.attemptId || null,
+            inboundRoute: options.inboundRoute || null,
             campaignContext: options.campaignContext || null,
             contentSummary: compactMessageContent(options.contentForDiagnostics || {}),
         };

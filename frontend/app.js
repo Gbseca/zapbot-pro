@@ -1129,6 +1129,7 @@ function compactDiagnosticForCopy(item) {
     resolutionSource: item.resolutionSource,
     routeLabel: item.routeLabel,
     routeOptions: item.routeOptions,
+    inboundRoute: item.inboundRoute,
     campaignContext: item.campaignContext,
     resultKey: item.resultKey,
     contentSummary: item.contentSummary,
