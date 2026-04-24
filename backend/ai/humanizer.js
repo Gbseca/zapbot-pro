@@ -40,7 +40,7 @@ function splitIntoChunks(text, forceSingle = false) {
   return [part1, part2].filter(Boolean);
 }
 
-export async function sendHumanized(wa, number, responseText, receivedText = '', forceSingle = false) {
+export async function sendHumanized(wa, number, responseText, receivedText = '', forceSingle = false, sendOptions = {}) {
   const chunks = splitIntoChunks(responseText, forceSingle);
   const acceptedChunks = [];
 
@@ -59,8 +59,8 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
       await sleep(280 + Math.random() * 320);
     }
 
-    await wa.sendTyping(number, delay);
-    const accepted = await wa.sendMessage(number, chunk, null);
+    await wa.sendTyping(number, delay, sendOptions);
+    const accepted = await wa.sendMessage(number, chunk, null, sendOptions);
     acceptedChunks.push({ ...accepted, chunk });
   }
 

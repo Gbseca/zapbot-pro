@@ -472,6 +472,17 @@ class WhatsAppManager extends EventEmitter {
             if (!mappedPhone) throw createUnresolvedLidError(originalTarget);
             this._registerPreferredJidForPhone(mappedPhone, originalTarget, 'resolveOutboundTarget:lid');
 
+            if (options?.forcePhoneJid) {
+                return {
+                    originalTarget,
+                    baseId,
+                    resolvedJid: WhatsAppManager.buildJid(mappedPhone),
+                    resolvedPhone: mappedPhone,
+                    targetKind: 'lid_forced_phone',
+                    resolutionSource: 'forced_phone_from_lid',
+                };
+            }
+
             return {
                 originalTarget,
                 baseId,
@@ -483,6 +494,17 @@ class WhatsAppManager extends EventEmitter {
         }
 
         const normalizedPhone = normalizePhoneCandidate(baseId);
+        if (normalizedPhone && options?.forcePhoneJid) {
+            return {
+                originalTarget,
+                baseId: normalizedPhone,
+                resolvedJid: WhatsAppManager.buildJid(normalizedPhone),
+                resolvedPhone: normalizedPhone,
+                targetKind: 'phone_forced',
+                resolutionSource: 'forced_phone_jid',
+            };
+        }
+
         const preferredJid = normalizedPhone
             ? (this._preferredJidByPhone.get(normalizedPhone) || this._lidByPhone.get(normalizedPhone))
             : null;

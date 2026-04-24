@@ -137,6 +137,39 @@ function resolveConversationPhone(displayNum, jidId) {
   return normalizePhone(displayNum) || normalizePhone(jidId) || null;
 }
 
+function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone) {
+  const altPhone = normalizePhone(fullJidAlt);
+  if (altPhone) {
+    return {
+      target: altPhone,
+      options: { forcePhoneJid: true, routeLabel: 'agent_remote_jid_alt' },
+      source: 'remoteJidAlt',
+    };
+  }
+
+  if (conversationPhone) {
+    return {
+      target: conversationPhone,
+      options: { forcePhoneJid: true, routeLabel: 'agent_phone' },
+      source: 'conversationPhone',
+    };
+  }
+
+  if (String(fullJid || '').includes('@lid')) {
+    return {
+      target: fullJid,
+      options: { forcePhoneJid: true, routeLabel: 'agent_lid_forced_phone' },
+      source: 'lid_forced_phone',
+    };
+  }
+
+  return {
+    target: fullJid,
+    options: { routeLabel: 'agent_jid' },
+    source: 'jid',
+  };
+}
+
 function resolveLeadIdentity(jidId, conversationPhone) {
   const preferredId = conversationPhone || jidId;
   const preferredLead = getLead(preferredId);
@@ -195,8 +228,8 @@ function appendAssistantMessage(lead, content, delivery) {
   lead.history.push(buildAssistantHistoryEntry(content, delivery));
 }
 
-async function sendSingleReplyTracked(wa, target, text) {
-  const accepted = await wa.sendMessage(target, text, null);
+async function sendSingleReplyTracked(wa, target, text, sendOptions = {}) {
+  const accepted = await wa.sendMessage(target, text, null, sendOptions);
   const final = await wa.waitForOutboundFinal(accepted.messageId);
   return {
     status: final?.status || 'failed',
@@ -248,9 +281,9 @@ function createNewLead(leadId, displayNum, pushName, fallbackPhone = null) {
   };
 }
 
-async function persistSimpleReply(wa, leadId, lead, target, reply, extraUpdates = () => ({})) {
+async function persistSimpleReply(wa, leadId, lead, target, reply, extraUpdates = () => ({}), sendOptions = {}) {
   try {
-    const delivery = await sendSingleReplyTracked(wa, target, reply);
+    const delivery = await sendSingleReplyTracked(wa, target, reply, sendOptions);
     appendAssistantMessage(lead, reply, delivery);
     Object.assign(lead, extraUpdates(delivery));
   } catch (err) {
@@ -281,11 +314,13 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const jidId = fullJid.split('@')[0].split(':')[0];
   const displayNum = wa.resolvePhone(fullJidAlt || fullJid);
   const conversationPhone = resolveConversationPhone(displayNum, jidId);
+  const replyRoute = resolveReplyRoute(fullJid, fullJidAlt, conversationPhone);
   const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone);
   const text = extractText(rawMsg);
   const pushName = rawMsg.pushName || null;
 
   console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${text.slice(0, 60)}"`);
+  console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source})`);
   if (!text) return;
 
   const existingLead = leadFromStore;
@@ -322,9 +357,9 @@ export async function handleIncomingMessage(wa, rawMsg) {
       const [eh] = (config.businessHoursEnd || '22:00').split(':');
       const msg = `Oi! Nosso horario de atendimento e das ${sh}h as ${eh}h. Estarei aqui quando voltar! Ate logo.`;
       const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
-      await persistSimpleReply(wa, leadId, lead, fullJid, msg, (delivery) => (
+      await persistSimpleReply(wa, leadId, lead, replyRoute.target, msg, (delivery) => (
         delivery.status === 'confirmed' ? { lastOutOfHoursMsg: today } : {}
-      ));
+      ), replyRoute.options);
     }
     return;
   }
@@ -339,7 +374,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     lead.status = 'no_interest';
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(REFUSAL_RESPONSES));
+    await persistSimpleReply(wa, leadId, lead, replyRoute.target, randomFrom(REFUSAL_RESPONSES), () => ({}), replyRoute.options);
     return;
   }
 
@@ -348,7 +383,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
       console.log(`[Agent] 2nd soft refusal - closing ${leadId}`);
       const lead = existingLead;
       lead.status = 'no_interest';
-      await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(REFUSAL_RESPONSES));
+      await persistSimpleReply(wa, leadId, lead, replyRoute.target, randomFrom(REFUSAL_RESPONSES), () => ({}), replyRoute.options);
       return;
     }
 
@@ -357,7 +392,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     lead.softRefusalSent = true;
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(SOFT_REFUSAL_RESPONSES));
+    await persistSimpleReply(wa, leadId, lead, replyRoute.target, randomFrom(SOFT_REFUSAL_RESPONSES), () => ({}), replyRoute.options);
     return;
   }
 
@@ -366,16 +401,16 @@ export async function handleIncomingMessage(wa, rawMsg) {
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: text, ts: Date.now() });
-    await persistSimpleReply(wa, leadId, lead, fullJid, randomFrom(CLARIFICATION_RESPONSES));
+    await persistSimpleReply(wa, leadId, lead, replyRoute.target, randomFrom(CLARIFICATION_RESPONSES), () => ({}), replyRoute.options);
     return;
   }
 
-  accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, config);
+  accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, config, replyRoute);
 }
 
-function accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, config) {
+function accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, config, replyRoute) {
   if (!messageBuffers.has(leadId)) {
-    messageBuffers.set(leadId, { texts: [], pushName, fullJid, displayNum, jidId, timer: null });
+    messageBuffers.set(leadId, { texts: [], pushName, fullJid, displayNum, jidId, replyRoute, timer: null });
   }
 
   const buffer = messageBuffers.get(leadId);
@@ -384,27 +419,31 @@ function accumulate(wa, fullJid, leadId, jidId, displayNum, text, pushName, conf
   buffer.fullJid = fullJid;
   buffer.displayNum = displayNum;
   buffer.jidId = jidId;
+  buffer.replyRoute = replyRoute;
 
   if (buffer.timer) clearTimeout(buffer.timer);
   buffer.timer = setTimeout(async () => {
-    const { texts, fullJid: jid, displayNum: phone, pushName: name, jidId: rawLeadId } = buffer;
+    const { texts, fullJid: jid, displayNum: phone, pushName: name, jidId: rawLeadId, replyRoute: route } = buffer;
     messageBuffers.delete(leadId);
     try {
-      await processConversation(wa, jid, leadId, rawLeadId, phone, texts, name, config);
+      await processConversation(wa, jid, leadId, rawLeadId, phone, texts, name, config, route);
     } catch (err) {
       console.error(`[Agent] Error processing ${leadId}:`, err.message, err.stack);
     }
   }, ANTIFLOOD_MS);
 }
 
-async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts, pushName, config) {
+async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts, pushName, config, replyRoute = null) {
   const combinedText = texts.join('\n');
   const conversationPhone = resolveConversationPhone(displayNum, jidId);
+  const route = replyRoute || resolveReplyRoute(fullJid, '', conversationPhone);
 
   let lead = getLead(leadId) || createNewLead(leadId, displayNum, pushName, conversationPhone);
 
   lead.number = leadId;
   lead.jid = fullJid;
+  lead.replyTargetJid = route.target;
+  lead.replyTargetSource = route.source;
   if (conversationPhone) {
     lead.phone = lead.phone || conversationPhone;
     lead.displayNumber = conversationPhone;
@@ -503,10 +542,10 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     }
   }
 
-  console.log(`[Agent] Sending to ${fullJid} (${displayNum})`);
+  console.log(`[Agent] Sending to ${route.target} (${displayNum}) via ${route.source}`);
   let delivery;
   try {
-    delivery = await sendHumanized(wa, fullJid, cleanResponse, combinedText);
+    delivery = await sendHumanized(wa, route.target, cleanResponse, combinedText, false, route.options || {});
   } catch (err) {
     delivery = {
       status: 'failed',

@@ -337,9 +337,17 @@ class MessageQueue {
                 ].map(normalizeCampaignNumber).filter(Boolean);
                 return values.includes(normalized);
             });
-        if (lead?.jid && String(lead.jid).includes('@')) {
+        const savedReplyTarget = lead?.replyTargetJid && String(lead.replyTargetJid).includes('@lid')
+            ? null
+            : lead?.replyTargetJid;
+        const savedSafeJid = lead?.jid && String(lead.jid).includes('@lid')
+            ? null
+            : lead?.jid;
+        const reusableJid = savedReplyTarget || savedSafeJid;
+
+        if (reusableJid && String(reusableJid).includes('@')) {
             return {
-                target: lead.jid,
+                target: reusableJid,
                 source: 'lead_jid',
                 normalized,
             };
@@ -540,6 +548,7 @@ class MessageQueue {
         const targetInfo = this.resolveCampaignSendTarget(item);
         const target = targetInfo.target;
         const routeMode = CAMPAIGN_ROUTE_MODE;
+        const forcePhoneForTarget = !String(target || '').includes('@lid');
 
         if (targetInfo.source === 'lead_jid') {
             this.log('info', `Usando JID salvo do lead para ${item.number}: ${target}.`);
@@ -556,11 +565,11 @@ class MessageQueue {
 
         if (this.config?.antiRestriction?.typing) {
             this.log('info', `Simulando digitacao para ${item.number}...`);
-            await this.wa.sendTyping(target, 2500, targetInfo.source === 'lead_jid' ? {} : { forcePhoneJid: true });
+            await this.wa.sendTyping(target, 2500, forcePhoneForTarget ? { forcePhoneJid: true } : {});
         }
 
         const routeAttempts = targetInfo.source === 'lead_jid'
-            ? [{ label: 'jid salvo do lead', options: {} }]
+            ? [{ label: 'jid salvo do lead', options: forcePhoneForTarget ? { forcePhoneJid: true } : {} }]
             : routeMode === 'lid_first'
                 ? [
                     { label: 'rota preferida do WhatsApp', options: {} },
