@@ -267,6 +267,31 @@ class WhatsAppManager extends EventEmitter {
         }
     }
 
+    async preferStoredLidForTarget(target, options = {}) {
+        if (!this._authKeys) return { preferredJid: null, source: 'auth_unavailable' };
+
+        const targetInfo = this.resolveOutboundTarget(target, options);
+        if (!targetInfo?.resolvedPhone) return { preferredJid: targetInfo?.resolvedJid || null, source: 'no_phone' };
+
+        const existingLid = this._lidByPhone.get(targetInfo.resolvedPhone)
+            || (this._preferredJidByPhone.get(targetInfo.resolvedPhone)?.includes('@lid')
+                ? this._preferredJidByPhone.get(targetInfo.resolvedPhone)
+                : null);
+        if (existingLid) return { preferredJid: existingLid, source: 'memory_lid' };
+
+        try {
+            const stored = await this._authKeys.get('lid-mapping', [targetInfo.resolvedPhone]);
+            const lidUser = stored?.[targetInfo.resolvedPhone];
+            if (!lidUser) return { preferredJid: targetInfo.resolvedJid, source: 'no_stored_lid' };
+
+            const preferredJid = `${lidUser}@lid`;
+            this._registerPreferredJidForPhone(targetInfo.resolvedPhone, preferredJid, 'lid-mapping:stored');
+            return { preferredJid, source: 'stored_lid' };
+        } catch (error) {
+            return { preferredJid: targetInfo.resolvedJid, source: 'stored_lid_error', error: error.message };
+        }
+    }
+
     async resetSignalSessionsForTarget(target, options = {}) {
         if (!this._authKeys) return { purged: 0, hydratedJid: null, reason: 'auth_unavailable' };
 
