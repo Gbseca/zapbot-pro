@@ -68,6 +68,43 @@ function buildSafeAIConfig() {
   return safeConfig;
 }
 
+function normalizeCampaignInputNumber(raw) {
+  let digits = String(raw || '').replace(/\D/g, '');
+  if (digits.startsWith('55') && digits.length > 11) digits = digits.slice(2);
+  return /^\d{10,11}$/.test(digits) ? digits : null;
+}
+
+function prepareCampaignNumbers(numbers = []) {
+  const seen = new Set();
+  const validNumbers = [];
+  const invalid = [];
+  const duplicates = [];
+
+  for (const raw of Array.isArray(numbers) ? numbers : []) {
+    const normalized = normalizeCampaignInputNumber(raw);
+    if (!normalized) {
+      invalid.push(String(raw || ''));
+      continue;
+    }
+    if (seen.has(normalized)) {
+      duplicates.push(normalized);
+      continue;
+    }
+    seen.add(normalized);
+    validNumbers.push(normalized);
+  }
+
+  return {
+    totalInput: Array.isArray(numbers) ? numbers.length : 0,
+    queuedCount: validNumbers.length,
+    invalidCount: invalid.length,
+    duplicateCount: duplicates.length,
+    invalid: invalid.slice(0, 20),
+    duplicates: duplicates.slice(0, 20),
+    validNumbers,
+  };
+}
+
 const wa = new WhatsAppManager(wss);
 const queue = new MessageQueue(wa, wss, { loadConfig });
 const adResearch = createAdResearchService({ loadConfig, broadcast });
@@ -88,9 +125,21 @@ wss.on('connection', (ws) => {
 
   const progress = queue.getProgress();
   ws.send(JSON.stringify({ type: 'campaign_status', status: progress.status }));
-  ws.send(JSON.stringify({ type: 'stats', stats: progress.stats }));
+  ws.send(JSON.stringify({
+    type: 'stats',
+    stats: progress.stats,
+    flowControl: progress.flowControl,
+    waitReason: progress.waitReason,
+  }));
   if (progress.queue.length > 0) {
-    ws.send(JSON.stringify({ type: 'campaign_loaded', stats: progress.stats, queue: progress.queue }));
+    ws.send(JSON.stringify({
+      type: 'campaign_loaded',
+      stats: progress.stats,
+      queue: progress.queue,
+      flowControl: progress.flowControl,
+      waitReason: progress.waitReason,
+      precheck: progress.precheck,
+    }));
   }
 
   const config = loadConfig();
@@ -132,15 +181,30 @@ app.post('/api/campaign/start', upload.single('image'), (req, res) => {
     const data = JSON.parse(req.body.data);
     const { numbers, message, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction } = data;
 
-    if (!numbers || numbers.length === 0) return res.status(400).json({ error: 'Lista de contatos vazia' });
+    const precheck = prepareCampaignNumbers(numbers);
+    if (!precheck.validNumbers.length) return res.status(400).json({ error: 'Lista de contatos vazia ou sem numeros validos' });
     if (!message?.trim()) return res.status(400).json({ error: 'A mensagem nao pode ser vazia' });
     if (wa.getStatus().status !== 'connected') return res.status(400).json({ error: 'WhatsApp nao esta conectado.' });
 
     const imageBuffer = req.file ? req.file.buffer : null;
-    queue.initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction });
+    queue.initCampaign({
+      numbers: precheck.validNumbers,
+      message,
+      imageBuffer,
+      pollEnabled,
+      pollOptions,
+      pollQuestion,
+      scheduleConfig,
+      antiRestriction,
+      precheck,
+    });
     queue.start();
     systemStatus.emitSnapshot();
-    res.json({ success: true, message: `Campanha iniciada com ${numbers.length} contato(s)` });
+    res.json({
+      success: true,
+      message: `Campanha iniciada com ${precheck.validNumbers.length} contato(s)`,
+      precheck,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

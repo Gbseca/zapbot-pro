@@ -22,7 +22,22 @@ function createStats(total = 0) {
         sent: 0,
         failed: 0,
         pending: total,
+        dailyOutboundAttempts: 0,
     };
+}
+
+function createFlowState() {
+    return {
+        windowStartedAt: null,
+        sentInWindow: 0,
+        nextWindowAt: null,
+    };
+}
+
+function clampInt(value, fallback, min, max) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
 }
 
 function buildAssistantHistoryEntry(content, delivery = {}) {
@@ -50,7 +65,11 @@ class MessageQueue {
         this.timer = null;
         this.stats = createStats(0);
         this.dailySent = 0;
+        this.dailyOutboundAttempts = 0;
         this.consecutiveFailures = 0;
+        this.flowState = createFlowState();
+        this.waitReason = null;
+        this.precheck = null;
     }
 
     setStatusReporter(reporter) {
@@ -86,11 +105,15 @@ class MessageQueue {
         });
     }
 
-    initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction }) {
+    initCampaign({ numbers, message, imageBuffer, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction, precheck }) {
         this.status = 'idle';
         this.currentIndex = 0;
         this.dailySent = 0;
+        this.dailyOutboundAttempts = 0;
         this.consecutiveFailures = 0;
+        this.flowState = createFlowState();
+        this.waitReason = null;
+        this.precheck = precheck || null;
         if (this.timer) {
             clearTimeout(this.timer);
             this.timer = null;
@@ -123,6 +146,9 @@ class MessageQueue {
         this.broadcast({
             type: 'campaign_loaded',
             stats: this.stats,
+            flowControl: this.getFlowControlSnapshot(),
+            waitReason: this.waitReason,
+            precheck: this.precheck,
             queue: this.queue.map(q => ({
                 number: q.number,
                 status: q.status,
@@ -136,6 +162,12 @@ class MessageQueue {
 
         const pollInfo = pollEnabled ? ' + enquete nativa' : '';
         this.log('info', `Campanha carregada com ${total} contatos${pollInfo}.`);
+        if (this.precheck?.duplicateCount > 0) {
+            this.log('warning', `${this.precheck.duplicateCount} contato(s) duplicado(s) ignorado(s) antes de entrar na fila.`);
+        }
+        if (this.precheck?.invalidCount > 0) {
+            this.log('warning', `${this.precheck.invalidCount} contato(s) ignorado(s) por numero invalido.`);
+        }
     }
 
     clear() {
@@ -152,6 +184,11 @@ class MessageQueue {
         this.stats = createStats(0);
         this.status = 'idle';
         this.consecutiveFailures = 0;
+        this.dailySent = 0;
+        this.dailyOutboundAttempts = 0;
+        this.flowState = createFlowState();
+        this.waitReason = null;
+        this.precheck = null;
         clearActiveCampaign('Campanha limpa manualmente.');
         this.broadcast({ type: 'campaign_cleared' });
         this.log('info', 'Historico da fila limpo.');
@@ -181,7 +218,91 @@ class MessageQueue {
     isDailyLimitReached() {
         const ar = this.config?.antiRestriction;
         if (!ar?.useLimit) return false;
-        return this.dailySent >= (parseInt(ar.dailyLimit, 10) || 50);
+        return this.dailyOutboundAttempts >= (parseInt(ar.dailyLimit, 10) || 50);
+    }
+
+    getFlowControlConfig() {
+        const raw = this.config?.scheduleConfig?.flowControl || {};
+        const enabled = raw.enabled === true || raw.enabled === 'true';
+        const maxContacts = clampInt(raw.maxContacts, 15, 1, 10000);
+        const windowMinutes = clampInt(raw.windowMinutes, 10, 1, 1440);
+        return {
+            enabled,
+            maxContacts,
+            windowMinutes,
+            windowMs: windowMinutes * 60 * 1000,
+        };
+    }
+
+    refreshFlowWindow(now = Date.now(), createIfMissing = true) {
+        const flow = this.getFlowControlConfig();
+        if (!flow.enabled) {
+            this.flowState = createFlowState();
+            return flow;
+        }
+
+        if (!this.flowState.windowStartedAt) {
+            if (!createIfMissing) return flow;
+            this.flowState.windowStartedAt = now;
+            this.flowState.sentInWindow = 0;
+        }
+
+        if (now - this.flowState.windowStartedAt >= flow.windowMs) {
+            this.flowState.windowStartedAt = now;
+            this.flowState.sentInWindow = 0;
+        }
+
+        this.flowState.nextWindowAt = this.flowState.windowStartedAt + flow.windowMs;
+        return flow;
+    }
+
+    getFlowWaitMs(now = Date.now()) {
+        const flow = this.refreshFlowWindow(now, true);
+        if (!flow.enabled) return 0;
+        if (this.flowState.sentInWindow < flow.maxContacts) return 0;
+        return Math.max(0, this.flowState.nextWindowAt - now);
+    }
+
+    recordAcceptedOutboundAttempt() {
+        this.dailyOutboundAttempts += 1;
+        this.dailySent = this.dailyOutboundAttempts;
+        this.stats.dailyOutboundAttempts = this.dailyOutboundAttempts;
+
+        const flow = this.refreshFlowWindow(Date.now(), true);
+        if (flow.enabled) {
+            this.flowState.sentInWindow += 1;
+            this.flowState.nextWindowAt = this.flowState.windowStartedAt + flow.windowMs;
+        }
+    }
+
+    getFlowControlSnapshot() {
+        const flow = this.refreshFlowWindow(Date.now(), false);
+        if (!flow.enabled) {
+            return {
+                enabled: false,
+                maxContacts: flow.maxContacts,
+                windowMinutes: flow.windowMinutes,
+                sentInWindow: 0,
+                remainingInWindow: null,
+                windowStartedAt: null,
+                nextWindowAt: null,
+                waitMs: 0,
+            };
+        }
+
+        const now = Date.now();
+        const waitMs = this.flowState.windowStartedAt ? this.getFlowWaitMs(now) : 0;
+        const remaining = Math.max(0, flow.maxContacts - this.flowState.sentInWindow);
+        return {
+            enabled: true,
+            maxContacts: flow.maxContacts,
+            windowMinutes: flow.windowMinutes,
+            sentInWindow: this.flowState.sentInWindow,
+            remainingInWindow: remaining,
+            windowStartedAt: this.flowState.windowStartedAt ? new Date(this.flowState.windowStartedAt).toISOString() : null,
+            nextWindowAt: this.flowState.nextWindowAt ? new Date(this.flowState.nextWindowAt).toISOString() : null,
+            waitMs,
+        };
     }
 
     addVariation(text) {
@@ -241,6 +362,7 @@ class MessageQueue {
             return;
         }
         this.status = 'running';
+        this.waitReason = null;
         updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
         this._reportStatusEvent({ type: 'state', severity: 'info', title: 'Campanha', message: 'Campanha iniciada.' });
@@ -251,6 +373,8 @@ class MessageQueue {
     pause(reason = 'Campanha pausada.') {
         if (this.status !== 'running') return;
         this.status = 'paused';
+        if (/limite diario/i.test(reason)) this.waitReason = 'daily_limit';
+        else if (!this.waitReason) this.waitReason = null;
         if (this.timer) {
             clearTimeout(this.timer);
             this.timer = null;
@@ -265,6 +389,7 @@ class MessageQueue {
         if (this.status !== 'paused') return;
         this.status = 'running';
         this.consecutiveFailures = 0;
+        this.waitReason = null;
         updateActiveCampaignStatus('running');
         this.broadcast({ type: 'campaign_status', status: 'running' });
         this._reportStatusEvent({ type: 'state', severity: 'info', title: 'Campanha', message: 'Campanha retomada.' });
@@ -274,6 +399,7 @@ class MessageQueue {
 
     stop() {
         this.status = 'stopped';
+        this.waitReason = null;
         if (this.timer) {
             clearTimeout(this.timer);
             this.timer = null;
@@ -286,11 +412,17 @@ class MessageQueue {
 
     _syncSentAlias() {
         this.stats.sent = this.stats.confirmed;
+        this.stats.dailyOutboundAttempts = this.dailyOutboundAttempts;
     }
 
     _broadcastStats() {
         this._syncSentAlias();
-        this.broadcast({ type: 'stats', stats: this.stats });
+        this.broadcast({
+            type: 'stats',
+            stats: this.stats,
+            flowControl: this.getFlowControlSnapshot(),
+            waitReason: this.waitReason,
+        });
     }
 
     _markConsecutiveFailure(item, status, errorMessage) {
@@ -377,6 +509,7 @@ class MessageQueue {
 
         if (this.currentIndex >= this.queue.length) {
             this.status = 'completed';
+            this.waitReason = null;
             updateActiveCampaignStatus('completed');
             this.broadcast({ type: 'campaign_status', status: 'completed' });
             this.log('success', `Concluida! Confirmadas: ${this.stats.confirmed} | Falhas: ${this.stats.failed}`);
@@ -384,16 +517,37 @@ class MessageQueue {
         }
 
         if (!this.isInTimeWindow()) {
+            this.waitReason = 'time_window';
             this.log('warning', 'Fora da janela de horario. Verificando em 60s...');
+            this._broadcastStats();
             this.timer = setTimeout(() => this.processNext(), 60000);
             return;
         }
 
         if (this.isDailyLimitReached()) {
+            this.waitReason = 'daily_limit';
             this.log('warning', 'Limite diario atingido. Campanha pausada.');
             this.pause('Limite diario atingido. Campanha pausada.');
             return;
         }
+
+        const flowWaitMs = this.getFlowWaitMs();
+        if (flowWaitMs > 0) {
+            this.waitReason = 'flow_control';
+            const waitSec = Math.max(1, Math.ceil(flowWaitMs / 1000));
+            const nextAt = this.flowState.nextWindowAt
+                ? new Date(this.flowState.nextWindowAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                : 'em breve';
+            this.log('warning', `Aguardando controle de fluxo: proxima janela em ${formatDurationForLog(waitSec)} (${nextAt}).`);
+            this._broadcastStats();
+            this.timer = setTimeout(() => {
+                this.waitReason = null;
+                this.processNext();
+            }, flowWaitMs);
+            return;
+        }
+
+        this.waitReason = null;
 
         const item = this.queue[this.currentIndex];
         item.status = 'sending';
@@ -412,6 +566,7 @@ class MessageQueue {
             item.targetKind = delivery.targetKind;
 
             this.stats.accepted += 1;
+            this.recordAcceptedOutboundAttempt();
             this.stats.pending = Math.max(0, this.stats.pending - 1);
             item.status = 'accepted';
             this.broadcast({
@@ -429,6 +584,7 @@ class MessageQueue {
                 item.error = delivery.error;
                 if (delivery.status === 'accepted_unconfirmed') {
                     this.stats.acceptedUnconfirmed += 1;
+                    this.consecutiveFailures = 0;
                     this.log('warning', `Sem confirmacao para ${item.number}: ${delivery.error}`);
                 } else {
                     this.stats.failed += 1;
@@ -450,7 +606,6 @@ class MessageQueue {
                 item.status = 'confirmed';
                 item.sentAt = new Date().toISOString();
                 this.stats.confirmed += 1;
-                this.dailySent += 1;
                 this.consecutiveFailures = 0;
                 this.seedCampaignLead(item.number, text || item.pollQuestion || '', {
                     status: 'confirmed',
@@ -536,7 +691,11 @@ class MessageQueue {
             status: this.status,
             currentIndex: this.currentIndex,
             consecutiveFailures: this.consecutiveFailures,
+            waitReason: this.waitReason,
+            dailyOutboundAttempts: this.dailyOutboundAttempts,
+            precheck: this.precheck,
             stats: { ...this.stats, sent: this.stats.confirmed },
+            flowControl: this.getFlowControlSnapshot(),
             dominantRouteKind,
             routeKinds,
             recentResolvedTargets: recentResolvedTargets.slice(-5).reverse(),
@@ -558,8 +717,18 @@ class MessageQueue {
                 targetKind: q.targetKind,
             })),
             currentIndex: this.currentIndex,
+            waitReason: this.waitReason,
+            flowControl: this.getFlowControlSnapshot(),
+            precheck: this.precheck,
         };
     }
+}
+
+function formatDurationForLog(totalSec) {
+    if (totalSec < 60) return `${totalSec}s`;
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return sec > 0 ? `${min}min ${sec}s` : `${min}min`;
 }
 
 export default MessageQueue;

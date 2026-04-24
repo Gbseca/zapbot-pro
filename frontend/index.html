@@ -215,10 +215,18 @@
               <span class="val-num" id="val-invalid">0</span>
               <span class="val-label">❌ Inválidos</span>
             </div>
+            <div class="val-item">
+              <span class="val-num" id="val-duplicates">0</span>
+              <span class="val-label">Duplicados</span>
+            </div>
           </div>
           <div id="invalid-list" class="invalid-numbers hidden">
             <h4>⚠️ Números com formato inválido:</h4>
             <div id="invalid-items" class="invalid-items-grid"></div>
+          </div>
+          <div id="duplicate-list" class="invalid-numbers hidden">
+            <h4>Contatos duplicados ignorados:</h4>
+            <div id="duplicate-items" class="invalid-items-grid"></div>
           </div>
         </div>
       </section>
@@ -453,6 +461,44 @@
               <div class="form-group">
                 <label class="form-label">Horário de término</label>
                 <input type="time" id="window-end" class="form-input" value="20:00">
+              </div>
+            </div>
+          </div>
+
+          <!-- Flow Control -->
+          <div class="card flow-control-card">
+            <div class="card-header">
+              <span class="card-icon">ðŸš¦</span>
+              <h2 class="card-title">Fluxo de Contatos</h2>
+              <div class="card-actions">
+                <button class="btn btn-outline btn-sm" onclick="applySafeSendPreset()">Modo seguro</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="flow-control-enabled" onchange="toggleFlowControl()">
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                <span>Limitar contatos por janela de tempo</span>
+              </label>
+              <p class="hint-text">Controla campanhas em lotes, sem afetar respostas privadas do Agente IA.</p>
+            </div>
+            <div id="flow-control-settings" class="hidden">
+              <div class="range-row">
+                <div class="form-group">
+                  <label class="form-label">Maximo de contatos</label>
+                  <input type="number" id="flow-max-contacts" class="form-input" value="15" min="1" max="10000" oninput="updateEstimate()">
+                </div>
+                <span class="range-sep">a cada</span>
+                <div class="form-group">
+                  <label class="form-label">Janela</label>
+                  <div class="input-with-unit">
+                    <input type="number" id="flow-window-minutes" class="form-input" value="10" min="1" max="1440" oninput="updateEstimate()">
+                    <span class="input-unit">min</span>
+                  </div>
+                </div>
+              </div>
+              <div class="info-box compact">
+                <p>Exemplo: 15 contatos a cada 10 minutos. Dentro desse bloco, o intervalo fixo ou aleatorio continua valendo.</p>
               </div>
             </div>
           </div>

@@ -10,12 +10,15 @@ const state = {
   waDetails: null,
   campaignStatus: 'idle',
   validNumbers: [],
+  contactPrecheck: { total: 0, valid: 0, invalid: [], duplicates: [] },
   selectedImage: null,
   emojiCategory: 'smileys',
   reactionCount: 1,
   pollMode: false,
   queue: [],
-  stats: { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 },
+  stats: { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0, dailyOutboundAttempts: 0 },
+  campaignFlow: null,
+  campaignWaitReason: null,
   systemStatus: null,
   adResearch: {
     jobId: '',
@@ -105,15 +108,17 @@ function handleWsMessage(data) {
     case 'status':       handleStatusUpdate(data.status, data.details || null); break;
     case 'qr':           handleQRCode(data.qr); break;
     case 'log':          appendLog(data.level, data.message); break;
-    case 'stats':        updateStats(data.stats); break;
+    case 'stats':        updateStats(data.stats, data.flowControl, data.waitReason); break;
     case 'queue_update': updateQueueItem(data.index, data.status, data.sentAt, data.error, data.messageId, data.resolvedTarget, data.targetKind); break;
     case 'campaign_status': handleCampaignStatus(data.status); break;
     case 'campaign_loaded': handleCampaignLoaded(data); break;
     case 'campaign_cleared':
       state.queue = [];
-      state.stats = { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0 };
+      state.stats = { total: 0, accepted: 0, acceptedUnconfirmed: 0, confirmed: 0, sent: 0, failed: 0, pending: 0, dailyOutboundAttempts: 0 };
+      state.campaignFlow = null;
+      state.campaignWaitReason = null;
       renderQueueList();
-      updateStats(state.stats);
+      updateStats(state.stats, null, null);
       handleCampaignStatus('idle');
       break;
     case 'ai_status':
@@ -251,6 +256,8 @@ function validateContactsList() {
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
   const valid = [];
   const invalid = [];
+  const duplicates = [];
+  const seen = new Set();
 
   lines.forEach(line => {
     // Strip spaces, dashes, parens, plus sign
@@ -260,16 +267,24 @@ function validateContactsList() {
       clean = clean.slice(2);
     }
     if (/^\d{10,11}$/.test(clean)) {
-      valid.push(clean);
+      if (seen.has(clean)) {
+        duplicates.push(clean);
+      } else {
+        seen.add(clean);
+        valid.push(clean);
+      }
     } else if (line.length > 0) {
       invalid.push(line);
     }
   });
 
   state.validNumbers = valid;
+  state.contactPrecheck = { total: lines.length, valid: valid.length, invalid, duplicates };
   document.getElementById('val-total').textContent = lines.length;
   document.getElementById('val-valid').textContent = valid.length;
   document.getElementById('val-invalid').textContent = invalid.length;
+  const duplicateCountEl = document.getElementById('val-duplicates');
+  if (duplicateCountEl) duplicateCountEl.textContent = duplicates.length;
 
   const invalidList = document.getElementById('invalid-list');
   if (invalid.length > 0) {
@@ -278,6 +293,17 @@ function validateContactsList() {
       .map(n => `<span class="invalid-tag">${n}</span>`).join('');
   } else {
     invalidList.classList.add('hidden');
+  }
+
+  const duplicateList = document.getElementById('duplicate-list');
+  if (duplicateList) {
+    if (duplicates.length > 0) {
+      duplicateList.classList.remove('hidden');
+      document.getElementById('duplicate-items').innerHTML = duplicates
+        .map(n => `<span class="invalid-tag">${n}</span>`).join('');
+    } else {
+      duplicateList.classList.add('hidden');
+    }
   }
 
   // Badge
@@ -549,6 +575,90 @@ function toggleDailyLimit() {
   const settings = document.getElementById('limit-settings');
   if (checked) settings.classList.remove('hidden');
   else settings.classList.add('hidden');
+  updateEstimate();
+}
+
+function toggleFlowControl() {
+  const checked = document.getElementById('flow-control-enabled')?.checked || false;
+  const settings = document.getElementById('flow-control-settings');
+  if (settings) settings.classList.toggle('hidden', !checked);
+  updateEstimate();
+}
+
+function getFlowConfigFromUI() {
+  return {
+    enabled: document.getElementById('flow-control-enabled')?.checked || false,
+    maxContacts: parseInt(document.getElementById('flow-max-contacts')?.value, 10) || 15,
+    windowMinutes: parseInt(document.getElementById('flow-window-minutes')?.value, 10) || 10,
+  };
+}
+
+function applySafeSendPreset() {
+  const randomMode = document.querySelector('input[name="interval-mode"][value="random"]');
+  if (randomMode) randomMode.checked = true;
+  const minInput = document.getElementById('interval-min');
+  const maxInput = document.getElementById('interval-max');
+  if (minInput) minInput.value = 20;
+  if (maxInput) maxInput.value = 40;
+
+  const flowEnabled = document.getElementById('flow-control-enabled');
+  const flowMax = document.getElementById('flow-max-contacts');
+  const flowWindow = document.getElementById('flow-window-minutes');
+  if (flowEnabled) flowEnabled.checked = true;
+  if (flowMax) flowMax.value = 15;
+  if (flowWindow) flowWindow.value = 10;
+
+  const antiLimit = document.getElementById('anti-limit');
+  const dailyLimit = document.getElementById('daily-limit');
+  if (antiLimit) antiLimit.checked = true;
+  if (dailyLimit) dailyLimit.value = 50;
+
+  const typing = document.getElementById('anti-typing');
+  const variation = document.getElementById('anti-variation');
+  if (typing) typing.checked = true;
+  if (variation) variation.checked = true;
+
+  updateIntervalMode();
+  toggleDailyLimit();
+  toggleFlowControl();
+  showToast('Modo seguro aplicado: 20-40s, 15 contatos/10min e 50 por dia.', 'success');
+}
+
+function estimateSecondsWithFlow(contacts, avgSec, flow) {
+  if (!flow.enabled || contacts <= 0) return contacts * avgSec;
+  const maxContacts = Math.max(1, flow.maxContacts || 15);
+  const windowSec = Math.max(60, (flow.windowMinutes || 10) * 60);
+  let elapsed = 0;
+  let windowStartedAt = 0;
+  let sentInWindow = 0;
+
+  for (let i = 0; i < contacts; i += 1) {
+    if (elapsed - windowStartedAt >= windowSec) {
+      windowStartedAt = elapsed;
+      sentInWindow = 0;
+    }
+    if (sentInWindow >= maxContacts) {
+      elapsed = windowStartedAt + windowSec;
+      windowStartedAt = elapsed;
+      sentInWindow = 0;
+    }
+    sentInWindow += 1;
+    elapsed += avgSec;
+  }
+
+  return elapsed;
+}
+
+function ensureFlowEstimateElement() {
+  let flowEl = document.getElementById('est-flow');
+  if (flowEl) return flowEl;
+  const estimateGrid = document.querySelector('#tab-schedule .estimate-grid');
+  if (!estimateGrid) return null;
+  const item = document.createElement('div');
+  item.className = 'estimate-item';
+  item.innerHTML = '<span class="est-value" id="est-flow">Livre</span><span class="est-label">Fluxo</span>';
+  estimateGrid.appendChild(item);
+  return item.querySelector('#est-flow');
 }
 
 function updateEstimate() {
@@ -567,8 +677,14 @@ function updateEstimate() {
     document.getElementById('est-interval').textContent = `${avgSec}s`;
   }
 
+  const flow = getFlowConfigFromUI();
+  const flowEl = ensureFlowEstimateElement();
+  if (flowEl) {
+    flowEl.textContent = flow.enabled ? `${flow.maxContacts}/${flow.windowMinutes}min` : 'Livre';
+  }
+
   if (contacts > 0) {
-    const totalSec = contacts * avgSec;
+    const totalSec = estimateSecondsWithFlow(contacts, avgSec, flow);
     document.getElementById('est-duration').textContent = formatDuration(totalSec);
     const end = new Date(Date.now() + totalSec * 1000);
     document.getElementById('est-end').textContent = end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -620,6 +736,7 @@ async function startCampaign() {
   }
 
   const mode = document.querySelector('input[name="interval-mode"]:checked').value;
+  const flowControl = getFlowConfigFromUI();
   const scheduleConfig = {
     intervalMode: mode,
     intervalFixed: document.getElementById('interval-fixed-val').value,
@@ -628,6 +745,7 @@ async function startCampaign() {
     useWindow: document.getElementById('use-window').checked,
     windowStart: document.getElementById('window-start').value,
     windowEnd: document.getElementById('window-end').value,
+    flowControl,
   };
 
   const antiRestriction = {
@@ -662,7 +780,10 @@ async function startCampaign() {
     const d = await r.json();
 
     if (r.ok) {
-      showToast(d.message || 'Campanha iniciada!', 'success');
+      const skipped = (d.precheck?.duplicateCount || 0) + (d.precheck?.invalidCount || 0);
+      showToast(skipped > 0
+        ? `${d.message || 'Campanha iniciada!'} (${skipped} contato(s) ignorado(s) na pre-checagem)`
+        : d.message || 'Campanha iniciada!', 'success');
       switchTab('campaign');
     } else {
       showToast(d.error || 'Erro ao iniciar.', 'error');
@@ -710,11 +831,13 @@ async function clearQueue() {
 function handleCampaignLoaded(data) {
   state.stats = data.stats;
   state.queue = data.queue;
+  state.campaignFlow = data.flowControl || null;
+  state.campaignWaitReason = data.waitReason || null;
   renderQueueList();
   state.queue.forEach((item, index) => {
     updateQueueItem(index, item.status, item.sentAt, item.error, item.messageId, item.resolvedTarget, item.targetKind);
   });
-  updateStats(data.stats);
+  updateStats(data.stats, data.flowControl, data.waitReason);
 }
 
 function handleCampaignStatus(status) {
@@ -758,7 +881,59 @@ function handleCampaignStatus(status) {
   updateBadge('campaign', status === 'running' ? 'â—' : null);
 }
 
-function updateStats(stats) {
+function waitReasonLabel(reason) {
+  const labels = {
+    flow_control: 'Aguardando fluxo de contatos',
+    daily_limit: 'Limite diario atingido',
+    time_window: 'Fora da janela de horario',
+  };
+  return labels[reason] || 'Sem espera ativa';
+}
+
+function formatFlowTime(value) {
+  if (!value) return '--';
+  return new Date(value).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function updateCampaignFlowPanel(flowControl, waitReason) {
+  state.campaignFlow = flowControl || state.campaignFlow;
+  state.campaignWaitReason = waitReason || null;
+  let panel = document.getElementById('campaign-flow-panel');
+  if (!panel) {
+    const progressCard = document.querySelector('#tab-campaign .progress-card');
+    if (progressCard) {
+      panel = document.createElement('div');
+      panel.id = 'campaign-flow-panel';
+      progressCard.insertAdjacentElement('afterend', panel);
+    }
+  }
+  if (!panel) return;
+
+  const flow = state.campaignFlow;
+  if (!flow?.enabled) {
+    panel.innerHTML = `
+      <div class="campaign-flow-title">${escapeHtml(state.campaignWaitReason ? waitReasonLabel(state.campaignWaitReason) : 'Fluxo de contatos livre')}</div>
+      <div class="campaign-flow-sub">${escapeHtml(state.campaignWaitReason ? 'A campanha esta aguardando uma condicao operacional antes de continuar.' : 'Nenhum limite por janela esta ativo para esta campanha.')}</div>
+    `;
+    panel.className = `campaign-flow-panel ${state.campaignWaitReason ? 'waiting' : ''}`;
+    return;
+  }
+
+  const remaining = flow.remainingInWindow ?? flow.maxContacts;
+  const isWaiting = state.campaignWaitReason === 'flow_control' || (flow.waitMs || 0) > 0;
+  const title = state.campaignWaitReason ? waitReasonLabel(state.campaignWaitReason) : 'Fluxo de contatos ativo';
+  panel.className = `campaign-flow-panel ${isWaiting ? 'waiting' : ''}`;
+  panel.innerHTML = `
+    <div class="campaign-flow-title">${escapeHtml(title)}</div>
+    <div class="campaign-flow-sub">
+      Janela atual: <strong>${flow.sentInWindow || 0}/${flow.maxContacts}</strong> contatos usados.
+      Restam <strong>${remaining}</strong>.
+      Proxima janela: <strong>${formatFlowTime(flow.nextWindowAt)}</strong>.
+    </div>
+  `;
+}
+
+function updateStats(stats, flowControl = null, waitReason = null) {
   state.stats = stats;
   const accepted = stats.accepted ?? 0;
   const acceptedUnconfirmed = stats.acceptedUnconfirmed ?? 0;
@@ -773,6 +948,7 @@ function updateStats(stats) {
   const pct = stats.total > 0 ? Math.round(((confirmed + acceptedUnconfirmed + stats.failed) / stats.total) * 100) : 0;
   document.getElementById('progress-bar').style.width = `${pct}%`;
   document.getElementById('progress-pct').textContent = `${pct}%`;
+  updateCampaignFlowPanel(flowControl, waitReason);
 }
 
 function queueStatusMeta(status) {
@@ -1064,8 +1240,14 @@ function renderSystemStatus() {
       statusMetric('Falhas', section.stats?.failed ?? 0),
     ],
     details: (section) => [
+      statusDetail('Tentativas hoje', section.dailyOutboundAttempts ?? section.stats?.dailyOutboundAttempts ?? 0),
       statusDetail('Taxa confirmacao', `${section.confirmationRate ?? 0}%`),
       statusDetail('Taxa sem confirmacao', `${section.acceptedUnconfirmedRate ?? 0}%`),
+      statusDetail('Fluxo', section.flowControl?.enabled
+        ? `${section.flowControl.sentInWindow || 0}/${section.flowControl.maxContacts} na janela`
+        : 'Desligado'),
+      statusDetail('Proxima janela', section.flowControl?.enabled ? formatFlowTime(section.flowControl.nextWindowAt) : '--'),
+      statusDetail('Espera atual', waitReasonLabel(section.waitReason)),
       statusDetail('Rota dominante', section.dominantRouteKind || '--'),
       statusDetail('Ultimo alvo', section.recentResolvedTargets?.[0]?.resolvedTarget || '--'),
     ],
@@ -1127,6 +1309,9 @@ function renderSystemStatus() {
 
 function handleSystemStatusUpdate(snapshot) {
   state.systemStatus = snapshot;
+  if (snapshot?.campaign) {
+    updateCampaignFlowPanel(snapshot.campaign.flowControl, snapshot.campaign.waitReason);
+  }
   if (Object.keys(aiConfig || {}).length > 0) {
     renderAIEffectiveSummary();
   }

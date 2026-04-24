@@ -91,6 +91,7 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
     let severity = 'healthy';
     if (snapshot.status === 'paused' && (stats.failed || 0) > 0) severity = 'error';
     else if ((stats.failed || 0) > 0 || (stats.acceptedUnconfirmed || 0) > 0) severity = 'degraded';
+    else if (snapshot.waitReason === 'flow_control' || snapshot.waitReason === 'time_window' || snapshot.waitReason === 'daily_limit') severity = 'warning';
     else if (snapshot.status === 'running') severity = 'healthy';
     else if (snapshot.status === 'idle' && (stats.total || 0) === 0) severity = 'warning';
 
