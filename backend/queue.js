@@ -516,43 +516,17 @@ class MessageQueue {
 
         const routeAttempts = [
             { label: 'rota preferida do WhatsApp', options: {} },
-            { label: 'rota preferida apos revalidar chaves', options: {}, repairBefore: true },
-            { label: 'relay renovado com dispositivos frescos', options: { freshDevices: true } },
-            { label: 'dispositivo principal pela rota preferida', options: { peerPrimary: true } },
             { label: 'numero real', options: { forcePhoneJid: true } },
-            { label: 'relay renovado pelo numero real', options: { freshDevices: true, forcePhoneJid: true } },
-            { label: 'dispositivo principal pelo numero real', options: { peerPrimary: true, forcePhoneJid: true } },
         ];
 
         let acceptedAttempts = 0;
         let lastDelivery = null;
-        let repairRan = false;
 
         for (let attemptIndex = 0; attemptIndex < routeAttempts.length; attemptIndex += 1) {
             const attempt = routeAttempts[attemptIndex];
             const isLastAttempt = attemptIndex === routeAttempts.length - 1;
             if (attemptIndex > 0) {
                 this.log('warning', `Tentando rota alternativa (${attempt.label}) para ${item.number}...`);
-            }
-
-            if (attempt.repairBefore && !repairRan) {
-                repairRan = true;
-                if (typeof this.wa.resetSignalSessionsForTarget === 'function') {
-                    const reset = await this.wa.resetSignalSessionsForTarget(item.number);
-                    if (reset?.purged > 0) {
-                        this.log('warning', `Sessao criptografica antiga removida para ${item.number}; tentando envio com chaves novas.`);
-                    }
-                    if (reset?.hydratedJid) {
-                        this.log('info', `WhatsApp validou ${item.number} como ${reset.hydratedJid}.`);
-                    }
-                }
-
-                if (typeof this.wa.refreshDevicesForTarget === 'function') {
-                    const refresh = await this.wa.refreshDevicesForTarget(item.number);
-                    if (refresh?.deviceCount > 0) {
-                        this.log('info', `Dispositivos do contato atualizados para ${item.number}: ${refresh.deviceCount}.`);
-                    }
-                }
             }
 
             let delivery;

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore, generateWAMessage } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore, generateWAMessage, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -657,14 +657,17 @@ class WhatsAppManager extends EventEmitter {
                 keys: makeCacheableSignalKeyStore(state.keys, this.logger),
             };
             this._authKeys = authState.keys;
-            const selectedVersion = this._getCurrentConnectVersion();
+            const latest = await fetchLatestBaileysVersion().catch(() => null);
+            const latestVersion = latest?.version || KNOWN_QR_FALLBACK_VERSION;
+            const selectedVersion = this._envVersionOverride
+                || (this._versionCursor > 0 ? KNOWN_QR_FALLBACK_VERSION : latestVersion);
             const usingEnvOverride = !!this._envVersionOverride && sameVersion(selectedVersion, this._envVersionOverride);
-            const versionLabel = this._getVersionLabel(selectedVersion);
+            const versionLabel = stringifyVersion(selectedVersion);
             const attemptState = { sawQr: false };
             this._activeConnectVersion = selectedVersion || null;
             this._latestWebVersion = selectedVersion || null;
 
-            console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${versionLabel}${usingEnvOverride ? ' (override)' : ''}`);
+            console.log(`[WhatsApp] Baileys ${this._baileysVersionRange} | WA Web ${versionLabel}${usingEnvOverride ? ` (override, latest ${stringifyVersion(latestVersion)})` : ''}`);
 
             const socketConfig = {
                 auth: authState,
@@ -713,26 +716,23 @@ class WhatsAppManager extends EventEmitter {
                         versionLabel,
                     });
 
-                    if (statusCode === 405 && !attemptState.sawQr && !this._envVersionOverride) {
-                        const nextVersion = this._versionCandidates[this._versionCursor + 1];
-                        if (nextVersion) {
-                            this._versionCursor += 1;
-                            details.retryVersion = this._getVersionLabel(nextVersion);
-                            console.warn(`[WhatsApp] Pairing rejected with 405 before QR using ${versionLabel}. Retrying with ${details.retryVersion}...`);
-                            this.broadcast({
-                                type: 'log',
-                                level: 'warning',
-                                message: `WhatsApp rejeitou o pareamento antes do QR usando ${versionLabel}. Tentando modo compativel ${details.retryVersion}...`,
-                            });
-                        } else {
-                            shouldReconnect = false;
-                            console.error(`[WhatsApp] Pairing blocked before QR even after fallback attempts. Last version: ${versionLabel}`);
-                            this.broadcast({
-                                type: 'log',
-                                level: 'error',
-                                message: 'WhatsApp bloqueou a criacao de uma nova sessao antes do QR (erro 405).',
-                            });
-                        }
+                    if (statusCode === 405 && !attemptState.sawQr && !this._envVersionOverride && this._versionCursor === 0) {
+                        this._versionCursor = 1;
+                        details.retryVersion = stringifyVersion(KNOWN_QR_FALLBACK_VERSION);
+                        console.warn(`[WhatsApp] Pairing rejected with 405 before QR using ${versionLabel}. Retrying with ${details.retryVersion}...`);
+                        this.broadcast({
+                            type: 'log',
+                            level: 'warning',
+                            message: `WhatsApp rejeitou o pareamento antes do QR usando ${versionLabel}. Tentando modo compativel ${details.retryVersion}...`,
+                        });
+                    } else if (statusCode === 405 && !attemptState.sawQr && !this._envVersionOverride) {
+                        shouldReconnect = false;
+                        console.error(`[WhatsApp] Pairing blocked before QR even after fallback attempts. Last version: ${versionLabel}`);
+                        this.broadcast({
+                            type: 'log',
+                            level: 'error',
+                            message: 'WhatsApp bloqueou a criacao de uma nova sessao antes do QR (erro 405).',
+                        });
                     }
 
                     this.status = 'disconnected';
