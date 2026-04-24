@@ -1129,6 +1129,7 @@ function renderStatusCard(elementId, section = {}, config = {}) {
   const el = document.getElementById(elementId);
   if (!el) return;
   const severity = section.severity || 'warning';
+  const extra = typeof config.extra === 'function' ? config.extra(section) : '';
   el.className = `status-card severity-${severity}`;
   el.innerHTML = `
     <div class="status-card-head">
@@ -1141,6 +1142,30 @@ function renderStatusCard(elementId, section = {}, config = {}) {
     ${config.summary ? `<p class="status-card-summary">${escapeHtml(config.summary(section) || '')}</p>` : ''}
     ${Array.isArray(config.metrics?.(section)) ? `<div class="status-metrics">${config.metrics(section).join('')}</div>` : ''}
     ${Array.isArray(config.details?.(section)) ? `<div class="status-details">${config.details(section).join('')}</div>` : ''}
+    ${extra || ''}
+  `;
+}
+
+function renderOutboundMiniList(items = []) {
+  const recent = Array.isArray(items) ? items.slice(0, 3) : [];
+  if (!recent.length) return '<div class="status-mini-empty">Nenhum envio rastreado ainda.</div>';
+
+  return `
+    <div class="status-mini-list">
+      ${recent.map((item) => `
+        <div class="status-mini-item">
+          <div class="status-mini-top">
+            <strong>${escapeHtml(item.status || '--')}</strong>
+            <span>${escapeHtml(item.messageId || '--')}</span>
+          </div>
+          <div class="status-mini-body">
+            ${escapeHtml(item.targetResolved || item.targetOriginal || '--')}
+            <br>
+            rota ${escapeHtml(item.targetKind || '--')} | ack ${escapeHtml(String(item.ackStatus ?? '--'))} | hash ${escapeHtml(item.contentSummary?.textHash || '--')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
   `;
 }
 
@@ -1211,6 +1236,12 @@ function renderSystemStatus() {
       statusDetail('Ultimo erro', section.lastDisconnect?.message || 'Nenhum'),
       statusDetail('Ultima rota', section.lastInboundRoute?.addressingMode || '--'),
     ],
+    extra: (section) => `
+      <div class="status-diagnostic-block">
+        <div class="status-diagnostic-title">Ultimos envios rastreados</div>
+        ${renderOutboundMiniList(section.recentOutbound || [])}
+      </div>
+    `,
   });
 
   renderStatusCard('status-card-ai', snapshot.ai, {
@@ -1248,6 +1279,7 @@ function renderSystemStatus() {
         : 'Desligado'),
       statusDetail('Proxima janela', section.flowControl?.enabled ? formatFlowTime(section.flowControl.nextWindowAt) : '--'),
       statusDetail('Espera atual', waitReasonLabel(section.waitReason)),
+      statusDetail('Modo de rota', section.routeMode || '--'),
       statusDetail('Rota dominante', section.dominantRouteKind || '--'),
       statusDetail('Ultimo alvo', section.recentResolvedTargets?.[0]?.resolvedTarget || '--'),
     ],
@@ -1340,6 +1372,59 @@ async function refreshSystemStatus() {
     showToast('Diagnostico atualizado.', 'success');
   } catch (error) {
     showToast('Erro ao atualizar diagnostico: ' + error.message, 'error');
+  }
+}
+
+function buildSystemDiagnosticText(snapshot = state.systemStatus) {
+  if (!snapshot) return 'Sem snapshot de status carregado.';
+  const copy = {
+    generatedAt: new Date().toISOString(),
+    whatsapp: {
+      status: snapshot.whatsapp?.status,
+      severity: snapshot.whatsapp?.severity,
+      webVersion: snapshot.whatsapp?.webVersion,
+      baileysVersion: snapshot.whatsapp?.baileysVersion,
+      lastDisconnect: snapshot.whatsapp?.lastDisconnect,
+      routeStats: snapshot.whatsapp?.routeStats,
+      predominantRoute: snapshot.whatsapp?.predominantRoute,
+      lastInboundRoute: snapshot.whatsapp?.lastInboundRoute,
+      recentOutbound: snapshot.whatsapp?.recentOutbound || [],
+    },
+    campaign: {
+      status: snapshot.campaign?.status,
+      waitReason: snapshot.campaign?.waitReason,
+      routeMode: snapshot.campaign?.routeMode,
+      stats: snapshot.campaign?.stats,
+      confirmationRate: snapshot.campaign?.confirmationRate,
+      acceptedUnconfirmedRate: snapshot.campaign?.acceptedUnconfirmedRate,
+      dominantRouteKind: snapshot.campaign?.dominantRouteKind,
+      routeKinds: snapshot.campaign?.routeKinds,
+      recentResolvedTargets: snapshot.campaign?.recentResolvedTargets,
+      flowControl: snapshot.campaign?.flowControl,
+      precheck: snapshot.campaign?.precheck,
+    },
+    recentEvents: snapshot.recentEvents || [],
+  };
+  return JSON.stringify(copy, null, 2);
+}
+
+async function copySystemDiagnostic() {
+  try {
+    await refreshSystemStatus();
+    const text = buildSystemDiagnosticText(state.systemStatus);
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    showToast('Log diagnostico copiado. Cole ele aqui se a campanha ainda falhar.', 'success');
+  } catch (error) {
+    showToast('Nao foi possivel copiar o diagnostico: ' + error.message, 'error');
   }
 }
 

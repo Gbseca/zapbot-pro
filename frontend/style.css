@@ -1475,6 +1475,47 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   color: var(--text-1);
   text-align: right;
 }
+.status-diagnostic-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.status-diagnostic-title {
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  margin-bottom: 8px;
+}
+.status-mini-list {
+  display: grid;
+  gap: 8px;
+}
+.status-mini-item,
+.status-mini-empty {
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.025);
+  padding: 9px 10px;
+}
+.status-mini-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+.status-mini-top strong {
+  color: var(--text-1);
+}
+.status-mini-body,
+.status-mini-empty {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
 .status-events {
   display: grid;
   gap: 10px;

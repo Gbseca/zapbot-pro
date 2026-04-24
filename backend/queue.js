@@ -1,4 +1,4 @@
-import { getLead, saveLead } from './data/leads-manager.js';
+import { getAllLeads, getLead, saveLead } from './data/leads-manager.js';
 import {
     clearActiveCampaign,
     registerActiveCampaign,
@@ -6,6 +6,7 @@ import {
 } from './campaign-state.js';
 
 const MAX_CONSECUTIVE_FAILURES = 3;
+const CAMPAIGN_ROUTE_MODE = String(process.env.WA_CAMPAIGN_ROUTE_MODE || 'phone_first').toLowerCase();
 
 function normalizeCampaignNumber(raw) {
     const digits = String(raw || '').replace(/\D/g, '');
@@ -317,6 +318,40 @@ class MessageQueue {
         return text.replace(/\{\{numero\}\}/gi, number);
     }
 
+    resolveCampaignSendTarget(item) {
+        const normalized = normalizeCampaignNumber(item?.number);
+        if (!normalized) {
+            return {
+                target: item?.number,
+                source: 'raw_number',
+                normalized: null,
+            };
+        }
+
+        const lead = getLead(normalized)
+            || getAllLeads().find((candidate) => {
+                const values = [
+                    candidate?.phone,
+                    candidate?.displayNumber,
+                    candidate?.number,
+                ].map(normalizeCampaignNumber).filter(Boolean);
+                return values.includes(normalized);
+            });
+        if (lead?.jid && String(lead.jid).includes('@')) {
+            return {
+                target: lead.jid,
+                source: 'lead_jid',
+                normalized,
+            };
+        }
+
+        return {
+            target: item.number,
+            source: 'number',
+            normalized,
+        };
+    }
+
     seedCampaignLead(number, message, delivery = {}) {
         const normalized = normalizeCampaignNumber(number);
         if (!normalized) return;
@@ -470,24 +505,24 @@ class MessageQueue {
         };
     }
 
-    async _sendCampaignItemOnce(item, text, routeOptions = {}) {
+    async _sendCampaignItemOnce(item, text, target, routeOptions = {}) {
         const acceptedRecords = [];
         const hasPoll = item.pollEnabled && item.pollOptions && item.pollOptions.length >= 2;
 
         if (hasPoll) {
             if (item.imageBuffer) {
-                acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer, routeOptions));
+                acceptedRecords.push(await this.wa.sendMessage(target, text, item.imageBuffer, routeOptions));
             } else if (text && text.trim()) {
-                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null, routeOptions));
+                acceptedRecords.push(await this.wa.sendMessage(target, text, null, routeOptions));
             }
 
             const pollQ = (item.pollQuestion && item.pollQuestion.trim())
                 ? item.pollQuestion.trim()
                 : (text.substring(0, 100) || 'Selecione uma opcao:');
-            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions, routeOptions));
+            acceptedRecords.push(await this.wa.sendPoll(target, pollQ, item.pollOptions, routeOptions));
         } else {
             acceptedRecords.push(await this.wa.sendMessage(
-                item.number,
+                target,
                 text,
                 item.imageBuffer,
                 routeOptions
@@ -502,7 +537,17 @@ class MessageQueue {
     }
 
     async _sendCampaignItem(item, text) {
-        if (typeof this.wa.preferStoredLidForTarget === 'function') {
+        const targetInfo = this.resolveCampaignSendTarget(item);
+        const target = targetInfo.target;
+        const routeMode = CAMPAIGN_ROUTE_MODE;
+
+        if (targetInfo.source === 'lead_jid') {
+            this.log('info', `Usando JID salvo do lead para ${item.number}: ${target}.`);
+        } else {
+            this.log('info', `Modo de rota da campanha para ${item.number}: ${routeMode}.`);
+        }
+
+        if (routeMode === 'lid_first' && typeof this.wa.preferStoredLidForTarget === 'function') {
             const preferred = await this.wa.preferStoredLidForTarget(item.number);
             if (preferred?.preferredJid?.includes('@lid')) {
                 this.log('info', `Rota LID preferida para ${item.number}: ${preferred.preferredJid}.`);
@@ -511,13 +556,17 @@ class MessageQueue {
 
         if (this.config?.antiRestriction?.typing) {
             this.log('info', `Simulando digitacao para ${item.number}...`);
-            await this.wa.sendTyping(item.number, 2500);
+            await this.wa.sendTyping(target, 2500, targetInfo.source === 'lead_jid' ? {} : { forcePhoneJid: true });
         }
 
-        const routeAttempts = [
-            { label: 'rota preferida do WhatsApp', options: {} },
-            { label: 'numero real', options: { forcePhoneJid: true } },
-        ];
+        const routeAttempts = targetInfo.source === 'lead_jid'
+            ? [{ label: 'jid salvo do lead', options: {} }]
+            : routeMode === 'lid_first'
+                ? [
+                    { label: 'rota preferida do WhatsApp', options: {} },
+                    { label: 'numero real', options: { forcePhoneJid: true } },
+                ]
+                : [{ label: 'numero real', options: { forcePhoneJid: true } }];
 
         let acceptedAttempts = 0;
         let lastDelivery = null;
@@ -525,13 +574,22 @@ class MessageQueue {
         for (let attemptIndex = 0; attemptIndex < routeAttempts.length; attemptIndex += 1) {
             const attempt = routeAttempts[attemptIndex];
             const isLastAttempt = attemptIndex === routeAttempts.length - 1;
+            const routeOptions = {
+                ...attempt.options,
+                routeLabel: attempt.label,
+                campaignContext: {
+                    number: item.number,
+                    targetSource: targetInfo.source,
+                    routeMode,
+                },
+            };
             if (attemptIndex > 0) {
                 this.log('warning', `Tentando rota alternativa (${attempt.label}) para ${item.number}...`);
             }
 
             let delivery;
             try {
-                delivery = await this._sendCampaignItemOnce(item, text, attempt.options);
+                delivery = await this._sendCampaignItemOnce(item, text, target, routeOptions);
             } catch (err) {
                 lastDelivery = {
                     status: 'failed',
@@ -555,6 +613,10 @@ class MessageQueue {
             lastDelivery = delivery;
 
             if (delivery.status === 'confirmed') {
+                return { ...delivery, acceptedAttempts };
+            }
+
+            if (delivery.status === 'accepted_unconfirmed') {
                 return { ...delivery, acceptedAttempts };
             }
 
@@ -768,6 +830,7 @@ class MessageQueue {
             precheck: this.precheck,
             stats: { ...this.stats, sent: this.stats.confirmed },
             flowControl: this.getFlowControlSnapshot(),
+            routeMode: CAMPAIGN_ROUTE_MODE,
             dominantRouteKind,
             routeKinds,
             recentResolvedTargets: recentResolvedTargets.slice(-5).reverse(),

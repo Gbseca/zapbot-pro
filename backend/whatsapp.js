@@ -6,6 +6,7 @@ import fs from 'fs';
 import pino from 'pino';
 import { fileURLToPath } from 'url';
 import { inspect } from 'util';
+import { createHash } from 'crypto';
 import { AUTH_DIR } from './storage/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -84,6 +85,40 @@ function createUnresolvedLidError(target) {
     const err = new Error(`Nao foi possivel resolver o numero real para ${target}`);
     err.code = 'UNRESOLVED_LID_TARGET';
     return err;
+}
+
+function hashText(value) {
+    return createHash('sha1')
+        .update(String(value || ''), 'utf8')
+        .digest('hex')
+        .slice(0, 12);
+}
+
+function compactMessageContent(content = {}) {
+    const text = typeof content.text === 'string'
+        ? content.text
+        : typeof content.caption === 'string'
+            ? content.caption
+            : '';
+    return {
+        keys: Object.keys(content || {}),
+        textLength: text.length,
+        textHash: text ? hashText(text) : '',
+        hasImage: !!content.image,
+        hasPoll: !!content.poll,
+    };
+}
+
+function compactOutboundUpdate(item) {
+    return {
+        at: new Date().toISOString(),
+        keyRemoteJid: item?.key?.remoteJid || item?.update?.key?.remoteJid || '',
+        keyId: item?.key?.id || item?.update?.key?.id || '',
+        participant: item?.key?.participant || item?.participant || '',
+        status: item?.update?.status ?? item?.status ?? null,
+        error: item?.update?.error?.message || item?.error?.message || item?.update?.error || item?.error || '',
+        updateKeys: item?.update ? Object.keys(item.update) : Object.keys(item || {}),
+    };
 }
 
 class WhatsAppManager extends EventEmitter {
@@ -473,6 +508,12 @@ class WhatsAppManager extends EventEmitter {
             targetKind: record.targetKind,
             resolutionSource: record.resolutionSource,
             ackStatus: record.ackStatus ?? null,
+            resultKey: record.resultKey || null,
+            routeOptions: record.routeOptions || null,
+            routeLabel: record.routeLabel || '',
+            campaignContext: record.campaignContext || null,
+            contentSummary: record.contentSummary || null,
+            updates: Array.isArray(record.updates) ? record.updates.slice(-8) : [],
             createdAt: record.createdAt,
             acceptedAt: record.acceptedAt || null,
             updatedAt: record.updatedAt || null,
@@ -538,7 +579,7 @@ class WhatsAppManager extends EventEmitter {
         return this._snapshotOutbound(record);
     }
 
-    _registerAcceptedOutbound(kind, targetInfo, result) {
+    _registerAcceptedOutbound(kind, targetInfo, result, meta = {}) {
         const messageId = result?.key?.id;
         if (!messageId) {
             const err = new Error('WhatsApp aceitou o envio, mas nao retornou messageId');
@@ -562,6 +603,17 @@ class WhatsAppManager extends EventEmitter {
             targetKind: targetInfo.targetKind,
             resolutionSource: targetInfo.resolutionSource,
             ackStatus: result?.status ?? null,
+            resultKey: {
+                id: result?.key?.id || '',
+                remoteJid: result?.key?.remoteJid || '',
+                participant: result?.key?.participant || '',
+                fromMe: result?.key?.fromMe ?? null,
+            },
+            routeOptions: meta.routeOptions || null,
+            routeLabel: meta.routeLabel || '',
+            campaignContext: meta.campaignContext || null,
+            contentSummary: meta.contentSummary || null,
+            updates: [],
             createdAt,
             acceptedAt: createdAt,
             updatedAt: createdAt,
@@ -613,6 +665,8 @@ class WhatsAppManager extends EventEmitter {
             const key = item?.key || item?.update?.key;
             const messageId = key?.id;
             if (!messageId || !this._outboundRecords.has(messageId)) continue;
+            const record = this._outboundRecords.get(messageId);
+            record.updates = [...(record.updates || []), compactOutboundUpdate(item)].slice(-12);
 
             const statusValue = item?.update?.status ?? item?.status;
             const numericStatus = Number(statusValue);
@@ -643,6 +697,15 @@ class WhatsAppManager extends EventEmitter {
         for (const item of normalizeListPayload(payload)) {
             const messageId = item?.key?.id || item?.id || item?.messageId || item?.update?.key?.id;
             if (!messageId || !this._outboundRecords.has(messageId)) continue;
+            const record = this._outboundRecords.get(messageId);
+            record.updates = [...(record.updates || []), {
+                at: new Date().toISOString(),
+                type: 'message-receipt.update',
+                keyRemoteJid: item?.key?.remoteJid || '',
+                keyId: messageId,
+                participant: item?.key?.participant || item?.participant || '',
+                receipt: item?.receipt || item?.update || null,
+            }].slice(-12);
             this._finalizeOutbound(messageId, 'confirmed', { ackStatus: 3 });
         }
     }
@@ -842,12 +905,22 @@ class WhatsAppManager extends EventEmitter {
         }
 
         const targetInfo = this.resolveOutboundTarget(target, options);
-        console.log(`[WA] ${kind} targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind}`);
+        const sendMeta = {
+            routeOptions: {
+                forcePhoneJid: !!options.forcePhoneJid,
+                freshDevices: !!options.freshDevices,
+                peerPrimary: !!options.peerPrimary,
+            },
+            routeLabel: options.routeLabel || '',
+            campaignContext: options.campaignContext || null,
+            contentSummary: compactMessageContent(options.contentForDiagnostics || {}),
+        };
+        console.log(`[WA] ${kind} targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind} route=${sendMeta.routeLabel || 'default'} textLen=${sendMeta.contentSummary.textLength} textHash=${sendMeta.contentSummary.textHash || '-'}`);
 
         for (let attempt = 1; attempt <= 2; attempt += 1) {
             try {
                 const result = await builder(targetInfo.resolvedJid);
-                const accepted = this._registerAcceptedOutbound(kind, targetInfo, result);
+                const accepted = this._registerAcceptedOutbound(kind, targetInfo, result, sendMeta);
                 console.log(`[WA] ${kind} accepted targetOriginal=${targetInfo.originalTarget} targetResolved=${accepted.resolvedJid} targetKind=${accepted.targetKind} messageId=${accepted.messageId}`);
                 return accepted;
             } catch (error) {
@@ -939,6 +1012,9 @@ class WhatsAppManager extends EventEmitter {
     }
 
     async sendMessage(number, text, imageBuffer = null, options = {}) {
+        const contentForDiagnostics = imageBuffer
+            ? { image: true, caption: text || '' }
+            : { text: text || '' };
         return this._sendTrackedPayload('message', number, async (jid) => {
             if (options?.peerPrimary && !imageBuffer) {
                 return this._sendPeerPrimaryRelay(jid, { text });
@@ -953,7 +1029,7 @@ class WhatsAppManager extends EventEmitter {
                 });
             }
             return this.sock.sendMessage(jid, { text });
-        }, options);
+        }, { ...options, contentForDiagnostics });
     }
 
     async sendPoll(number, question, options, sendOptions = {}) {
@@ -988,7 +1064,13 @@ class WhatsAppManager extends EventEmitter {
                     selectableCount: 1,
                 },
             });
-        }, sendOptions);
+        }, {
+            ...sendOptions,
+            contentForDiagnostics: {
+                poll: true,
+                text: question || '',
+            },
+        });
     }
 
     async sendTyping(number, duration = 2500, options = {}) {
@@ -1028,7 +1110,7 @@ class WhatsAppManager extends EventEmitter {
             routeStats: { ...this._routeStats },
             predominantRoute,
             lastInboundRoute: this._lastInboundRoute,
-            recentOutbound: this._recentOutbound.slice(-8).reverse(),
+            recentOutbound: this._recentOutbound.slice(-20).reverse(),
         };
     }
 
