@@ -96,6 +96,7 @@ class WhatsAppManager extends EventEmitter {
         this.authPath = AUTH_DIR;
         this.reconnecting = false;
         this.logger = pino({ level: 'silent' });
+        this._authKeys = null;
         this.onMessage = null;
         this._contactMap = new Map();
         this._lidByPhone = new Map();
@@ -203,6 +204,143 @@ class WhatsAppManager extends EventEmitter {
         }
         this.emit('contact-map-update', { alias: normalizedJid, phone: normalizedPhone, source });
         return true;
+    }
+
+    _getSignalSessionPrefixesForJid(jid) {
+        const target = String(jid || '').trim();
+        const baseId = toBaseId(target);
+        if (!baseId) return [];
+
+        if (target.includes('@lid')) return [`${baseId}_1.`];
+        if (target.includes('@hosted.lid')) return [`${baseId}_129.`];
+        if (target.includes('@hosted')) return [`${baseId}_128.`];
+        return [`${baseId}.`];
+    }
+
+    _getSignalSessionPrefixesForTargetInfo(targetInfo) {
+        const jids = new Set();
+        if (targetInfo?.resolvedJid) jids.add(targetInfo.resolvedJid);
+        if (targetInfo?.originalTarget && String(targetInfo.originalTarget).includes('@')) {
+            jids.add(targetInfo.originalTarget);
+        }
+        if (targetInfo?.resolvedPhone) {
+            jids.add(WhatsAppManager.buildJid(targetInfo.resolvedPhone));
+            const lidJid = this._lidByPhone.get(targetInfo.resolvedPhone);
+            if (lidJid) jids.add(lidJid);
+        }
+
+        return [...new Set([...jids].flatMap(jid => this._getSignalSessionPrefixesForJid(jid)))];
+    }
+
+    _isOwnSignalSessionPrefix(prefix) {
+        const ownJids = [
+            this.sock?.user?.id,
+            this.sock?.user?.lid,
+        ].filter(Boolean);
+
+        return ownJids.some(jid => this._getSignalSessionPrefixesForJid(jid).includes(prefix));
+    }
+
+    async _hydrateOutboundTarget(targetInfo) {
+        if (!this.sock || typeof this.sock.onWhatsApp !== 'function' || !targetInfo?.resolvedPhone) {
+            return null;
+        }
+
+        const phoneJid = WhatsAppManager.buildJid(targetInfo.resolvedPhone);
+        try {
+            const [result] = await this.sock.onWhatsApp(phoneJid);
+            if (!result?.exists || !result?.jid) return null;
+            this._registerPreferredJidForPhone(targetInfo.resolvedPhone, result.jid, 'onWhatsApp');
+            console.log(`[WA] onWhatsApp target=${targetInfo.originalTarget} exists=${result.exists} jid=${result.jid}`);
+            return result.jid;
+        } catch (error) {
+            console.warn(`[WA] onWhatsApp failed target=${targetInfo.originalTarget}: ${error.message}`);
+            return null;
+        }
+    }
+
+    async resetSignalSessionsForTarget(target, options = {}) {
+        if (!this._authKeys) return { purged: 0, hydratedJid: null, reason: 'auth_unavailable' };
+
+        const targetInfo = this.resolveOutboundTarget(target, options);
+        const hydratedJid = await this._hydrateOutboundTarget(targetInfo);
+        const hydratedInfo = hydratedJid
+            ? this.resolveOutboundTarget(target, options)
+            : targetInfo;
+        const prefixes = this._getSignalSessionPrefixesForTargetInfo(hydratedInfo);
+        if (hydratedInfo?.resolvedPhone) {
+            try {
+                const stored = await this._authKeys.get('lid-mapping', [hydratedInfo.resolvedPhone]);
+                const lidUser = stored?.[hydratedInfo.resolvedPhone];
+                if (lidUser) {
+                    prefixes.push(`${lidUser}_1.`);
+                    prefixes.push(`${lidUser}_129.`);
+                }
+            } catch {
+                // Best effort only: normal device refresh still runs after this cleanup.
+            }
+        }
+
+        const safePrefixes = [...new Set(prefixes)]
+            .filter(prefix => !this._isOwnSignalSessionPrefix(prefix));
+
+        if (safePrefixes.length === 0) return { purged: 0, hydratedJid };
+
+        let files = [];
+        try {
+            files = fs.readdirSync(this.authPath);
+        } catch {
+            return { purged: 0, hydratedJid, reason: 'auth_dir_unavailable' };
+        }
+
+        const sessionIds = [];
+        for (const file of files) {
+            if (!file.startsWith('session-') || !file.endsWith('.json')) continue;
+            const sessionId = file.slice('session-'.length, -'.json'.length);
+            if (safePrefixes.some(prefix => sessionId.startsWith(prefix))) {
+                sessionIds.push(sessionId);
+            }
+        }
+
+        if (sessionIds.length === 0) return { purged: 0, hydratedJid };
+
+        const payload = {};
+        for (const id of sessionIds) payload[id] = null;
+        await this._authKeys.set({ session: payload });
+        console.warn(`[WA] purged ${sessionIds.length} stale signal session(s) for ${targetInfo.originalTarget}`);
+        return { purged: sessionIds.length, hydratedJid };
+    }
+
+    async refreshDevicesForTarget(target, options = {}) {
+        if (!this.sock || typeof this.sock.getUSyncDevices !== 'function') {
+            return { deviceCount: 0, deviceJids: [], hydratedJid: null, reason: 'devices_unavailable' };
+        }
+
+        const targetInfo = this.resolveOutboundTarget(target, options);
+        const hydratedJid = await this._hydrateOutboundTarget(targetInfo);
+        const refreshedInfo = hydratedJid ? this.resolveOutboundTarget(target, options) : targetInfo;
+        const lookupJids = new Set();
+        if (refreshedInfo.resolvedPhone) lookupJids.add(WhatsAppManager.buildJid(refreshedInfo.resolvedPhone));
+        if (refreshedInfo.resolvedJid) lookupJids.add(refreshedInfo.resolvedJid);
+
+        const devices = await this.sock.getUSyncDevices([...lookupJids], false, false);
+        const deviceJids = [...new Set(devices.map(device => device.jid).filter(Boolean))];
+        if (deviceJids.length && typeof this.sock.assertSessions === 'function') {
+            await this.sock.assertSessions(deviceJids, true);
+        }
+
+        if (refreshedInfo.resolvedPhone) {
+            for (const jid of deviceJids) {
+                if (jid.includes('@lid') || jid.includes('@hosted.lid')) {
+                    const server = jid.includes('@hosted.lid') ? 'hosted.lid' : 'lid';
+                    this._registerPreferredJidForPhone(refreshedInfo.resolvedPhone, `${toBaseId(jid)}@${server}`, 'refreshDevicesForTarget');
+                    break;
+                }
+            }
+        }
+
+        console.log(`[WA] refreshed devices target=${targetInfo.originalTarget} count=${deviceJids.length}${hydratedJid ? ` hydrated=${hydratedJid}` : ''}`);
+        return { deviceCount: deviceJids.length, deviceJids, hydratedJid };
     }
 
     _extractPhoneCandidates(msg) {
@@ -484,6 +622,7 @@ class WhatsAppManager extends EventEmitter {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, this.logger),
             };
+            this._authKeys = authState.keys;
             const selectedVersion = this._getCurrentConnectVersion();
             const usingEnvOverride = !!this._envVersionOverride && sameVersion(selectedVersion, this._envVersionOverride);
             const versionLabel = this._getVersionLabel(selectedVersion);
@@ -875,6 +1014,7 @@ class WhatsAppManager extends EventEmitter {
         this.status = 'disconnected';
         this.qrCode = null;
         this.reconnecting = false;
+        this._authKeys = null;
         this._clearLastDisconnect();
         if (fs.existsSync(this.authPath)) {
             fs.rmSync(this.authPath, { recursive: true, force: true });
