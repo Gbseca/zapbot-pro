@@ -222,7 +222,7 @@ class WhatsAppManager extends EventEmitter {
         return [...new Set(rawCandidates.map(normalizePhoneCandidate).filter(Boolean))];
     }
 
-    resolveOutboundTarget(target) {
+    resolveOutboundTarget(target, options = {}) {
         const originalTarget = String(target || '').trim();
         if (!originalTarget) {
             const err = new Error('Destino de WhatsApp invalido');
@@ -236,6 +236,16 @@ class WhatsAppManager extends EventEmitter {
                 const err = new Error(`Numero invalido para envio: ${originalTarget}`);
                 err.code = 'INVALID_PHONE_TARGET';
                 throw err;
+            }
+            if (options?.forcePhoneJid) {
+                return {
+                    originalTarget,
+                    baseId: normalizedPhone,
+                    resolvedJid: WhatsAppManager.buildJid(normalizedPhone),
+                    resolvedPhone: normalizedPhone,
+                    targetKind: 'phone_forced',
+                    resolutionSource: 'forced_phone_input',
+                };
             }
             const preferredJid = this._preferredJidByPhone.get(normalizedPhone) || this._lidByPhone.get(normalizedPhone);
             return {
@@ -653,12 +663,12 @@ class WhatsAppManager extends EventEmitter {
         }
     }
 
-    async _sendTrackedPayload(kind, target, builder) {
+    async _sendTrackedPayload(kind, target, builder, options = {}) {
         if (!this.sock || this.status !== 'connected') {
             throw new Error('WhatsApp nao esta conectado');
         }
 
-        const targetInfo = this.resolveOutboundTarget(target);
+        const targetInfo = this.resolveOutboundTarget(target, options);
         console.log(`[WA] ${kind} targetOriginal=${targetInfo.originalTarget} targetResolved=${targetInfo.resolvedJid} targetKind=${targetInfo.targetKind}`);
 
         for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -744,7 +754,7 @@ class WhatsAppManager extends EventEmitter {
                 });
             }
             return this.sock.sendMessage(jid, { text });
-        });
+        }, options);
     }
 
     async sendPoll(number, question, options, sendOptions = {}) {
@@ -769,15 +779,15 @@ class WhatsAppManager extends EventEmitter {
                     selectableCount: 1,
                 },
             });
-        });
+        }, sendOptions);
     }
 
-    async sendTyping(number, duration = 2500) {
+    async sendTyping(number, duration = 2500, options = {}) {
         if (!this.sock || this.status !== 'connected') return null;
 
         let targetInfo;
         try {
-            targetInfo = this.resolveOutboundTarget(number);
+            targetInfo = this.resolveOutboundTarget(number, options);
         } catch (error) {
             if (error?.code === 'UNRESOLVED_LID_TARGET') {
                 console.warn(`[WA] typing skipped targetOriginal=${number} reason=${error.code}`);
