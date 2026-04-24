@@ -211,8 +211,8 @@ class WhatsAppManager extends EventEmitter {
         const baseId = toBaseId(target);
         if (!baseId) return [];
 
-        if (target.includes('@lid')) return [`${baseId}_1.`];
         if (target.includes('@hosted.lid')) return [`${baseId}_129.`];
+        if (target.includes('@lid')) return [`${baseId}_1.`];
         if (target.includes('@hosted')) return [`${baseId}_128.`];
         return [`${baseId}.`];
     }
@@ -250,7 +250,15 @@ class WhatsAppManager extends EventEmitter {
         try {
             const [result] = await this.sock.onWhatsApp(phoneJid);
             if (!result?.exists || !result?.jid) return null;
-            this._registerPreferredJidForPhone(targetInfo.resolvedPhone, result.jid, 'onWhatsApp');
+            const existingLid = this._lidByPhone.get(targetInfo.resolvedPhone)
+                || (this._preferredJidByPhone.get(targetInfo.resolvedPhone)?.includes('@lid')
+                    ? this._preferredJidByPhone.get(targetInfo.resolvedPhone)
+                    : null);
+            if (result.jid.includes('@lid') || result.jid.includes('@hosted.lid')) {
+                this._registerPreferredJidForPhone(targetInfo.resolvedPhone, result.jid, 'onWhatsApp');
+            } else if (!existingLid) {
+                this._registerPhoneAlias(result.jid, targetInfo.resolvedPhone, 'onWhatsApp:phone');
+            }
             console.log(`[WA] onWhatsApp target=${targetInfo.originalTarget} exists=${result.exists} jid=${result.jid}`);
             return result.jid;
         } catch (error) {
@@ -273,6 +281,7 @@ class WhatsAppManager extends EventEmitter {
                 const stored = await this._authKeys.get('lid-mapping', [hydratedInfo.resolvedPhone]);
                 const lidUser = stored?.[hydratedInfo.resolvedPhone];
                 if (lidUser) {
+                    this._registerPreferredJidForPhone(hydratedInfo.resolvedPhone, `${lidUser}@lid`, 'lid-mapping:stored');
                     prefixes.push(`${lidUser}_1.`);
                     prefixes.push(`${lidUser}_129.`);
                 }
