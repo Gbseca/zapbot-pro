@@ -742,8 +742,34 @@ class WhatsAppManager extends EventEmitter {
         return fullMsg;
     }
 
+    async _sendPeerPrimaryRelay(jid, content) {
+        if (!this.sock || !this.sock.user?.id || typeof this.sock.relayMessage !== 'function') {
+            throw new Error('Sock do WhatsApp nao suporta relayMessage direto neste momento');
+        }
+
+        const fullMsg = await generateWAMessage(jid, content, {
+            logger: this.logger,
+            userJid: this.sock.user.id,
+            getProfilePicUrl: this.sock.profilePictureUrl?.bind(this.sock),
+            getCallLink: this.sock.createCallLink?.bind(this.sock),
+        });
+
+        await this.sock.relayMessage(jid, fullMsg.message, {
+            messageId: fullMsg.key.id,
+            additionalAttributes: {
+                category: 'peer',
+                push_priority: 'high_force',
+            },
+        });
+
+        return fullMsg;
+    }
+
     async sendMessage(number, text, imageBuffer = null, options = {}) {
         return this._sendTrackedPayload('message', number, async (jid) => {
+            if (options?.peerPrimary && !imageBuffer) {
+                return this._sendPeerPrimaryRelay(jid, { text });
+            }
             if (options?.freshDevices && !imageBuffer) {
                 return this._sendFreshRelay(jid, { text }, { useUserDevicesCache: false });
             }
@@ -762,6 +788,16 @@ class WhatsAppManager extends EventEmitter {
         if (cleanOptions.length < 2) throw new Error('Enquete precisa de pelo menos 2 opcoes');
 
         return this._sendTrackedPayload('poll', number, async (jid) => {
+            if (sendOptions?.peerPrimary) {
+                return this._sendPeerPrimaryRelay(jid, {
+                    poll: {
+                        name: question.substring(0, 255),
+                        values: cleanOptions,
+                        selectableCount: 1,
+                    },
+                });
+            }
+
             if (sendOptions?.freshDevices) {
                 return this._sendFreshRelay(jid, {
                     poll: {

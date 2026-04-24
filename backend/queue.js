@@ -263,14 +263,15 @@ class MessageQueue {
         return Math.max(0, this.flowState.nextWindowAt - now);
     }
 
-    recordAcceptedOutboundAttempt() {
-        this.dailyOutboundAttempts += 1;
+    recordAcceptedOutboundAttempt(count = 1) {
+        const safeCount = Math.max(1, parseInt(count, 10) || 1);
+        this.dailyOutboundAttempts += safeCount;
         this.dailySent = this.dailyOutboundAttempts;
         this.stats.dailyOutboundAttempts = this.dailyOutboundAttempts;
 
         const flow = this.refreshFlowWindow(Date.now(), true);
         if (flow.enabled) {
-            this.flowState.sentInWindow += 1;
+            this.flowState.sentInWindow += safeCount;
             this.flowState.nextWindowAt = this.flowState.windowStartedAt + flow.windowMs;
         }
     }
@@ -454,6 +455,7 @@ class MessageQueue {
                 targetJid: firstProblem.targetResolved || lastAccepted?.resolvedJid || null,
                 resolvedTarget: firstProblem.targetResolved || lastAccepted?.resolvedJid || null,
                 targetKind: firstProblem.targetKind || lastAccepted?.targetKind || null,
+                acceptedAttempts: acceptedRecords.length,
             };
         }
 
@@ -464,36 +466,31 @@ class MessageQueue {
             targetJid: lastAccepted?.resolvedJid || null,
             resolvedTarget: lastAccepted?.resolvedJid || null,
             targetKind: lastAccepted?.targetKind || null,
+            acceptedAttempts: acceptedRecords.length,
         };
     }
 
-    async _sendCampaignItem(item, text) {
+    async _sendCampaignItemOnce(item, text, routeOptions = {}) {
         const acceptedRecords = [];
-
-        if (this.config?.antiRestriction?.typing) {
-            this.log('info', `Simulando digitacao para ${item.number}...`);
-            await this.wa.sendTyping(item.number, 2500, { forcePhoneJid: true });
-        }
-
         const hasPoll = item.pollEnabled && item.pollOptions && item.pollOptions.length >= 2;
 
         if (hasPoll) {
             if (item.imageBuffer) {
-                acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer, { forcePhoneJid: true }));
+                acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer, routeOptions));
             } else if (text && text.trim()) {
-                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null, { forcePhoneJid: true }));
+                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null, routeOptions));
             }
 
             const pollQ = (item.pollQuestion && item.pollQuestion.trim())
                 ? item.pollQuestion.trim()
                 : (text.substring(0, 100) || 'Selecione uma opcao:');
-            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions, { forcePhoneJid: true }));
+            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions, routeOptions));
         } else {
             acceptedRecords.push(await this.wa.sendMessage(
                 item.number,
                 text,
                 item.imageBuffer,
-                { forcePhoneJid: true }
+                routeOptions
             ));
         }
 
@@ -504,6 +501,75 @@ class MessageQueue {
         return this._normalizeDeliveryResult(acceptedRecords, finalRecords);
     }
 
+    async _sendCampaignItem(item, text) {
+        if (this.config?.antiRestriction?.typing) {
+            this.log('info', `Simulando digitacao para ${item.number}...`);
+            await this.wa.sendTyping(item.number, 2500);
+        }
+
+        const routeAttempts = [
+            { label: 'rota preferida do WhatsApp', options: {} },
+            { label: 'numero real', options: { forcePhoneJid: true } },
+            { label: 'dispositivo principal pela rota preferida', options: { peerPrimary: true } },
+            { label: 'dispositivo principal pelo numero real', options: { peerPrimary: true, forcePhoneJid: true } },
+        ];
+
+        let acceptedAttempts = 0;
+        let lastDelivery = null;
+
+        for (let attemptIndex = 0; attemptIndex < routeAttempts.length; attemptIndex += 1) {
+            const attempt = routeAttempts[attemptIndex];
+            const isLastAttempt = attemptIndex === routeAttempts.length - 1;
+            if (attemptIndex > 0) {
+                this.log('warning', `Tentando rota alternativa (${attempt.label}) para ${item.number}...`);
+            }
+
+            let delivery;
+            try {
+                delivery = await this._sendCampaignItemOnce(item, text, attempt.options);
+            } catch (err) {
+                lastDelivery = {
+                    status: 'failed',
+                    error: err.message || 'Falha ao enviar pela rota atual',
+                    messageId: err.messageId || null,
+                    targetJid: err.targetResolved || null,
+                    resolvedTarget: err.targetResolved || null,
+                    targetKind: err.targetKind || null,
+                    acceptedAttempts: 0,
+                };
+
+                if (!isLastAttempt) {
+                    this.log('warning', `Tentativa "${attempt.label}" falhou para ${item.number}: ${lastDelivery.error}`);
+                    continue;
+                }
+
+                return { ...lastDelivery, acceptedAttempts };
+            }
+
+            acceptedAttempts += delivery.acceptedAttempts || 0;
+            lastDelivery = delivery;
+
+            if (delivery.status === 'confirmed') {
+                return { ...delivery, acceptedAttempts };
+            }
+
+            if (delivery.status !== 'accepted_unconfirmed' && !isLastAttempt) {
+                this.log('warning', `Tentativa "${attempt.label}" nao concluiu para ${item.number}: ${delivery.error || delivery.status}`);
+                continue;
+            }
+
+            if (delivery.status !== 'accepted_unconfirmed') {
+                return { ...delivery, acceptedAttempts };
+            }
+        }
+
+        return {
+            ...lastDelivery,
+            acceptedAttempts,
+            error: lastDelivery?.error || 'WhatsApp aceitou, mas nenhuma rota confirmou entrega.',
+        };
+    }
+
     async processNext() {
         if (this.status !== 'running') return;
 
@@ -512,7 +578,7 @@ class MessageQueue {
             this.waitReason = null;
             updateActiveCampaignStatus('completed');
             this.broadcast({ type: 'campaign_status', status: 'completed' });
-            this.log('success', `Concluida! Confirmadas: ${this.stats.confirmed} | Falhas: ${this.stats.failed}`);
+            this.log('success', `Concluida! Confirmadas: ${this.stats.confirmed} | Sem confirmacao: ${this.stats.acceptedUnconfirmed} | Falhas: ${this.stats.failed}`);
             return;
         }
 
@@ -565,8 +631,9 @@ class MessageQueue {
             item.resolvedTarget = delivery.resolvedTarget;
             item.targetKind = delivery.targetKind;
 
-            this.stats.accepted += 1;
-            this.recordAcceptedOutboundAttempt();
+            const acceptedAttempts = Math.max(1, delivery.acceptedAttempts || 1);
+            this.stats.accepted += acceptedAttempts;
+            this.recordAcceptedOutboundAttempt(acceptedAttempts);
             this.stats.pending = Math.max(0, this.stats.pending - 1);
             item.status = 'accepted';
             this.broadcast({
