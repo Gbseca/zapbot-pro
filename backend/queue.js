@@ -481,19 +481,18 @@ class MessageQueue {
             if (item.imageBuffer) {
                 acceptedRecords.push(await this.wa.sendMessage(item.number, text, item.imageBuffer));
             } else if (text && text.trim()) {
-                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null, { freshDevices: true }));
+                acceptedRecords.push(await this.wa.sendMessage(item.number, text, null));
             }
 
             const pollQ = (item.pollQuestion && item.pollQuestion.trim())
                 ? item.pollQuestion.trim()
                 : (text.substring(0, 100) || 'Selecione uma opcao:');
-            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions, { freshDevices: true }));
+            acceptedRecords.push(await this.wa.sendPoll(item.number, pollQ, item.pollOptions));
         } else {
             acceptedRecords.push(await this.wa.sendMessage(
                 item.number,
                 text,
-                item.imageBuffer,
-                item.imageBuffer ? {} : { freshDevices: true }
+                item.imageBuffer
             ));
         }
 
