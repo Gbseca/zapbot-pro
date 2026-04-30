@@ -13,7 +13,23 @@ async function runFollowUp(wa) {
 
   // FIX [7]: Only follow up with genuinely engaged leads.
   // no_interest, blocked, transferred, cold → never re-engage automatically.
-  const SKIP_STATUSES = new Set(['no_interest', 'blocked', 'transferred', 'cold']);
+  const SKIP_STATUSES = new Set([
+    'no_interest',
+    'blocked',
+    'transferred',
+    'cold',
+    'human_requested',
+    'awaiting_financial_review',
+    'payment_claimed',
+    'receipt_received',
+    'inspection_pending',
+    'inspection_disputed',
+    'app_blocked',
+    'billing_disputed',
+    'transferred_to_financial',
+    'transferred_to_support',
+    'human_taken_over',
+  ]);
 
   for (const lead of leads) {
     if (SKIP_STATUSES.has(lead.status)) continue;

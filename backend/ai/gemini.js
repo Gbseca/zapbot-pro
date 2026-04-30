@@ -8,8 +8,11 @@ import { getDefaultModel, resolveEffectiveAIConfig } from '../data/config-manage
 function resolveModel(config, purpose = 'reply') {
   const effective = resolveEffectiveAIConfig(config);
   const provider = effective.effectiveProvider || 'groq';
-  if (purpose === 'qualification' && effective.qualificationModel) {
-    return effective.qualificationModel;
+  if (purpose === 'decision' && effective.effectiveClassificationModel) {
+    return effective.effectiveClassificationModel;
+  }
+  if (purpose === 'qualification' && effective.effectiveQualificationModel) {
+    return effective.effectiveQualificationModel;
   }
   return effective.effectiveAiModel || getDefaultModel(provider);
 }
@@ -18,8 +21,48 @@ function buildHistory(history = []) {
   return history.slice(-18);
 }
 
+function resolveGenerationSettings(options = {}) {
+  const purpose = options.purpose || 'reply';
+  const mode = options.mode || 'sales';
+  const jsonMode = purpose === 'qualification' || purpose === 'decision';
+
+  if (jsonMode) {
+    return {
+      jsonMode: true,
+      temperature: 0.15,
+      topP: 0.4,
+      maxTokens: purpose === 'decision' ? 512 : 300,
+    };
+  }
+
+  if (purpose === 'case_summary') {
+    return {
+      jsonMode: false,
+      temperature: 0.25,
+      topP: 0.55,
+      maxTokens: 500,
+    };
+  }
+
+  if (mode === 'collections') {
+    return {
+      jsonMode: false,
+      temperature: 0.32,
+      topP: 0.65,
+      maxTokens: 300,
+    };
+  }
+
+  return {
+    jsonMode: false,
+    temperature: 0.55,
+    topP: 0.8,
+    maxTokens: 512,
+  };
+}
+
 async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, options = {}) {
-  const jsonMode = options.purpose === 'qualification';
+  const settings = resolveGenerationSettings(options);
   const messages = [
     { role: 'system', content: systemPrompt },
     ...buildHistory(history).map((item) => ({
@@ -32,12 +75,12 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, opt
   const body = {
     model: options.model,
     messages,
-    temperature: jsonMode ? 0.15 : 0.55,
-    max_tokens: jsonMode ? 256 : 512,
-    top_p: jsonMode ? 0.4 : 0.8,
+    temperature: settings.temperature,
+    max_tokens: settings.maxTokens,
+    top_p: settings.topP,
   };
 
-  if (jsonMode) {
+  if (settings.jsonMode) {
     body.response_format = { type: 'json_object' };
   }
 
@@ -88,14 +131,14 @@ async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
 
 async function callGemini(apiKey, { systemPrompt, history = [], userMessage }, options = {}) {
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
-  const jsonMode = options.purpose === 'qualification';
+  const settings = resolveGenerationSettings(options);
   const generationConfig = {
-    temperature: jsonMode ? 0.15 : 0.55,
-    topP: jsonMode ? 0.4 : 0.8,
-    maxOutputTokens: jsonMode ? 256 : 512,
+    temperature: settings.temperature,
+    topP: settings.topP,
+    maxOutputTokens: settings.maxTokens,
   };
 
-  if (jsonMode) {
+  if (settings.jsonMode) {
     generationConfig.responseMimeType = 'application/json';
   }
 
@@ -138,7 +181,19 @@ export async function callAI(config, context, options = {}) {
     return callGemini(effective.effectiveGeminiKey, context, { ...options, model, purpose });
   }
 
-  return callGroq(effective.effectiveGroqKey, context, { ...options, model, purpose });
+  try {
+    return await callGroq(effective.effectiveGroqKey, context, { ...options, model, purpose });
+  } catch (error) {
+    if (effective.geminiFallbackEnabled && effective.effectiveGeminiKey) {
+      console.warn(`[AI] Groq failed for ${purpose}; using Gemini fallback: ${error.message}`);
+      return callGemini(effective.effectiveGeminiKey, context, {
+        ...options,
+        model: getDefaultModel('gemini'),
+        purpose,
+      });
+    }
+    throw error;
+  }
 }
 
 export async function testAPIKey(provider, apiKey, model) {

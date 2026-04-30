@@ -1025,6 +1025,17 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .status-dot-transferred { background: #10b981; }
 .status-dot-cold { background: #374151; }
 .status-dot-blocked { background: #ef4444; }
+.status-dot-human_requested,
+.status-dot-awaiting_financial_review,
+.status-dot-payment_claimed,
+.status-dot-receipt_received,
+.status-dot-inspection_pending,
+.status-dot-inspection_disputed,
+.status-dot-app_blocked,
+.status-dot-billing_disputed,
+.status-dot-transferred_to_financial,
+.status-dot-transferred_to_support,
+.status-dot-human_taken_over { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,.45); }
 .lead-info { flex: 1; min-width: 0; }
 .lead-name { font-size: 13.5px; font-weight: 600; color: var(--text-1); }
 .lead-number { font-size: 11px; color: var(--text-3); font-family: var(--mono); margin-top: 2px; }
@@ -1092,9 +1103,28 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   display: flex; gap: 12px; padding: 12px 20px;
   background: var(--surface-2); border-bottom: 1px solid var(--border);
   font-size: 13px;
+  flex-wrap: wrap;
 }
 .modal-vehicle-item { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
 .modal-vehicle-item strong { color: var(--text-1); font-weight: 600; }
+.modal-case-summary {
+  flex-basis: 100%;
+  align-items: flex-start;
+  line-height: 1.45;
+}
+.lead-risk-badge {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.lead-risk-badge.risk-baixo { color: #22c55e; background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.3); }
+.lead-risk-badge.risk-medio { color: #f59e0b; background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.3); }
+.lead-risk-badge.risk-alto { color: #ef4444; background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.3); }
 .modal-actions {
   display: flex; gap: 8px; padding: 12px 16px;
   border-bottom: 1px solid var(--border); flex-wrap: wrap;

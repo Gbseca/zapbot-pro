@@ -24,6 +24,8 @@ const defaultConfig = {
   aiProvider: 'groq',           // 'groq' (recommended) | 'gemini'
   aiModel: DEFAULT_AI_MODELS.groq,
   qualificationModel: '',
+  classificationModel: '',
+  geminiFallbackEnabled: false,
   groqKey: '',
   geminiKey: '',
   agentName: 'Júlia',
@@ -52,11 +54,14 @@ function normalizeConfig(rawConfig = {}) {
   const provider = merged.aiProvider || defaultConfig.aiProvider;
   const customAiModel = normalizeSecret(rawConfig.aiModel);
   const customQualificationModel = normalizeSecret(rawConfig.qualificationModel);
+  const customClassificationModel = normalizeSecret(rawConfig.classificationModel);
   return {
     ...merged,
     aiProvider: provider,
     aiModel: customAiModel || getDefaultModel(provider),
     qualificationModel: customQualificationModel || '',
+    classificationModel: customClassificationModel || '',
+    geminiFallbackEnabled: !!merged.geminiFallbackEnabled,
   };
 }
 
@@ -99,6 +104,7 @@ export function resolveEffectiveAIConfig(rawConfig = {}, env = process.env) {
   const effectiveGeminiKey = resolveValueByPriority(config.geminiKey, envGeminiKey);
   const effectiveAiModel = config.aiModel || getDefaultModel(effectiveProvider);
   const effectiveQualificationModel = config.qualificationModel || effectiveAiModel;
+  const effectiveClassificationModel = config.classificationModel || effectiveQualificationModel;
   const groqKeySource = getSource(config.groqKey, envGroqKey, DEFAULT_GROQ_API_KEY);
   const geminiKeySource = getSource(config.geminiKey, envGeminiKey);
   const hasEffectiveGroqKey = !!effectiveGroqKey;
@@ -111,6 +117,7 @@ export function resolveEffectiveAIConfig(rawConfig = {}, env = process.env) {
     effectiveProvider,
     effectiveAiModel,
     effectiveQualificationModel,
+    effectiveClassificationModel,
     effectiveGroqKey,
     effectiveGeminiKey,
     groqKeySource,

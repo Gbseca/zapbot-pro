@@ -46,6 +46,104 @@ function buildSummary(lead) {
     .substring(0, 350);
 }
 
+function yesNo(value) {
+  return value ? 'Sim' : 'Nao';
+}
+
+function buildFinancialSummary(lead) {
+  const structured = typeof lead.leadSummary === 'object' && lead.leadSummary ? lead.leadSummary : {};
+  return lead.caseSummary
+    || structured.caseSummary
+    || structured.lastUserMessage
+    || buildSummary(lead)
+    || 'Sem resumo disponivel.';
+}
+
+function resolveOperationalHandoff(event = {}, lead = {}) {
+  const eventType = event.type || lead.lastDetectedIntent || lead.lastIntent || '';
+  if (eventType === 'inspection_disputed' || eventType === 'inspection_pending') {
+    return {
+      title: 'ATENDIMENTO SUPORTE / REVISTORIA',
+      status: 'transferred_to_support',
+      action: 'Validar necessidade real de revistoria antes de responder o cliente.',
+    };
+  }
+
+  if (eventType === 'human_requested' || lead.status === 'human_requested') {
+    return {
+      title: 'ATENDIMENTO HUMANO SOLICITADO',
+      status: 'human_requested',
+      action: 'Assumir a conversa e pausar o atendimento automatico.',
+    };
+  }
+
+  return {
+    title: 'ATENDIMENTO FINANCEIRO / REGULARIZACAO',
+    status: 'transferred_to_financial',
+    action: 'Conferir baixa do pagamento e pendencias antes de orientar o cliente.',
+  };
+}
+
+export async function executeFinancialHandoff(wa, lead, config, event = {}) {
+  const consultor = selectConsultor(config);
+  if (!consultor) {
+    console.warn('[Handoff] No consultor configured - skipping financial notification');
+    return;
+  }
+
+  const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const contactPhone = lead.phone || lead.displayNumber || lead.number;
+  const waLinkNumber = buildWaLinkNumber(contactPhone);
+  const status = lead.status || event.status || 'awaiting_financial_review';
+  const reason = event.reason || lead.operationalReason || 'Atendimento operacional de cobranca.';
+  const handoff = resolveOperationalHandoff(event, lead);
+
+  const consultorMsg =
+    `*${handoff.title} - ZapBot Pro*\n` +
+    `------------------------------\n` +
+    `*Cliente:* ${lead.name || 'Nao informado'}\n` +
+    `*WhatsApp:* ${formatNumber(contactPhone)}\n` +
+    `*Placa:* ${lead.plate || 'Nao informada'}\n` +
+    `*Status:* ${status}\n` +
+    `*Motivo:* ${reason}\n` +
+    `*Pagamento informado:* ${yesNo(lead.paymentClaimed)}\n` +
+    `*Data do pagamento:* ${lead.paymentDate || 'Nao informada'}\n` +
+    `*Valor informado:* ${lead.paymentAmount || 'Nao informado'}\n` +
+    `*Comprovante enviado:* ${yesNo(lead.receiptReceived)}\n` +
+    `*App bloqueado:* ${yesNo(lead.appBlocked)}\n` +
+    `*Revistoria questionada:* ${yesNo(lead.inspectionDisputed)}\n` +
+    `\n*Resumo da conversa:*\n${buildFinancialSummary(lead)}\n` +
+    `\n*Acao sugerida:* ${handoff.action}\n` +
+    `\nEncaminhado em: ${now}\n` +
+    `------------------------------\n` +
+    `Abrir conversa:\nhttps://wa.me/${waLinkNumber}`;
+
+  let cNum = String(consultor.number).replace(/\D/g, '');
+  if (cNum.startsWith('0')) cNum = cNum.substring(1);
+
+  console.log(`[Handoff] Notifying financial/consultor: ${consultor.name} -> raw="${consultor.number}" clean="${cNum}"`);
+
+  try {
+    await wa.sendMessage(cNum, consultorMsg, null, {
+      forcePhoneJid: true,
+      routeLabel: 'agent_financial_handoff',
+      context: 'ai',
+      noInternalRetry: true,
+    });
+    updateLead(lead.number, {
+      status: handoff.status,
+      operationalStatus: status,
+      financialTransferredAt: new Date().toISOString(),
+      financialTransferredTo: consultor.number || null,
+      financialTransferredToName: consultor.name || null,
+      stage: handoff.status,
+    });
+    console.log(`[Handoff] Financial notification sent: ${consultor.name} (${cNum})`);
+  } catch (err) {
+    console.error(`[Handoff] FAILED financial notification ${consultor.name} (${cNum}): ${err.message}`);
+  }
+}
+
 /**
  * Executes the handoff:
  * 1. Sends farewell to client
@@ -67,7 +165,7 @@ export async function executeHandoff(wa, lead, config) {
     const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     const contactPhone = lead.phone || lead.displayNumber || lead.number;
     const waLinkNumber = buildWaLinkNumber(contactPhone);
-    const consultorMsg =
+    let consultorMsg =
       `🔔 *NOVO LEAD QUALIFICADO — ZapBot Pro*\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `👤 *Nome:* ${lead.name || 'Não informado'}\n` +
@@ -78,6 +176,8 @@ export async function executeHandoff(wa, lead, config) {
       `\n⏰ Qualificado em: ${now}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `👆 Abrir conversa:\nhttps://wa.me/${waLinkNumber}`;
+
+    consultorMsg = consultorMsg.replace('*Placa:*', `*Ano:* ${lead.year || 'Nao informado'}\n*Placa:*`);
 
     // Normalize consultor number: strip non-digits + remove leading zero if present
     let cNum = String(consultor.number).replace(/\D/g, '');

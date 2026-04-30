@@ -2660,6 +2660,33 @@ async function blockLead(number) {
   showToast('Bot pausado para esse nÃºmero.', 'info');
 }
 
+async function updateLeadStatus(number, updates, toastMessage) {
+  await fetch(`/api/leads/${number}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  await loadLeads();
+  if (toastMessage) showToast(toastMessage, 'info');
+  openLeadModal(number);
+}
+
+async function takeOverLead(number) {
+  await updateLeadStatus(number, {
+    status: 'human_taken_over',
+    stage: 'human_taken_over',
+    operationalStatus: 'human_taken_over',
+  }, 'Atendimento assumido. A IA foi pausada.');
+}
+
+async function returnLeadToAI(number) {
+  await updateLeadStatus(number, {
+    status: 'talking',
+    stage: 'engaged',
+    operationalStatus: 'returned_to_ai',
+  }, 'Lead devolvido para a IA.');
+}
+
 function updateLeadBadge() {
   const talking = allLeads.filter(l => l.status === 'talking').length;
   updateBadge('leads', talking > 0 ? talking : null);
@@ -2680,9 +2707,18 @@ function openLeadModal(number) {
        <div class="modal-vehicle-item" style="margin-left:auto">ðŸ“… ${new Date(lead.createdAt).toLocaleDateString('pt-BR')}</div>`
     : `<div class="modal-vehicle-item" style="color:var(--text-3)">VeÃ­culo nÃ£o capturado ainda</div>`;
 
+  const risk = getLeadRisk(lead);
+  const caseSummary = getLeadCaseSummary(lead);
+  vehicle.innerHTML += `<div class="lead-risk-badge risk-${risk.level}">Risco ${risk.label}</div>`;
+  if (caseSummary) {
+    vehicle.innerHTML += `<div class="modal-vehicle-item modal-case-summary"><strong>Resumo:</strong> ${escapeHtml(caseSummary)}</div>`;
+  }
+
   const actions = document.getElementById('modal-actions');
   const waTarget = getLeadWhatsAppTarget(lead);
   actions.innerHTML = `
+    ${lead.status !== 'human_taken_over' ? `<button class="btn btn-outline btn-sm" onclick="takeOverLead('${number}')">Assumir atendimento</button>` : ''}
+    ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
     ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm">ðŸ’¬ Abrir no WhatsApp</a>` : ''}
     ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">â›” Pausar bot</button>` : ''}
     <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">ðŸ—‘ï¸ Excluir lead</button>
@@ -2795,6 +2831,37 @@ function getLeadWhatsAppTarget(lead) {
   return digits;
 }
 
+function getLeadCaseSummary(lead) {
+  if (!lead) return '';
+  if (lead.caseSummary) return lead.caseSummary;
+  if (typeof lead.leadSummary === 'object' && lead.leadSummary) {
+    return lead.leadSummary.caseSummary || lead.leadSummary.reason || lead.leadSummary.lastUserMessage || '';
+  }
+  return lead.operationalReason || '';
+}
+
+function getLeadRisk(lead) {
+  const explicit = String(lead?.riskLevel || '').toLowerCase();
+  if (['baixo', 'medio', 'alto'].includes(explicit)) {
+    return { level: explicit, label: explicit };
+  }
+
+  const highStatuses = new Set([
+    'human_requested',
+    'awaiting_financial_review',
+    'receipt_received',
+    'inspection_disputed',
+    'billing_disputed',
+    'transferred_to_financial',
+    'transferred_to_support',
+    'human_taken_over',
+  ]);
+  const mediumStatuses = new Set(['payment_claimed', 'inspection_pending', 'app_blocked']);
+  if (highStatuses.has(lead?.status)) return { level: 'alto', label: 'alto' };
+  if (mediumStatuses.has(lead?.status)) return { level: 'medio', label: 'medio' };
+  return { level: 'baixo', label: 'baixo' };
+}
+
 function statusLabel(status) {
   const m = {
     new: 'Novo',
@@ -2804,6 +2871,17 @@ function statusLabel(status) {
     cold: 'Frio',
     blocked: 'Bloqueado',
     no_interest: 'Sem interesse', // FIX [4b]
+    human_requested: 'Aguardando humano',
+    awaiting_financial_review: 'Conferencia financeira',
+    payment_claimed: 'Pagamento informado',
+    receipt_received: 'Comprovante recebido',
+    inspection_pending: 'Revistoria pendente',
+    inspection_disputed: 'Revistoria contestada',
+    app_blocked: 'App bloqueado',
+    billing_disputed: 'Cobranca contestada',
+    transferred_to_financial: 'Transferido financeiro',
+    transferred_to_support: 'Transferido suporte',
+    human_taken_over: 'Humano assumiu',
   };
   return m[status] || status;
 }

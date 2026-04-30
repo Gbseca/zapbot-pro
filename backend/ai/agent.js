@@ -4,8 +4,16 @@ import { buildContext, buildQualificationContext } from './context-builder.js';
 import { callAI } from './gemini.js';
 import { sendHumanized } from './humanizer.js';
 import { detectAndExtract, normalizePhone, tryExtractPhone } from './lead-detector.js';
-import { executeHandoff } from './handoff.js';
+import { executeFinancialHandoff, executeHandoff } from './handoff.js';
 import { getCollectionsContextForPhone } from '../campaign-state.js';
+import {
+  extractIncomingContent,
+  isOperationalStopStatus,
+} from './collections-guard.js';
+import {
+  applyConversationDecisionToLead,
+  makeConversationDecision,
+} from './conversation-decision.js';
 
 const messageBuffers = new Map();
 const sessionTimers = new Map();
@@ -240,6 +248,28 @@ function resolveConversationModeContext(config, lead, conversationPhone, jidId) 
     if (context) return context;
   }
 
+  const collectionsStatuses = new Set([
+    'payment_claimed',
+    'receipt_received',
+    'awaiting_financial_review',
+    'inspection_pending',
+    'inspection_disputed',
+    'app_blocked',
+    'billing_disputed',
+    'transferred_to_financial',
+    'transferred_to_support',
+  ]);
+  if (lead?.conversationMode === 'collections' || collectionsStatuses.has(lead?.status)) {
+    return {
+      conversationMode: 'collections',
+      campaignId: lead?.campaignId || 'lead_state',
+      campaignMessage: lead?.campaignMessage || '',
+      campaignIntent: 'collections',
+      campaignSubIntent: lead?.campaignSubIntent || lead?.lastIntent || 'collections_unknown',
+      campaignIntentReason: 'Lead ja estava marcado como atendimento operacional.',
+    };
+  }
+
   return null;
 }
 
@@ -312,6 +342,12 @@ function createNewLead(leadId, displayNum, pushName, fallbackPhone = null) {
     history: [],
     plate: null,
     model: null,
+    year: null,
+    stage: 'new',
+    lastIntent: null,
+    lastObjection: null,
+    leadSummary: null,
+    lastQualifiedSignalAt: null,
     profileCaptured: false,
     softRefusalSent: false,
     jid: null,
@@ -359,22 +395,57 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const conversationPhone = resolveConversationPhone(displayNum, jidId, inboundRoute);
   const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone, fullJid);
   const replyRoute = resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute, leadFromStore);
-  const text = extractText(rawMsg);
+  const incomingContent = extractIncomingContent(rawMsg);
+  const text = incomingContent.text;
   const pushName = rawMsg.pushName || null;
 
-  console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${text.slice(0, 60)}"`);
+  console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${incomingContent.historyText.slice(0, 60)}"`);
   console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source}) candidates=${inboundRoute?.phoneCandidates?.join(',') || '-'} mapped=${inboundRoute?.mappedPhone || '-'}`);
-  if (!text) return;
 
   const existingLead = leadFromStore;
   const collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
+  if (!incomingContent.historyText) return;
 
-  if (existingLead?.status === 'blocked') return;
+  if (existingLead?.status === 'blocked' || isOperationalStopStatus(existingLead?.status)) return;
 
   if (existingLead?.campaignSentAt && !existingLead?.campaignLoopHandled && config.campaignLoopEnabled === false) {
     console.log(`[Agent] Campaign loop disabled - ignoring reply from ${leadId}`);
     return;
   }
+
+  const decision = makeConversationDecision({
+    text,
+    lead: existingLead || {},
+    collectionsContext,
+    incomingContent,
+  });
+  const operationalEvent = decision.operationalEvent;
+
+  if (operationalEvent) {
+    console.log(`[Agent] Operational event ${operationalEvent.type} for ${leadId}: ${operationalEvent.reason}`);
+    const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
+    lead.number = leadId;
+    lead.jid = fullJid;
+    lead.replyTargetJid = replyRoute.target;
+    lead.replyTargetSource = replyRoute.source;
+    if (!lead.name && pushName) lead.name = pushName;
+    if (conversationPhone) {
+      lead.phone = lead.phone || conversationPhone;
+      lead.displayNumber = conversationPhone;
+    }
+    lead.history = lead.history || [];
+    lead.history.push({ role: 'user', content: incomingContent.historyText, ts: Date.now() });
+    lead.lastInteraction = new Date().toISOString();
+    applyConversationDecisionToLead(lead, decision, incomingContent);
+
+    await persistSimpleReply(wa, leadId, lead, replyRoute.target, operationalEvent.reply, () => ({}), replyRoute.options);
+    if (operationalEvent.shouldNotifyHuman) {
+      await executeFinancialHandoff(wa, lead, config, operationalEvent);
+    }
+    return;
+  }
+
+  if (!text) return;
 
   if (existingLead?.status === 'no_interest' && !collectionsContext) {
     const normForReeng = normalizeText(text);
@@ -521,12 +592,40 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     if (lead.status === 'new' || lead.status === 'cold' || lead.status === 'no_interest') {
       lead.status = 'talking';
     }
+    lead.stage = lead.stage || 'engaged';
+    lead.conversationMode = 'collections';
     console.log(`[Agent] Collections mode active for ${leadId} via campaign ${conversationModeContext.campaignId}`);
   } else if (lead.status === 'new' || lead.status === 'cold') {
     lead.status = 'talking';
+    lead.stage = lead.stage || 'engaged';
   }
 
-  const alreadyTransferred = lead.status === 'transferred';
+  const decision = makeConversationDecision({
+    text: combinedText,
+    lead,
+    collectionsContext: conversationModeContext,
+    incomingContent: { text: combinedText, historyText: combinedText },
+  });
+  applyConversationDecisionToLead(lead, decision, { text: combinedText, historyText: combinedText });
+
+  if (decision.operationalEvent) {
+    console.log(`[Agent] Buffered operational event ${decision.operationalEvent.type} for ${leadId}: ${decision.operationalEvent.reason}`);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      decision.operationalEvent.reply,
+      () => ({}),
+      route.options,
+    );
+    if (decision.operationalEvent.shouldNotifyHuman) {
+      await executeFinancialHandoff(wa, lead, config, decision.operationalEvent);
+    }
+    return;
+  }
+
+  const alreadyTransferred = ['transferred', 'transferred_to_financial', 'transferred_to_support'].includes(lead.status);
   saveLead(leadId, lead);
 
   const replyContext = await buildContext(
@@ -541,6 +640,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     qualified: false,
     plate: lead.plate || null,
     model: lead.model || null,
+    year: lead.year || null,
     name: lead.name || null,
     phone: lead.phone || null,
     profileCaptured: !!lead.profileCaptured,
@@ -548,7 +648,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
   if (conversationModeContext) {
     try {
-      cleanResponse = sanitizeReply(await callAI(config, replyContext, { purpose: 'reply' }));
+      cleanResponse = sanitizeReply(await callAI(config, replyContext, { purpose: 'reply', mode: 'collections' }));
     } catch (error) {
       console.error('[Agent] Collections reply error:', error.message || error);
       return;
@@ -557,8 +657,8 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     const qualificationContext = await buildQualificationContext(config, lead, combinedText);
 
     const [replyResult, qualificationResult] = await Promise.allSettled([
-      callAI(config, replyContext, { purpose: 'reply' }),
-      callAI(config, qualificationContext, { purpose: 'qualification' }),
+      callAI(config, replyContext, { purpose: 'reply', mode: 'sales' }),
+      callAI(config, qualificationContext, { purpose: 'qualification', mode: 'sales' }),
     ]);
 
     if (replyResult.status !== 'fulfilled') {
@@ -576,6 +676,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
     if (extraction.plate) lead.plate = extraction.plate;
     if (extraction.model) lead.model = extraction.model;
+    if (extraction.year) lead.year = extraction.year;
     if (extraction.name && extraction.name.length > 1) lead.name = extraction.name;
     if (extraction.profileCaptured) lead.profileCaptured = true;
     if (extraction.phone) {
@@ -613,7 +714,9 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
   if (extraction.qualified && !alreadyTransferred) {
     lead.status = 'qualified';
+    lead.stage = 'qualified';
     lead.qualifiedAt = new Date().toISOString();
+    lead.lastQualifiedSignalAt = lead.qualifiedAt;
     saveLead(leadId, lead);
     await executeHandoff(wa, lead, config);
     return;

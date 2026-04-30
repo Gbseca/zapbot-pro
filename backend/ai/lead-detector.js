@@ -27,6 +27,13 @@ function parseBoolean(value) {
   return false;
 }
 
+function sanitizeYear(value) {
+  const text = sanitizeString(value);
+  if (!text) return null;
+  const match = text.match(/\b(19[8-9]\d|20[0-3]\d)\b/);
+  return match ? match[1] : null;
+}
+
 function extractJsonPayload(rawText = '') {
   if (!rawText) return null;
   const cleaned = String(rawText)
@@ -92,26 +99,30 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
 
   const plate = sanitizeString(parsed.plate) || currentLead.plate || null;
   const model = sanitizeString(parsed.model) || currentLead.model || null;
+  const year = sanitizeYear(parsed.year) || sanitizeYear(currentLead.year) || null;
   const name = sanitizeString(parsed.name) || currentLead.name || null;
   const phone = normalizePhone(parsed.phone) || currentLead.phone || null;
   const profileCaptured = parseBoolean(parsed.profileCaptured) || currentLead.profileCaptured || false;
 
   const hasRealPlate = isRealPlate(plate);
   const hasRealModel = !!(model && model.length > 1);
+  const hasRealYear = !!year;
   const hasRealPhone = isRealPhone(phone);
 
-  const fastQualify = hasRealPlate && hasRealModel && hasRealPhone;
-  const classicQualify = hasRealPlate && hasRealModel && profileCaptured;
+  const fastQualify = hasRealPlate && hasRealModel && hasRealYear && hasRealPhone;
+  const classicQualify = hasRealPlate && hasRealModel && hasRealYear && profileCaptured;
   const qualified = fastQualify || classicQualify;
 
   if (!hasRealPlate) {
     console.warn(`[Detector] Qualification rejected — plate "${plate}" is not a real plate value.`);
   } else if (!hasRealModel) {
     console.warn('[Detector] Qualification rejected — model missing.');
+  } else if (!hasRealYear) {
+    console.warn('[Detector] Qualification rejected - year missing.');
   } else if (!fastQualify && !classicQualify) {
     console.warn('[Detector] Qualification rejected — need phone OR profile=sim.');
   } else {
-    const path = fastQualify ? 'fast (plate+model+phone)' : 'classic (plate+model+profile)';
+    const path = fastQualify ? 'fast (plate+model+year+phone)' : 'classic (plate+model+year+profile)';
     console.log(`[Detector] ✅ Qualified via ${path} — plate=${plate} model=${model} phone=${phone}`);
   }
 
@@ -121,6 +132,7 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
     qualified,
     plate,
     model,
+    year,
     name,
     phone,
     profileCaptured,

@@ -31,6 +31,7 @@ Schema obrigatorio:
   "qualified": boolean,
   "plate": string | null,
   "model": string | null,
+  "year": string | null,
   "name": string | null,
   "phone": string | null,
   "profileCaptured": boolean,
@@ -40,9 +41,10 @@ Schema obrigatorio:
 Regras:
 - Nunca invente dados.
 - So preencha placa, modelo, nome e telefone se aparecerem explicitamente na conversa.
+- So preencha year se o ano aparecer explicitamente na conversa.
 - O telefone principal ja conhecido do lead e: ${knownPhone || 'desconhecido'}.
 - profileCaptured = true apenas se o cliente tiver dado contexto util de perfil, uso ou cidade do veiculo.
-- qualified = true apenas se houver placa real + veiculo real + (telefone conhecido OU profileCaptured=true).
+- qualified = true apenas se houver placa real + veiculo real + ano real + (telefone conhecido OU profileCaptured=true).
 - Se houver duvida, prefira false e campos null.
 - Nao escreva markdown, comentario, explicacao nem texto fora do JSON.`;
 
@@ -50,6 +52,7 @@ Regras:
 ${JSON.stringify({
     name: lead.name || null,
     model: lead.model || null,
+    year: lead.year || null,
     plate: lead.plate || null,
     phone: lead.phone || null,
     profileCaptured: !!lead.profileCaptured,
@@ -101,8 +104,18 @@ function buildLeadStatus(lead, alreadyTransferred = false) {
     'STATUS INTERNO DO LEAD',
     `Nome: ${lead.name || 'nao coletado'}`,
     `Veiculo: ${lead.model || 'nao coletado'}`,
+    `Ano: ${lead.year || 'nao coletado'}`,
     `Placa: ${lead.plate || 'nao coletada'}`,
     `Telefone principal: ${knownPhone || 'desconhecido'}`,
+    `Modo: ${lead.conversationMode || 'sales'}`,
+    `Estagio: ${lead.stage || lead.status || 'nao definido'}`,
+    `Ultima intencao: ${lead.lastIntent || 'nao detectada'}`,
+    `Ultima objecao: ${lead.lastObjection || 'nao detectada'}`,
+    `Emocao detectada: ${lead.customerEmotion || 'neutral'}`,
+    `Risco operacional: ${lead.riskLevel || 'baixo'}`,
+    `Resumo operacional: ${lead.caseSummary || lead.leadSummary?.caseSummary || lead.leadSummary?.reason || 'nao gerado'}`,
+    `Acoes proibidas agora: ${(lead.forbiddenActions || []).join(', ') || 'nenhuma especifica'}`,
+    `Dados faltantes: ${(lead.missingData || []).join(', ') || 'nenhum detectado'}`,
     `Perfil coletado: ${lead.profileCaptured ? 'SIM' : 'NAO'}`,
     `Mensagens do cliente: ${msgCount}${urgencyNote}${antiRepeatNote}`,
     `Transferido: ${alreadyTransferred ? 'SIM' : 'NAO'}`,
@@ -200,6 +213,7 @@ function buildCollectionsSystemPrompt(config, lead, docs, options = {}) {
   const docsSection = buildDocsSection(docs);
   const campaignMessage = String(options.campaignMessage || '').trim();
   const campaignIntent = String(options.campaignIntent || 'collections').trim();
+  const campaignSubIntent = String(options.campaignSubIntent || 'collections_unknown').trim();
   const campaignIntentReason = String(options.campaignIntentReason || '').trim();
 
   return `Voce e ${agentName}, do time de atendimento da ${company} pelo WhatsApp.
@@ -220,13 +234,30 @@ REGRAS ABSOLUTAS
 - Nunca ofereca nova protecao, novo plano ou nova venda.
 - Nunca trate o contato como prospect ou lead frio.
 - Nunca execute qualificacao comercial.
+- Este cliente ja e associado/cliente. Nao trate como lead novo.
 - Nunca fale como se estivesse buscando vender.
 - Nunca invente valor, vencimento, multa, boleto, desconto, acordo ou condicao financeira.
+- Nunca prometa que atualizou pagamento, liberou app, deu baixa, verificou financeiro ou resolveu o caso.
+- Nao diga "vou verificar no sistema", "vou dar baixa", "vou liberar o app", "esta tudo em dia" ou "nao precisa de revistoria" sem integracao real.
+- Use "vou encaminhar para conferencia", "o setor responsavel precisa validar" e "para evitar informacao errada, vou passar para um atendente".
+- Nao peca modelo e ano do veiculo em cobranca, a menos que seja realmente necessario para identificar o caso.
+- Em cobranca, o dado principal e identificar o caso: placa, nome, comprovante ou problema relatado.
+- Se o cliente disser que ja pagou, nao continue cobrando.
+- Se o cliente enviar comprovante, agradeca e encaminhe para conferencia.
+- Se o cliente disser que vencimento caiu em sabado, domingo ou feriado, nao afirme atraso.
+- Se o cliente contestar cobranca, vencimento ou revistoria, reconheca a contestacao e encaminhe para humano.
+- Se o cliente disser que o app esta bloqueado apos pagamento, trate como problema de baixa/liberacao.
+- Se o cliente pedir atendente humano, responda uma vez e pare o atendimento automatico.
+- Nao use emojis quando o cliente estiver irritado.
+- Nao diga "otimo", "bom comeco" ou "perfeito" quando o cliente estiver reclamando.
+- Nao repita perguntas ja respondidas.
+- Nao peca valor/data se o cliente ja informou valor/data.
+- Nao peca revistoria se atraso ou pendencia nao foi confirmado.
 - Se perguntarem "o que voce quer?" ou "qual o motivo da mensagem?", responda com base na campanha ativa.
 - Use a mensagem da campanha como principal fonte do contexto especial desta conversa.
 - Se o cliente pedir algo que depende do financeiro, responda de forma honesta e indique que o time responsavel confirma os detalhes.
 - Fale de forma curta, clara e respeitosa.
-- Maximo 2 emojis por mensagem.
+- Evite emojis em inadimplencia; se usar, no maximo 1 e apenas quando o cliente estiver tranquilo.
 - Uma pergunta por vez.
 
 COMO RESPONDER
@@ -241,6 +272,7 @@ ${campaignMessage || 'Mensagem da campanha nao informada.'}
 
 LEITURA DO PROPOSITO DA CAMPANHA
 Intent detectado: ${campaignIntent}
+Subtipo detectado: ${campaignSubIntent}
 Motivo: ${campaignIntentReason || 'Campanha identificada como cobranca pela regra interna.'}
 
 CONHECIMENTO DA MOOVE

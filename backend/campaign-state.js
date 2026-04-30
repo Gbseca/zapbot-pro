@@ -58,6 +58,15 @@ const SALES_KEYWORDS = [
   'simulacao',
 ];
 
+const SUB_INTENT_KEYWORDS = {
+  collections_app_blocked: ['app bloqueado', 'app esta bloqueado', 'app continua bloqueado', 'aplicativo bloqueado', 'aplicativo esta bloqueado', 'liberar app', 'acesso ao app'],
+  collections_inspection: ['revistoria', 'vistoria', 'video do veiculo', 'codigo de revistoria'],
+  collections_receipt: ['comprovante', 'recibo', 'enviar comprovante', 'comprovante de pagamento'],
+  collections_reactivation: ['reativar', 'reativacao', 'suspensao', 'liberacao', 'regularizacao'],
+  collections_payment: ['boleto', 'pagamento', 'vencimento', 'mensalidade', 'debito', 'em aberto', 'pendencia'],
+  sales_quote: ['cotacao', 'cotar', 'simulacao', 'protecao', 'seguro'],
+};
+
 function createEmptyCampaignState() {
   return {
     campaignId: '',
@@ -65,6 +74,7 @@ function createEmptyCampaignState() {
     message: '',
     normalizedRecipients: [],
     intent: 'sales',
+    subIntent: 'sales_quote',
     intentConfidence: 'baixa',
     intentReason: 'Nenhuma campanha ativa carregada.',
     intentSource: 'none',
@@ -106,6 +116,26 @@ function countKeywordHits(text, keywords = []) {
   return keywords.filter((keyword) => text.includes(keyword));
 }
 
+function classifySubIntent(normalizedMessage, intent) {
+  if (intent !== 'collections') return 'sales_quote';
+
+  const ordered = [
+    'collections_app_blocked',
+    'collections_inspection',
+    'collections_receipt',
+    'collections_reactivation',
+    'collections_payment',
+  ];
+
+  for (const subIntent of ordered) {
+    if (countKeywordHits(normalizedMessage, SUB_INTENT_KEYWORDS[subIntent]).length > 0) {
+      return subIntent;
+    }
+  }
+
+  return 'collections_unknown';
+}
+
 function parseJsonObject(rawText = '') {
   const cleaned = String(rawText || '')
     .replace(/^```json\s*/i, '')
@@ -135,6 +165,7 @@ function classifyCampaignIntentHeuristically(message = '') {
   if (!normalized) {
     return {
       intent: 'sales',
+      subIntent: 'sales_quote',
       intentConfidence: 'baixa',
       intentReason: 'Campanha sem texto suficiente para inferir contexto especial.',
       intentSource: 'heuristic',
@@ -152,6 +183,7 @@ function classifyCampaignIntentHeuristically(message = '') {
   if (collectionsScore >= 5) {
     return {
       intent: 'collections',
+      subIntent: classifySubIntent(normalized, 'collections'),
       intentConfidence: 'alta',
       intentReason: `Heuristica detectou varios sinais de cobranca: ${collectionsHits.slice(0, 4).join(', ')}.`,
       intentSource: 'heuristic',
@@ -162,6 +194,7 @@ function classifyCampaignIntentHeuristically(message = '') {
   if (collectionsScore >= 3) {
     return {
       intent: 'collections',
+      subIntent: classifySubIntent(normalized, 'collections'),
       intentConfidence: 'media',
       intentReason: `Heuristica detectou campanha de regularizacao com base em ${collectionsHits.concat(customerHits).slice(0, 4).join(', ')}.`,
       intentSource: 'heuristic',
@@ -172,6 +205,7 @@ function classifyCampaignIntentHeuristically(message = '') {
   if (collectionsHits.length >= 1 || customerHits.length >= 2) {
     return {
       intent: 'collections',
+      subIntent: classifySubIntent(normalized, 'collections'),
       intentConfidence: 'baixa',
       intentReason: 'Campanha com alguns sinais de cobranca, mas ainda ambigua.',
       intentSource: 'heuristic',
@@ -182,6 +216,7 @@ function classifyCampaignIntentHeuristically(message = '') {
   if (salesScore >= 2) {
     return {
       intent: 'sales',
+      subIntent: 'sales_quote',
       intentConfidence: 'media',
       intentReason: `Heuristica detectou linguagem comercial: ${salesHits.slice(0, 3).join(', ')}.`,
       intentSource: 'heuristic',
@@ -191,6 +226,7 @@ function classifyCampaignIntentHeuristically(message = '') {
 
   return {
     intent: 'sales',
+    subIntent: 'sales_quote',
     intentConfidence: 'baixa',
     intentReason: 'Campanha sem sinais suficientes de cobranca; mantendo modo comercial por seguranca.',
     intentSource: 'heuristic',
@@ -211,6 +247,7 @@ function setActiveCampaignState(nextState = {}) {
   activeCampaign.message = merged.message;
   activeCampaign.normalizedRecipients = merged.normalizedRecipients;
   activeCampaign.intent = merged.intent;
+  activeCampaign.subIntent = merged.subIntent;
   activeCampaign.intentConfidence = merged.intentConfidence;
   activeCampaign.intentReason = merged.intentReason;
   activeCampaign.intentSource = merged.intentSource;
@@ -230,11 +267,13 @@ async function classifyCampaignIntentWithAI(message = '', config = {}) {
 Responda APENAS JSON valido com:
 {
   "intent": "collections" | "sales",
+  "subIntent": "collections_payment" | "collections_receipt" | "collections_inspection" | "collections_app_blocked" | "collections_reactivation" | "collections_unknown" | "sales_quote",
   "confidence": "alta" | "media" | "baixa",
   "reason": "texto curto"
 }
 
 Classifique como collections somente quando a mensagem for claramente de cobranca, regularizacao, pagamento em atraso, boleto, pendencia financeira ou reativacao de cliente ja existente.
+Use subIntent para indicar o assunto principal da campanha.
 Se houver duvida, responda sales.`;
 
   try {
@@ -252,13 +291,27 @@ Se houver duvida, responda sales.`;
     if (!parsed) return null;
 
     const normalizedIntent = String(parsed.intent || '').trim().toLowerCase();
+    const normalizedSubIntent = String(parsed.subIntent || '').trim().toLowerCase();
     const normalizedConfidence = String(parsed.confidence || '').trim().toLowerCase();
+    const intent = normalizedIntent === 'collections' ? 'collections' : 'sales';
+    const allowedSubIntents = new Set([
+      'collections_payment',
+      'collections_receipt',
+      'collections_inspection',
+      'collections_app_blocked',
+      'collections_reactivation',
+      'collections_unknown',
+      'sales_quote',
+    ]);
+    const fallbackSubIntent = classifySubIntent(normalizeMessage(message), intent);
+    const subIntent = allowedSubIntents.has(normalizedSubIntent) ? normalizedSubIntent : fallbackSubIntent;
     const confidence = ['alta', 'media', 'baixa'].includes(normalizedConfidence)
       ? normalizedConfidence
       : 'baixa';
 
     return {
-      intent: normalizedIntent === 'collections' ? 'collections' : 'sales',
+      intent,
+      subIntent: intent === 'collections' ? subIntent : 'sales_quote',
       intentConfidence: confidence,
       intentReason: String(parsed.reason || 'Classificacao inferida pela IA da campanha ativa.').trim(),
       intentSource: 'ai',
@@ -277,6 +330,7 @@ async function maybeRefineIntentWithAI(campaignId, message, config) {
 
   setActiveCampaignState({
     intent: aiResult.intent,
+    subIntent: aiResult.subIntent,
     intentConfidence: aiResult.intentConfidence,
     intentReason: aiResult.intentReason,
     intentSource: aiResult.intentSource,
@@ -291,6 +345,7 @@ export function registerActiveCampaign({ message = '', numbers = [], config = {}
     message: String(message || '').trim(),
     normalizedRecipients: normalizeRecipients(numbers),
     intent: classification.intent,
+    subIntent: classification.subIntent,
     intentConfidence: classification.intentConfidence,
     intentReason: classification.intentReason,
     intentSource: classification.intentSource,
@@ -322,6 +377,7 @@ export function getActiveCampaign() {
     message: activeCampaign.message,
     normalizedRecipients: [...activeCampaign.normalizedRecipients],
     intent: activeCampaign.intent,
+    subIntent: activeCampaign.subIntent,
     intentConfidence: activeCampaign.intentConfidence,
     intentReason: activeCampaign.intentReason,
     intentSource: activeCampaign.intentSource,
@@ -345,6 +401,7 @@ export function getCollectionsContextForPhone(phone, config = {}) {
     campaignStatus: activeCampaign.status,
     campaignMessage: activeCampaign.message,
     campaignIntent: activeCampaign.intent,
+    campaignSubIntent: activeCampaign.subIntent,
     campaignIntentConfidence: activeCampaign.intentConfidence,
     campaignIntentReason: activeCampaign.intentReason,
     normalizedRecipient: normalizedPhone,
