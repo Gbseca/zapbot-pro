@@ -5,6 +5,121 @@ function normalizeFinalStatus(status) {
   return status || 'accepted';
 }
 
+function isRetryableDelivery(status) {
+  return status === 'accepted_unconfirmed' || status === 'delivery_timeout';
+}
+
+function mergeAcceptedAndFinal(accepted = {}, final = {}) {
+  return {
+    status: normalizeFinalStatus(final.status || accepted.status),
+    messageId: accepted.messageId || final.messageId || null,
+    targetJid: final.targetResolved || accepted.resolvedJid || null,
+    resolvedJid: final.targetResolved || accepted.resolvedJid || null,
+    targetKind: final.targetKind || accepted.targetKind || null,
+    ackStatus: final.ackStatus ?? null,
+    error: final.error || null,
+  };
+}
+
+function buildRecoveryAttempts(sendOptions = {}) {
+  if (sendOptions.disableDeliveryRecovery) return [sendOptions];
+  const baseLabel = sendOptions.routeLabel || 'agent_reply';
+  return [
+    sendOptions,
+    {
+      ...sendOptions,
+      forcePhoneJid: true,
+      freshDevices: true,
+      peerPrimary: false,
+      noInternalRetry: true,
+      skipTyping: true,
+      routeLabel: `${baseLabel}_fresh_phone`,
+    },
+    {
+      ...sendOptions,
+      forcePhoneJid: true,
+      freshDevices: false,
+      peerPrimary: true,
+      noInternalRetry: true,
+      skipTyping: true,
+      routeLabel: `${baseLabel}_peer_phone`,
+    },
+  ];
+}
+
+async function prepareDeliveryRecovery(wa, number) {
+  try {
+    if (typeof wa.refreshDevicesForTarget === 'function') {
+      const refreshed = await wa.refreshDevicesForTarget(number, { forcePhoneJid: true });
+      console.warn(`[Humanizer] Recovery refresh devices target=${number} count=${refreshed.deviceCount || 0}`);
+    }
+  } catch (error) {
+    console.warn(`[Humanizer] Recovery refresh failed target=${number}: ${error.message}`);
+  }
+
+  try {
+    if (typeof wa.resetSignalSessionsForTarget === 'function') {
+      const reset = await wa.resetSignalSessionsForTarget(number, { forcePhoneJid: true });
+      console.warn(`[Humanizer] Recovery reset sessions target=${number} purged=${reset.purged || 0}`);
+    }
+  } catch (error) {
+    console.warn(`[Humanizer] Recovery reset failed target=${number}: ${error.message}`);
+  }
+}
+
+export async function sendTextWithConfirmation(wa, number, text, sendOptions = {}) {
+  const attempts = buildRecoveryAttempts(sendOptions);
+  let lastDelivery = null;
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attemptOptions = attempts[index];
+    if (index > 0) {
+      if (index === 1) await prepareDeliveryRecovery(wa, number);
+      console.warn(`[Humanizer] Retrying WhatsApp delivery via ${attemptOptions.routeLabel || 'recovery'} target=${number}`);
+    }
+
+    let accepted;
+    try {
+      accepted = await wa.sendMessage(number, text, null, attemptOptions);
+    } catch (error) {
+      lastDelivery = {
+        status: 'failed',
+        messageId: error.messageId || null,
+        targetJid: error.targetResolved || null,
+        resolvedJid: error.targetResolved || null,
+        targetKind: error.targetKind || null,
+        error: error.message,
+      };
+      if (index < attempts.length - 1) continue;
+      return lastDelivery;
+    }
+
+    if (typeof wa.waitForOutboundFinal !== 'function' || !accepted.messageId) {
+      return {
+        status: accepted.status || 'accepted',
+        messageId: accepted.messageId || null,
+        targetJid: accepted.resolvedJid || null,
+        resolvedJid: accepted.resolvedJid || null,
+        targetKind: accepted.targetKind || null,
+        error: null,
+      };
+    }
+
+    const final = await wa.waitForOutboundFinal(accepted.messageId);
+    lastDelivery = mergeAcceptedAndFinal(accepted, final);
+    if (lastDelivery.status === 'confirmed') return lastDelivery;
+    if (!isRetryableDelivery(lastDelivery.status)) return lastDelivery;
+  }
+
+  return lastDelivery || {
+    status: 'failed',
+    messageId: null,
+    targetJid: null,
+    resolvedJid: null,
+    error: 'Falha desconhecida no envio',
+  };
+}
+
 function calcNaturalDelay(receivedText = '', responseText = '') {
   const wordsReceived = receivedText.trim().split(/\s+/).filter(Boolean).length;
   const wordsResponse = responseText.trim().split(/\s+/).filter(Boolean).length;
@@ -67,8 +182,9 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
     if (!sendOptions?.skipTyping) {
       await wa.sendTyping(number, delay, sendOptions);
     }
-    const accepted = await wa.sendMessage(number, chunk, null, sendOptions);
-    acceptedChunks.push({ ...accepted, chunk });
+    const delivery = await sendTextWithConfirmation(wa, number, chunk, sendOptions);
+    acceptedChunks.push({ ...delivery, chunk });
+    if (delivery.status !== 'confirmed') break;
   }
 
   if (acceptedChunks.length === 0) {
@@ -85,13 +201,13 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
   const acceptedOnlyChunks = acceptedChunks.map((accepted) => ({
     chunk: accepted.chunk,
     messageId: accepted.messageId,
-    resolvedJid: accepted.resolvedJid,
+    resolvedJid: accepted.resolvedJid || accepted.targetJid,
     status: accepted.status || 'accepted',
-    error: null,
+    error: accepted.error || null,
   }));
   const finalChunks = [];
 
-  if (typeof wa.waitForOutboundFinal === 'function') {
+  if (typeof wa.waitForOutboundFinal === 'function' && acceptedChunks.some(chunk => chunk.status === 'accepted')) {
     for (const accepted of acceptedChunks) {
       const final = await wa.waitForOutboundFinal(accepted.messageId);
       finalChunks.push({
@@ -109,11 +225,12 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
   const lastChunk = deliveryChunks[deliveryChunks.length - 1];
   const failedChunk = deliveryChunks.find(chunk => chunk.status === 'failed');
   const unconfirmedChunk = deliveryChunks.find(chunk => chunk.status === 'accepted_unconfirmed');
+  const allConfirmed = deliveryChunks.length > 0 && deliveryChunks.every(chunk => chunk.status === 'confirmed');
   const finalStatus = failedChunk
     ? 'failed'
     : unconfirmedChunk
       ? 'accepted_unconfirmed'
-      : finalChunks.length
+      : (finalChunks.length || allConfirmed)
         ? 'confirmed'
         : 'accepted';
 

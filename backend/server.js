@@ -188,6 +188,8 @@ app.post('/api/debug/send-test', async (req, res) => {
 
     if (route === 'phone') {
       options.forcePhoneJid = true;
+      if (req.body?.freshDevices === true) options.freshDevices = true;
+      if (req.body?.peerPrimary === true) options.peerPrimary = true;
     } else if (route === 'lid') {
       const preferred = await wa.preferStoredLidForTarget(number);
       lookup = preferred?.lookup || null;

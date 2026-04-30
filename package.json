@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@whiskeysockets/baileys": "6.7.21",
+    "@whiskeysockets/baileys": "6.17.16",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",

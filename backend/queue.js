@@ -588,6 +588,7 @@ class MessageQueue {
         const target = targetInfo.target;
         const routeMode = CAMPAIGN_ROUTE_MODE;
         const forcePhoneForTarget = !isLidJid(target);
+        const canUseTextRecovery = !item.imageBuffer;
         item.normalizedNumber = targetInfo.normalized || item.normalizedNumber || null;
 
         if (targetInfo.source === 'lead_jid') {
@@ -615,17 +616,30 @@ class MessageQueue {
             await this.wa.sendTyping(target, 2500, typingOptions);
         }
 
+        const phoneRecoveryAttempts = RETRY_PHONE_ON_LID_TIMEOUT && canUseTextRecovery
+            ? [
+                { label: 'numero real fresh devices', options: { forcePhoneJid: true, freshDevices: true, noInternalRetry: true }, recoverBefore: true },
+                { label: 'numero real peer primary', options: { forcePhoneJid: true, peerPrimary: true, noInternalRetry: true }, recoverBefore: false },
+            ]
+            : [];
         const canRetryPhoneAfterLidTimeout = routeMode === 'lid_first' && RETRY_PHONE_ON_LID_TIMEOUT;
         const routeAttempts = targetInfo.source === 'lead_jid'
-            ? [{ label: 'jid salvo do lead', options: forcePhoneForTarget ? { forcePhoneJid: true } : {} }]
+            ? [
+                { label: 'jid salvo do lead', options: forcePhoneForTarget ? { forcePhoneJid: true } : {} },
+                ...phoneRecoveryAttempts,
+            ]
             : routeMode === 'lid_first'
                 ? canRetryPhoneAfterLidTimeout
                     ? [
                         { label: 'rota preferida do WhatsApp', options: {} },
-                        { label: 'numero real', options: { forcePhoneJid: true } },
+                        { label: 'numero real', options: { forcePhoneJid: true }, recoverBefore: true },
+                        ...phoneRecoveryAttempts,
                     ]
                     : [{ label: 'rota preferida do WhatsApp', options: {} }]
-                : [{ label: 'numero real', options: { forcePhoneJid: true } }];
+                : [
+                    { label: 'numero real', options: { forcePhoneJid: true } },
+                    ...phoneRecoveryAttempts,
+                ];
 
         let acceptedAttempts = 0;
         let lastDelivery = null;
@@ -648,6 +662,9 @@ class MessageQueue {
             };
             if (attemptIndex > 0) {
                 this.log('warning', `Tentando rota alternativa (${attempt.label}) para ${item.number}...`);
+            }
+            if (attempt.recoverBefore) {
+                await this._preparePhoneFallback(item, target);
             }
 
             let delivery;
@@ -680,12 +697,14 @@ class MessageQueue {
             }
 
             if (delivery.status === 'accepted_unconfirmed') {
-                const shouldFallbackToPhone = !isLastAttempt
-                    && canRetryPhoneAfterLidTimeout
-                    && isLidRouteKind(delivery.targetKind);
-                if (shouldFallbackToPhone) {
-                    this.log('warning', `Rota LID aceitou mas nao confirmou para ${item.number}. Tentando phone @s.whatsapp.net (risco baixo de duplicidade se o WhatsApp entregar tarde).`);
-                    await this._preparePhoneFallback(item, target);
+                const shouldTryNextRoute = !isLastAttempt && (
+                    isLidRouteKind(delivery.targetKind)
+                    || delivery.targetKind === 'phone_forced'
+                    || delivery.targetKind === 'lid_forced_phone'
+                    || delivery.targetKind === 'jid_phone'
+                );
+                if (shouldTryNextRoute) {
+                    this.log('warning', `Rota "${attempt.label}" aceitou mas nao confirmou para ${item.number}. Tentando proxima rota (risco de duplicidade se o WhatsApp entregar tarde).`);
                     continue;
                 }
                 return { ...delivery, acceptedAttempts };

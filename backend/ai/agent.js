@@ -2,7 +2,7 @@ import { loadConfig, resolveEffectiveAIConfig } from '../data/config-manager.js'
 import { getAllLeads, getLead, saveLead } from '../data/leads-manager.js';
 import { buildContext, buildQualificationContext } from './context-builder.js';
 import { callAI } from './gemini.js';
-import { sendHumanized } from './humanizer.js';
+import { sendHumanized, sendTextWithConfirmation } from './humanizer.js';
 import { detectAndExtract, normalizePhone, tryExtractPhone } from './lead-detector.js';
 import { executeFinancialHandoff, executeHandoff } from './handoff.js';
 import { getCollectionsContextForPhone } from '../campaign-state.js';
@@ -302,22 +302,7 @@ function appendAssistantMessage(lead, content, delivery) {
 }
 
 async function sendSingleReplyTracked(wa, target, text, sendOptions = {}) {
-  const accepted = await wa.sendMessage(target, text, null, sendOptions);
-  if (typeof wa.waitForOutboundFinal === 'function' && accepted.messageId) {
-    const final = await wa.waitForOutboundFinal(accepted.messageId);
-    return {
-      status: final.status === 'delivery_timeout' ? 'accepted_unconfirmed' : (final.status || accepted.status || 'accepted'),
-      messageId: accepted.messageId,
-      targetJid: final.targetResolved || accepted.resolvedJid || null,
-      error: final.error || null,
-    };
-  }
-  return {
-    status: accepted.status || 'accepted',
-    messageId: accepted.messageId,
-    targetJid: accepted.resolvedJid || null,
-    error: null,
-  };
+  return sendTextWithConfirmation(wa, target, text, sendOptions);
 }
 
 function resetSessionTimer(leadId, config) {
