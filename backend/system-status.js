@@ -181,9 +181,11 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
     let severity = 'healthy';
     if (status.status === 'disconnected') severity = status.lastDisconnect ? 'error' : 'warning';
     else if (status.status === 'qr_ready') severity = 'warning';
+    else if (status.outboundDiagnostics?.degraded) severity = 'degraded';
 
     return {
       severity,
+      recommendation: status.outboundDiagnostics?.recommendation || '',
       ...status,
     };
   }

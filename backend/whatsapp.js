@@ -15,6 +15,14 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_CONFIRMATION_TIMEOUT_MS = 25_000;
 const OUTBOUND_RECORD_TTL_MS = 5 * 60 * 1000;
 const KNOWN_QR_FALLBACK_VERSION = [2, 3000, 1035194821];
+const WA_DEBUG_ACKS = readEnvFlag('WA_DEBUG_ACKS', true);
+const WA_RETRY_PHONE_ON_LID_TIMEOUT = readEnvFlag('WA_RETRY_PHONE_ON_LID_TIMEOUT', true);
+
+function readEnvFlag(name, fallback = false) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    return /^(1|true|yes|sim|on)$/i.test(String(raw).trim());
+}
 
 function readBaileysVersionRange() {
     try {
@@ -50,6 +58,10 @@ function toBaseId(value) {
 function isLidJid(value) {
     const text = String(value || '');
     return text.includes('@lid') || text.includes('@hosted.lid');
+}
+
+function isLidRouteKind(value) {
+    return /lid/i.test(String(value || ''));
 }
 
 function normalizePhoneCandidate(value) {
@@ -164,6 +176,13 @@ class WhatsAppManager extends EventEmitter {
         this._recentOutbound = [];
         this._routeStats = { pn: 0, lid: 0, unknown: 0 };
         this._lastInboundRoute = null;
+        this._outboundDiagnostics = {
+            lastAcceptedAt: null,
+            lastConfirmedAt: null,
+            lastTimeoutAt: null,
+            lastTimeout: null,
+            recommendation: '',
+        };
         this._reconnectCount = 0;
         this._baileysVersionRange = readBaileysVersionRange();
         this._latestWebVersion = null;
@@ -673,11 +692,51 @@ class WhatsAppManager extends EventEmitter {
     _emitOutboundStatus(record) {
         const snapshot = this._snapshotOutbound(record);
         if (!snapshot) return;
+        this._updateOutboundDiagnostics(snapshot);
         this._recentOutbound.push(snapshot);
         if (this._recentOutbound.length > 100) {
             this._recentOutbound = this._recentOutbound.slice(-100);
         }
         this.emit('outbound-status', snapshot);
+    }
+
+    _updateOutboundDiagnostics(snapshot) {
+        if (!snapshot) return;
+        if (snapshot.status === 'accepted') {
+            this._outboundDiagnostics.lastAcceptedAt = snapshot.acceptedAt || snapshot.updatedAt || new Date().toISOString();
+        }
+        if (snapshot.status === 'confirmed') {
+            this._outboundDiagnostics.lastConfirmedAt = snapshot.confirmedAt || snapshot.updatedAt || new Date().toISOString();
+            this._outboundDiagnostics.recommendation = '';
+        }
+        if (snapshot.status === 'delivery_timeout') {
+            this._outboundDiagnostics.lastTimeoutAt = snapshot.timedOutAt || snapshot.updatedAt || new Date().toISOString();
+            this._outboundDiagnostics.lastTimeout = snapshot;
+            this._outboundDiagnostics.recommendation = isLidRouteKind(snapshot.targetKind)
+                ? 'Rota LID ficou sem confirmacao. Force WA_CAMPAIGN_ROUTE_MODE=phone e reenvie; se phone tambem falhar, reconecte/limpe a sessao.'
+                : 'Envio por phone ficou sem confirmacao. Recomendado reconectar o WhatsApp; se persistir, limpar auth_info/volume e escanear QR novamente.';
+        }
+    }
+
+    getOutboundDiagnostics() {
+        const recent = this._recentOutbound.slice(-25);
+        const accepted = recent.filter(item => item.status === 'accepted').length;
+        const confirmed = recent.filter(item => item.status === 'confirmed').length;
+        const timeouts = recent.filter(item => item.status === 'delivery_timeout').length;
+        const failed = recent.filter(item => item.status === 'failed').length;
+        const processed = confirmed + timeouts + failed;
+        return {
+            ...this._outboundDiagnostics,
+            retryPhoneOnLidTimeout: WA_RETRY_PHONE_ON_LID_TIMEOUT,
+            debugAcks: WA_DEBUG_ACKS,
+            recentWindow: recent.length,
+            recentAccepted: accepted,
+            recentConfirmed: confirmed,
+            recentDeliveryTimeouts: timeouts,
+            recentFailed: failed,
+            recentConfirmationRate: processed ? Math.round((confirmed / processed) * 100) : null,
+            degraded: timeouts > 0 || failed > 0,
+        };
     }
 
     _scheduleOutboundCleanup(messageId) {
@@ -698,6 +757,9 @@ class WhatsAppManager extends EventEmitter {
         const record = this._outboundRecords.get(messageId);
         if (!record) return null;
         if (['confirmed', 'failed', 'delivery_timeout'].includes(record.status)) {
+            if (WA_DEBUG_ACKS && record.status === 'delivery_timeout' && status === 'confirmed') {
+                console.warn(`[WA] late confirmation after timeout id=${messageId} target=${record.targetResolved} previous=${record.status}`);
+            }
             return this._snapshotOutbound(record);
         }
 
@@ -823,7 +885,12 @@ class WhatsAppManager extends EventEmitter {
         for (const item of normalizeListPayload(payload)) {
             const key = item?.key || item?.update?.key;
             const messageId = key?.id;
-            if (!messageId || !this._outboundRecords.has(messageId)) continue;
+            const hasRecord = !!messageId && this._outboundRecords.has(messageId);
+            if (WA_DEBUG_ACKS) {
+                const updateKeys = item?.update ? Object.keys(item.update) : Object.keys(item || {});
+                console.log(`[WA] messages.update id=${messageId || '-'} remote=${key?.remoteJid || '-'} participant=${key?.participant || '-'} status=${item?.update?.status ?? item?.status ?? '-'} keys=${updateKeys.join(',') || '-'} matched=${hasRecord}`);
+            }
+            if (!messageId || !hasRecord) continue;
             const record = this._outboundRecords.get(messageId);
             record.updates = [...(record.updates || []), compactOutboundUpdate(item)].slice(-12);
 
@@ -855,7 +922,11 @@ class WhatsAppManager extends EventEmitter {
     _handleReceiptUpdate(payload) {
         for (const item of normalizeListPayload(payload)) {
             const messageId = item?.key?.id || item?.id || item?.messageId || item?.update?.key?.id;
-            if (!messageId || !this._outboundRecords.has(messageId)) continue;
+            const hasRecord = !!messageId && this._outboundRecords.has(messageId);
+            if (WA_DEBUG_ACKS) {
+                console.log(`[WA] message-receipt.update id=${messageId || '-'} remote=${item?.key?.remoteJid || '-'} participant=${item?.key?.participant || item?.participant || '-'} matched=${hasRecord}`);
+            }
+            if (!messageId || !hasRecord) continue;
             const record = this._outboundRecords.get(messageId);
             record.updates = [...(record.updates || []), {
                 at: new Date().toISOString(),
@@ -1021,6 +1092,10 @@ class WhatsAppManager extends EventEmitter {
                     const remoteJid = msg?.key?.remoteJid || '';
                     const remoteJidAlt = msg?.key?.remoteJidAlt || '';
                     const addressingMode = msg?.key?.addressingMode || '';
+                    if (msg?.key?.fromMe && WA_DEBUG_ACKS) {
+                        const ownId = msg?.key?.id || '';
+                        console.log(`[WA] messages.upsert outbound id=${ownId || '-'} remote=${remoteJid || '-'} status=${msg?.status ?? '-'} matched=${ownId ? this._outboundRecords.has(ownId) : false}`);
+                    }
                     const routeContext = this._buildInboundRouteContext(msg);
                     this._registerInboundRouteContext(routeContext);
                     msg.__zapbotRouteContext = routeContext;
@@ -1286,6 +1361,11 @@ class WhatsAppManager extends EventEmitter {
             routeStats: { ...this._routeStats },
             predominantRoute,
             lastInboundRoute: this._lastInboundRoute,
+            routeConfig: {
+                campaignRouteMode: String(process.env.WA_CAMPAIGN_ROUTE_MODE || 'lid_first').toLowerCase(),
+                retryPhoneOnLidTimeout: WA_RETRY_PHONE_ON_LID_TIMEOUT,
+            },
+            outboundDiagnostics: this.getOutboundDiagnostics(),
             recentOutbound: this._recentOutbound.slice(-50).reverse(),
         };
     }

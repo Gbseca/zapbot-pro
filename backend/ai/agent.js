@@ -303,6 +303,15 @@ function appendAssistantMessage(lead, content, delivery) {
 
 async function sendSingleReplyTracked(wa, target, text, sendOptions = {}) {
   const accepted = await wa.sendMessage(target, text, null, sendOptions);
+  if (typeof wa.waitForOutboundFinal === 'function' && accepted.messageId) {
+    const final = await wa.waitForOutboundFinal(accepted.messageId);
+    return {
+      status: final.status === 'delivery_timeout' ? 'accepted_unconfirmed' : (final.status || accepted.status || 'accepted'),
+      messageId: accepted.messageId,
+      targetJid: final.targetResolved || accepted.resolvedJid || null,
+      error: final.error || null,
+    };
+  }
   return {
     status: accepted.status || 'accepted',
     messageId: accepted.messageId,
@@ -704,6 +713,12 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   if (delivery.status === 'failed') {
     saveLead(leadId, lead);
     console.error(`[Agent] Delivery failed for ${leadId}: ${delivery.error || delivery.status}`);
+    return;
+  }
+
+  if (delivery.status === 'accepted_unconfirmed' || delivery.status === 'delivery_timeout') {
+    saveLead(leadId, lead);
+    console.warn(`[Agent] Delivery unconfirmed for ${leadId}: ${delivery.error || delivery.status}`);
     return;
   }
 

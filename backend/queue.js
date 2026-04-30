@@ -7,10 +7,21 @@ import {
 
 const MAX_CONSECUTIVE_FAILURES = 3;
 const CAMPAIGN_ROUTE_MODE = String(process.env.WA_CAMPAIGN_ROUTE_MODE || 'lid_first').toLowerCase();
+const RETRY_PHONE_ON_LID_TIMEOUT = readEnvFlag('WA_RETRY_PHONE_ON_LID_TIMEOUT', true);
+
+function readEnvFlag(name, fallback = false) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    return /^(1|true|yes|sim|on)$/i.test(String(raw).trim());
+}
 
 function isLidJid(value) {
     const text = String(value || '');
     return text.includes('@lid') || text.includes('@hosted.lid');
+}
+
+function isLidRouteKind(value) {
+    return /lid/i.test(String(value || ''));
 }
 
 function normalizeCampaignNumber(raw) {
@@ -551,6 +562,27 @@ class MessageQueue {
         return this._normalizeDeliveryResult(acceptedRecords, finalRecords);
     }
 
+    async _preparePhoneFallback(item, target) {
+        const label = item?.number || target;
+        try {
+            if (typeof this.wa.refreshDevicesForTarget === 'function') {
+                const refreshed = await this.wa.refreshDevicesForTarget(target);
+                this.log('info', `Refresh de devices para fallback ${label}: ${refreshed.deviceCount || 0} device(s).`);
+            }
+        } catch (error) {
+            this.log('warning', `Falha ao atualizar devices antes do fallback ${label}: ${error.message}`);
+        }
+
+        try {
+            if (typeof this.wa.resetSignalSessionsForTarget === 'function') {
+                const reset = await this.wa.resetSignalSessionsForTarget(target);
+                this.log('info', `Reset Signal para fallback ${label}: ${reset.purged || 0} sessao(oes) removida(s).`);
+            }
+        } catch (error) {
+            this.log('warning', `Falha ao resetar sessao Signal antes do fallback ${label}: ${error.message}`);
+        }
+    }
+
     async _sendCampaignItem(item, text) {
         const targetInfo = this.resolveCampaignSendTarget(item);
         const target = targetInfo.target;
@@ -583,13 +615,16 @@ class MessageQueue {
             await this.wa.sendTyping(target, 2500, typingOptions);
         }
 
+        const canRetryPhoneAfterLidTimeout = routeMode === 'lid_first' && RETRY_PHONE_ON_LID_TIMEOUT;
         const routeAttempts = targetInfo.source === 'lead_jid'
             ? [{ label: 'jid salvo do lead', options: forcePhoneForTarget ? { forcePhoneJid: true } : {} }]
             : routeMode === 'lid_first'
-                ? [
-                    { label: 'rota preferida do WhatsApp', options: {} },
-                    { label: 'numero real', options: { forcePhoneJid: true } },
-                ]
+                ? canRetryPhoneAfterLidTimeout
+                    ? [
+                        { label: 'rota preferida do WhatsApp', options: {} },
+                        { label: 'numero real', options: { forcePhoneJid: true } },
+                    ]
+                    : [{ label: 'rota preferida do WhatsApp', options: {} }]
                 : [{ label: 'numero real', options: { forcePhoneJid: true } }];
 
         let acceptedAttempts = 0;
@@ -645,6 +680,14 @@ class MessageQueue {
             }
 
             if (delivery.status === 'accepted_unconfirmed') {
+                const shouldFallbackToPhone = !isLastAttempt
+                    && canRetryPhoneAfterLidTimeout
+                    && isLidRouteKind(delivery.targetKind);
+                if (shouldFallbackToPhone) {
+                    this.log('warning', `Rota LID aceitou mas nao confirmou para ${item.number}. Tentando phone @s.whatsapp.net (risco baixo de duplicidade se o WhatsApp entregar tarde).`);
+                    await this._preparePhoneFallback(item, target);
+                    continue;
+                }
                 return { ...delivery, acceptedAttempts };
             }
 
@@ -859,6 +902,7 @@ class MessageQueue {
             stats: { ...this.stats, sent: this.stats.confirmed },
             flowControl: this.getFlowControlSnapshot(),
             routeMode: CAMPAIGN_ROUTE_MODE,
+            retryPhoneOnLidTimeout: RETRY_PHONE_ON_LID_TIMEOUT,
             dominantRouteKind,
             routeKinds,
             recentResolvedTargets: recentResolvedTargets.slice(-5).reverse(),

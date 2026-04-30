@@ -105,6 +105,17 @@ function prepareCampaignNumbers(numbers = []) {
   };
 }
 
+function normalizeDebugRoute(route) {
+  const value = String(route || 'auto').toLowerCase();
+  return ['phone', 'lid', 'auto'].includes(value) ? value : 'auto';
+}
+
+function assertDebugToken(req) {
+  const expected = String(process.env.DEBUG_SEND_TOKEN || '').trim();
+  if (!expected) return true;
+  return String(req.headers['x-debug-token'] || req.body?.debugToken || '').trim() === expected;
+}
+
 const wa = new WhatsAppManager(wss);
 const queue = new MessageQueue(wa, wss, { loadConfig });
 const adResearch = createAdResearchService({ loadConfig, broadcast });
@@ -155,6 +166,63 @@ wss.on('connection', (ws) => {
 
 app.get('/api/status', (req, res) => res.json(wa.getStatus()));
 app.get('/api/system/status', (req, res) => res.json(systemStatus.buildSnapshot()));
+
+app.post('/api/debug/send-test', async (req, res) => {
+  try {
+    if (!assertDebugToken(req)) return res.status(403).json({ error: 'Debug token invalido.' });
+    if (wa.getStatus().status !== 'connected') return res.status(400).json({ error: 'WhatsApp nao esta conectado.' });
+
+    const number = String(req.body?.number || '').trim();
+    const message = String(req.body?.message || 'teste').trim() || 'teste';
+    const route = normalizeDebugRoute(req.body?.route);
+    if (!number) return res.status(400).json({ error: 'Informe number.' });
+
+    let target = number;
+    const options = {
+      context: 'debug',
+      routeLabel: `debug_${route}`,
+      noInternalRetry: true,
+      skipTyping: true,
+    };
+    let lookup = null;
+
+    if (route === 'phone') {
+      options.forcePhoneJid = true;
+    } else if (route === 'lid') {
+      const preferred = await wa.preferStoredLidForTarget(number);
+      lookup = preferred?.lookup || null;
+      if (!preferred?.preferredJid || !/@(?:hosted\.)?lid\b/.test(String(preferred.preferredJid))) {
+        return res.status(400).json({
+          error: 'Nenhuma rota LID encontrada para este numero.',
+          preferred,
+        });
+      }
+      target = preferred.preferredJid;
+    }
+
+    const accepted = await wa.sendMessage(target, message, null, options);
+    const final = typeof wa.waitForOutboundFinal === 'function'
+      ? await wa.waitForOutboundFinal(accepted.messageId)
+      : { status: accepted.status || 'accepted' };
+
+    res.json({
+      accepted: !!accepted.messageId,
+      messageId: accepted.messageId,
+      targetResolved: final.targetResolved || accepted.resolvedJid,
+      targetKind: final.targetKind || accepted.targetKind,
+      routeLabel: final.routeLabel || options.routeLabel,
+      route,
+      lookup,
+      finalStatus: final.status === 'delivery_timeout' ? 'delivery_timeout' : final.status,
+      ackStatus: final.ackStatus ?? null,
+      updates: final.updates || [],
+      error: final.error || null,
+      outbound: final,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message, targetResolved: error.targetResolved || null, targetKind: error.targetKind || null });
+  }
+});
 
 app.post('/api/system/status/refresh', async (req, res) => {
   try {

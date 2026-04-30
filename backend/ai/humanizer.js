@@ -1,5 +1,10 @@
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+function normalizeFinalStatus(status) {
+  if (status === 'delivery_timeout') return 'accepted_unconfirmed';
+  return status || 'accepted';
+}
+
 function calcNaturalDelay(receivedText = '', responseText = '') {
   const wordsReceived = receivedText.trim().split(/\s+/).filter(Boolean).length;
   const wordsResponse = responseText.trim().split(/\s+/).filter(Boolean).length;
@@ -84,14 +89,40 @@ export async function sendHumanized(wa, number, responseText, receivedText = '',
     status: accepted.status || 'accepted',
     error: null,
   }));
-  const lastChunk = acceptedOnlyChunks[acceptedOnlyChunks.length - 1];
+  const finalChunks = [];
+
+  if (typeof wa.waitForOutboundFinal === 'function') {
+    for (const accepted of acceptedChunks) {
+      const final = await wa.waitForOutboundFinal(accepted.messageId);
+      finalChunks.push({
+        chunk: accepted.chunk,
+        messageId: accepted.messageId,
+        resolvedJid: final.targetResolved || accepted.resolvedJid,
+        status: normalizeFinalStatus(final.status),
+        ackStatus: final.ackStatus ?? null,
+        error: final.error || null,
+      });
+    }
+  }
+
+  const deliveryChunks = finalChunks.length ? finalChunks : acceptedOnlyChunks;
+  const lastChunk = deliveryChunks[deliveryChunks.length - 1];
+  const failedChunk = deliveryChunks.find(chunk => chunk.status === 'failed');
+  const unconfirmedChunk = deliveryChunks.find(chunk => chunk.status === 'accepted_unconfirmed');
+  const finalStatus = failedChunk
+    ? 'failed'
+    : unconfirmedChunk
+      ? 'accepted_unconfirmed'
+      : finalChunks.length
+        ? 'confirmed'
+        : 'accepted';
 
   return {
-    status: 'accepted',
+    status: finalStatus,
     messageId: lastChunk?.messageId || null,
-    messageIds: acceptedOnlyChunks.map(chunk => chunk.messageId).filter(Boolean),
+    messageIds: deliveryChunks.map(chunk => chunk.messageId).filter(Boolean),
     targetJid: lastChunk?.resolvedJid || null,
-    error: null,
-    chunks: acceptedOnlyChunks,
+    error: failedChunk?.error || unconfirmedChunk?.error || null,
+    chunks: deliveryChunks,
   };
 }
