@@ -5,9 +5,9 @@ const HUMAN_REPLY = [
 ].join('\n');
 
 const PAYMENT_CLAIMED_REPLY = [
-  'Entendi. Se o pagamento ja foi feito, o correto e o financeiro conferir a baixa antes de qualquer nova orientacao.',
+  'Entendi. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro.',
   '',
-  'Pode me enviar o comprovante aqui, se ainda nao enviou?',
+  'Para localizar mais rapido, pode me enviar o comprovante e a placa do veiculo, se ainda nao enviou?',
 ].join('\n');
 
 const RECEIPT_RECEIVED_REPLY = [
@@ -35,17 +35,43 @@ const INSPECTION_DISPUTED_REPLY = [
 ].join('\n');
 
 const INSPECTION_PENDING_REPLY = [
-  'Entendi. Para a revistoria, preciso confirmar alguns dados antes de encaminhar corretamente.',
+  'Entendi. Para a revistoria, o ideal e um consultor acompanhar seu caso e confirmar o procedimento correto.',
   '',
-  'Pode me informar a placa do veiculo?',
+  'Pode me passar a placa do veiculo para eu encaminhar certinho?',
+].join('\n');
+
+const BOLETO_REQUEST_REPLY = [
+  'Entendi. Como boleto e regularizacao dependem de consulta do financeiro, vou encaminhar para um consultor verificar seu caso.',
+  '',
+  'Para localizar mais rapido, pode me passar a placa do veiculo?',
+].join('\n');
+
+const REGULARIZATION_REPLY = [
+  'Entendi. Vou encaminhar para um consultor verificar a melhor forma de regularizar seu caso.',
+  '',
+  'Se puder, me envie a placa do veiculo para agilizar o atendimento.',
+].join('\n');
+
+const SYSTEM_CHECK_REPLY = [
+  'Entendi. Isso depende de consulta interna do cadastro/financeiro.',
+  '',
+  'Vou encaminhar para um consultor verificar e dar continuidade por aqui.',
+].join('\n');
+
+const CANCEL_REQUEST_REPLY = [
+  'Entendi. Vou encaminhar seu pedido para um atendente humano verificar com cuidado.',
+  '',
+  'Para evitar qualquer orientacao errada, vou pausar meu atendimento automatico por aqui.',
 ].join('\n');
 
 export const OPERATIONAL_STOP_STATUSES = new Set([
   'human_requested',
   'awaiting_financial_review',
+  'payment_claimed',
   'receipt_received',
   'app_blocked',
   'billing_disputed',
+  'inspection_pending',
   'inspection_disputed',
   'transferred_to_financial',
   'transferred_to_support',
@@ -111,6 +137,13 @@ const HUMAN_REQUEST_PATTERNS = [
   /\bvou denunciar\b/,
 ];
 
+const CANCEL_REQUEST_PATTERNS = [
+  /\bquero cancelar\b/,
+  /\bcancelar\b/,
+  /\bcancelamento\b/,
+  /\bencerrar contrato\b/,
+];
+
 const PAYMENT_CLAIMED_PATTERNS = [
   /\bja paguei\b/,
   /\bpaguei\b/,
@@ -147,6 +180,36 @@ const BILLING_DISPUTE_PATTERNS = [
   /\bcobranca errada\b/,
 ];
 
+const BOLETO_REQUEST_PATTERNS = [
+  /\bpreciso (do|de um|da) boleto\b/,
+  /\bme manda (o )?boleto\b/,
+  /\bme envia (o )?boleto\b/,
+  /\breenviar (o )?boleto\b/,
+  /\bsegunda via\b/,
+  /\bgerar boleto\b/,
+  /\bmandar boleto\b/,
+];
+
+const REGULARIZATION_PATTERNS = [
+  /\bquero regularizar\b/,
+  /\bregularizar\b/,
+  /\bnegociar\b/,
+  /\bacordo\b/,
+  /\bcomo pago\b/,
+  /\bcomo faco para pagar\b/,
+];
+
+const SYSTEM_CHECK_PATTERNS = [
+  /\bverificar (meu )?(cadastro|contrato|pendencia|situacao)\b/,
+  /\bconsultar (meu )?(cadastro|contrato|pendencia|situacao)\b/,
+  /\btem pendencia\b/,
+  /\bbaixa\b/,
+  /\bliberacao\b/,
+  /\bliberar\b/,
+  /\bfinanceiro\b/,
+  /\bmeu cadastro\b/,
+];
+
 const APP_BLOCKED_PATTERNS = [
   /\bapp bloquead[ao]\b/,
   /\bapp .*bloquead[ao]\b/,
@@ -171,6 +234,24 @@ const INSPECTION_DISPUTE_HINTS = [
   /\bquestion/,
   /\breclama/,
 ];
+
+const INSPECTION_PROGRESS_HINTS = [
+  /\bquero fazer\b/,
+  /\bcomo faco\b/,
+  /\bpreciso fazer\b/,
+  /\bja fiz\b/,
+  /\bnao consigo\b/,
+  /\bcodigo\b/,
+  /\bmandei (o )?(video|foto|arquivo)\b/,
+  /\benviei (o )?(video|foto|arquivo)\b/,
+  /\bvideo\b/,
+  /\bfoto\b/,
+];
+
+function extractPlate(text = '') {
+  const match = String(text || '').toUpperCase().match(/\b[A-Z]{3}\d[A-Z0-9]\d{2}\b/);
+  return match ? match[0] : null;
+}
 
 function extractPaymentAmount(text = '') {
   const match = String(text).match(/(?:r\$\s*)?\b\d{1,5}(?:[,.]\d{2})\b/i);
@@ -206,6 +287,17 @@ export function isOperationalStopStatus(status) {
 
 export function detectOperationalEvent({ text = '', hasAttachment = false, attachmentType = null, collectionsContext = null } = {}) {
   const normalized = normalizeText(text);
+  const mentionsInspection = matchAny(normalized, INSPECTION_PATTERNS);
+
+  if (matchAny(normalized, CANCEL_REQUEST_PATTERNS)) {
+    return makeEvent('cancel_request', {
+      status: 'human_requested',
+      stage: 'human_requested',
+      reply: CANCEL_REQUEST_REPLY,
+      reason: 'Cliente pediu cancelamento ou encerramento.',
+      lastObjection: 'cancel_request',
+    });
+  }
 
   if (matchAny(normalized, HUMAN_REQUEST_PATTERNS)) {
     return makeEvent('human_requested', {
@@ -218,6 +310,24 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
   }
 
   if (!collectionsContext) return null;
+
+  if (mentionsInspection && (hasAttachment || matchAny(normalized, INSPECTION_PROGRESS_HINTS))) {
+    return makeEvent('inspection_pending', {
+      status: 'inspection_pending',
+      stage: 'inspection_pending',
+      reply: hasAttachment
+        ? 'Recebi. Vou encaminhar para um consultor acompanhar sua revistoria e dar continuidade por aqui.'
+        : INSPECTION_PENDING_REPLY,
+      reason: hasAttachment
+        ? `Cliente enviou midia/anexo em conversa de revistoria (${attachmentType || 'midia'}).`
+        : 'Cliente pediu orientacao ou acompanhamento de revistoria.',
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+      inspectionPending: true,
+      inspectionMediaSent: hasAttachment || matchAny(normalized, [/\bvideo\b/, /\bfoto\b/]),
+      inspectionCodeMentioned: matchAny(normalized, [/\bcodigo\b/]),
+    });
+  }
 
   const hasReceiptLanguage = matchAny(normalized, RECEIPT_PATTERNS);
   if (hasAttachment || hasReceiptLanguage) {
@@ -242,7 +352,6 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
     });
   }
 
-  const mentionsInspection = matchAny(normalized, INSPECTION_PATTERNS);
   if (mentionsInspection && matchAny(normalized, INSPECTION_DISPUTE_HINTS)) {
     return makeEvent('inspection_disputed', {
       status: 'inspection_disputed',
@@ -263,14 +372,51 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
     });
   }
 
+  if (matchAny(normalized, BOLETO_REQUEST_PATTERNS)) {
+    return makeEvent('boleto_request', {
+      status: 'awaiting_financial_review',
+      stage: 'awaiting_financial_review',
+      reply: BOLETO_REQUEST_REPLY,
+      reason: 'Cliente pediu boleto, segunda via ou reenvio de cobranca.',
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+      lastIntent: 'boleto_request',
+    });
+  }
+
+  if (matchAny(normalized, REGULARIZATION_PATTERNS)) {
+    return makeEvent('regularization_request', {
+      status: 'awaiting_financial_review',
+      stage: 'awaiting_financial_review',
+      reply: REGULARIZATION_REPLY,
+      reason: 'Cliente pediu regularizacao, negociacao ou acordo.',
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+      lastIntent: 'regularization_request',
+    });
+  }
+
+  if (matchAny(normalized, SYSTEM_CHECK_PATTERNS)) {
+    return makeEvent('system_check_request', {
+      status: 'awaiting_financial_review',
+      stage: 'awaiting_financial_review',
+      reply: SYSTEM_CHECK_REPLY,
+      reason: 'Cliente pediu verificacao que depende de cadastro, financeiro ou sistema interno.',
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+      lastIntent: 'system_check_request',
+    });
+  }
+
   if (matchAny(normalized, PAYMENT_CLAIMED_PATTERNS)) {
     return makeEvent('payment_claimed', {
-      status: 'payment_claimed',
-      stage: 'payment_claimed',
+      status: 'awaiting_financial_review',
+      stage: 'awaiting_financial_review',
       reply: PAYMENT_CLAIMED_REPLY,
       reason: 'Cliente informou que o pagamento ja foi feito.',
-      shouldNotifyHuman: false,
-      shouldStopAutomation: false,
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+      lastIntent: 'payment_claimed',
       paymentClaimed: true,
       paymentDate: extractPaymentDate(text),
       paymentAmount: extractPaymentAmount(text),
@@ -283,8 +429,8 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
       stage: 'inspection_pending',
       reply: INSPECTION_PENDING_REPLY,
       reason: 'Conversa de cobranca menciona revistoria sem contestacao clara.',
-      shouldNotifyHuman: false,
-      shouldStopAutomation: false,
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
       inspectionPending: true,
     });
   }
@@ -312,8 +458,12 @@ export function applyOperationalEventToLead(lead, event, content = {}) {
   if (event.billingDisputed) lead.billingDisputed = true;
   if (event.inspectionDisputed) lead.inspectionDisputed = true;
   if (event.inspectionPending) lead.inspectionPending = true;
+  if (event.inspectionMediaSent) lead.inspectionMediaSent = true;
+  if (event.inspectionCodeMentioned) lead.inspectionCodeMentioned = true;
   if (event.paymentDate) lead.paymentDate = event.paymentDate;
   if (event.paymentAmount) lead.paymentAmount = event.paymentAmount;
+  const detectedPlate = extractPlate(content.historyText || content.text || '');
+  if (detectedPlate && !lead.plate) lead.plate = detectedPlate;
 
   lead.leadSummary = {
     ...existingSummary,
@@ -330,6 +480,8 @@ export function applyOperationalEventToLead(lead, event, content = {}) {
     billingDisputed: !!lead.billingDisputed,
     inspectionPending: !!lead.inspectionPending,
     inspectionDisputed: !!lead.inspectionDisputed,
+    inspectionMediaSent: !!lead.inspectionMediaSent,
+    inspectionCodeMentioned: !!lead.inspectionCodeMentioned,
     updatedAt: now,
   };
 

@@ -20,6 +20,7 @@ const COLLECTIONS_STATUSES = new Set([
   'billing_disputed',
   'transferred_to_financial',
   'transferred_to_support',
+  'human_requested',
 ]);
 
 const HUMAN_STOP_STATUSES = new Set([
@@ -105,11 +106,29 @@ function inferConversationMode(text, lead = {}, collectionsContext = null) {
   if (matchAny(normalized, [
     /\bja paguei\b/,
     /\bpaguei\b/,
+    /\bfoi pago\b/,
+    /\besta pago\b/,
+    /\bpagamento feito\b/,
+    /\bpago desde\b/,
+    /\bquitei\b/,
     /\bcomprovante\b/,
+    /\brecibo\b/,
     /\bboleto\b/,
+    /\bsegunda via\b/,
+    /\bgerar boleto\b/,
+    /\breenviar boleto\b/,
     /\bvencimento\b/,
     /\bregularizar\b/,
+    /\bnegociar\b/,
+    /\bacordo\b/,
+    /\bcadastro\b/,
+    /\bpendencia\b/,
+    /\bfinanceiro\b/,
+    /\bbaixa\b/,
+    /\bliberacao\b/,
+    /\bapp .*bloquead[ao]\b/,
     /\bapp bloquead[ao]\b/,
+    /\baplicativo .*bloquead[ao]\b/,
     /\baplicativo bloquead[ao]\b/,
   ])) return 'collections';
   if (matchAny(normalized, [/\brevistoria\b/, /\bvistoria\b/])) return 'inspection';
@@ -124,6 +143,9 @@ function mapOperationalIntent(type) {
     receipt_received: 'billing_receipt_sent',
     billing_disputed: 'billing_due_date_dispute',
     app_blocked: 'billing_app_blocked',
+    boleto_request: 'boleto_request',
+    regularization_request: 'regularization_request',
+    system_check_request: 'system_check_request',
     inspection_pending: 'inspection_requested',
     inspection_disputed: 'inspection_disputed',
     angry_customer: 'angry_customer',
@@ -137,9 +159,8 @@ function actionForEvent(event, conversationMode) {
   if (event.type === 'human_requested' || event.type === 'angry_customer' || event.type === 'cancel_request') {
     return 'handoff_support';
   }
-  if (event.type === 'inspection_disputed') return 'handoff_support';
+  if (event.type === 'inspection_disputed' || event.type === 'inspection_pending' || event.type === 'app_blocked') return 'handoff_support';
   if (event.shouldNotifyHuman) return conversationMode === 'sales' ? 'handoff_support' : 'handoff_financial';
-  if (event.type === 'payment_claimed' || event.type === 'inspection_pending') return 'ask_missing_data';
   return 'reply';
 }
 
@@ -178,6 +199,7 @@ function missingDataFor(intent, conversationMode, lead = {}, text = '') {
   }
 
   if (intent === 'billing_payment_claimed' && !lead.receiptReceived) missing.push('receipt');
+  if (intent === 'inspection_requested' && !lead.inspectionCodeMentioned) missing.push('inspection_code_or_video_status');
   if (!lead.plate && !lead.receiptReceived && !hasPlate(text)) missing.push('plate');
   return missing;
 }
@@ -279,7 +301,7 @@ export function makeConversationDecision({
   const contentText = text || incomingContent.text || '';
   const collectionsLike = isCollectionsLike(lead, collectionsContext);
   const conversationMode = inferConversationMode(contentText, lead, collectionsContext);
-  const detectorContext = collectionsLike || conversationMode === 'collections'
+  const detectorContext = collectionsLike || conversationMode === 'collections' || conversationMode === 'inspection' || conversationMode === 'support'
     ? (collectionsContext || { conversationMode: 'collections', campaignSubIntent: lead.campaignSubIntent || 'collections_unknown' })
     : null;
   const emotion = detectEmotion(contentText);

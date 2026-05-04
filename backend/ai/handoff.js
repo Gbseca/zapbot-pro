@@ -61,11 +61,67 @@ function buildFinancialSummary(lead) {
 
 function resolveOperationalHandoff(event = {}, lead = {}) {
   const eventType = event.type || lead.lastDetectedIntent || lead.lastIntent || '';
+  if (eventType === 'payment_claimed') {
+    return {
+      title: 'ATENDIMENTO FINANCEIRO / PAGAMENTO INFORMADO',
+      status: 'transferred_to_financial',
+      action: 'Conferir baixa do pagamento, localizar boleto e orientar o cliente.',
+    };
+  }
+
+  if (eventType === 'receipt_received') {
+    return {
+      title: 'ATENDIMENTO FINANCEIRO / COMPROVANTE RECEBIDO',
+      status: 'transferred_to_financial',
+      action: 'Validar comprovante e conferir baixa do pagamento antes de nova orientacao.',
+    };
+  }
+
+  if (eventType === 'boleto_request') {
+    return {
+      title: 'ATENDIMENTO FINANCEIRO / BOLETO',
+      status: 'transferred_to_financial',
+      action: 'Verificar cadastro/pendencia e enviar a orientacao correta sobre boleto.',
+    };
+  }
+
+  if (eventType === 'regularization_request') {
+    return {
+      title: 'ATENDIMENTO FINANCEIRO / REGULARIZACAO',
+      status: 'transferred_to_financial',
+      action: 'Verificar pendencia e orientar regularizacao conforme o caso real do cliente.',
+    };
+  }
+
+  if (eventType === 'system_check_request') {
+    return {
+      title: 'ATENDIMENTO OPERACIONAL / CONSULTA INTERNA',
+      status: 'transferred_to_financial',
+      action: 'Consultar cadastro/pendencia no sistema e orientar o cliente sem promessas automaticas.',
+    };
+  }
+
+  if (eventType === 'app_blocked') {
+    return {
+      title: 'ATENDIMENTO SUPORTE / APP BLOQUEADO',
+      status: 'transferred_to_support',
+      action: 'Verificar baixa/liberacao do app e orientar o cliente.',
+    };
+  }
+
+  if (eventType === 'billing_disputed') {
+    return {
+      title: 'ATENDIMENTO FINANCEIRO / COBRANCA CONTESTADA',
+      status: 'transferred_to_financial',
+      action: 'Conferir vencimento, pendencia e regra aplicada antes de responder o cliente.',
+    };
+  }
+
   if (eventType === 'inspection_disputed' || eventType === 'inspection_pending') {
     return {
-      title: 'ATENDIMENTO SUPORTE / REVISTORIA',
+      title: eventType === 'inspection_disputed' ? 'ATENDIMENTO DE REVISTORIA / CONTESTACAO' : 'ATENDIMENTO DE REVISTORIA',
       status: 'transferred_to_support',
-      action: 'Validar necessidade real de revistoria antes de responder o cliente.',
+      action: 'Acompanhar revistoria do cliente e confirmar proximos passos conforme o caso real.',
     };
   }
 
@@ -112,6 +168,8 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
     `*Comprovante enviado:* ${yesNo(lead.receiptReceived)}\n` +
     `*App bloqueado:* ${yesNo(lead.appBlocked)}\n` +
     `*Revistoria questionada:* ${yesNo(lead.inspectionDisputed)}\n` +
+    `*Recebeu codigo de revistoria:* ${yesNo(lead.inspectionCodeMentioned)}\n` +
+    `*Enviou video/fotos:* ${yesNo(lead.inspectionMediaSent)}\n` +
     `\n*Resumo da conversa:*\n${buildFinancialSummary(lead)}\n` +
     `\n*Acao sugerida:* ${handoff.action}\n` +
     `\nEncaminhado em: ${now}\n` +
