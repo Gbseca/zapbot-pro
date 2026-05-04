@@ -14,6 +14,14 @@ import {
   applyConversationDecisionToLead,
   makeConversationDecision,
 } from './conversation-decision.js';
+import {
+  applySalesEventToLead,
+  applySalesFactsToLead,
+  detectSalesEvent,
+  getSalesHandoffFailedReply,
+  isSalesStopStatus,
+  markSalesHandoffFailure,
+} from './sales-guard.js';
 
 const messageBuffers = new Map();
 const sessionTimers = new Map();
@@ -368,6 +376,42 @@ async function persistSimpleReply(wa, leadId, lead, target, reply, extraUpdates 
   saveLead(leadId, lead);
 }
 
+async function handleSalesEvent(wa, leadId, lead, route, config, event, content = {}) {
+  applySalesEventToLead(lead, event, content);
+  saveLead(leadId, lead);
+
+  if (!event.shouldHandoff) {
+    await persistSimpleReply(wa, leadId, lead, route.target, event.reply, () => ({}), route.options);
+    return;
+  }
+
+  try {
+    const handoffResult = await executeHandoff(wa, lead, config, {
+      reason: event.reason,
+      clientMessage: event.clientMessage || event.reply,
+    });
+    lead.status = 'transferred';
+    lead.stage = 'transferred';
+    lead.transferredAt = new Date().toISOString();
+    lead.transferredTo = handoffResult.consultor?.number || null;
+    lead.transferredToName = handoffResult.consultor?.name || null;
+    lead.handoffReason = event.reason;
+    saveLead(leadId, lead);
+  } catch (err) {
+    console.error(`[Agent] Commercial handoff failed for ${leadId}: ${err.message}`);
+    markSalesHandoffFailure(lead, err);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      getSalesHandoffFailedReply(),
+      () => ({ handoffError: err.message }),
+      route.options,
+    );
+  }
+}
+
 export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
 
@@ -400,7 +444,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
   if (!incomingContent.historyText) return;
 
-  if (existingLead?.status === 'blocked' || isOperationalStopStatus(existingLead?.status)) return;
+  if (existingLead?.status === 'blocked' || isOperationalStopStatus(existingLead?.status) || isSalesStopStatus(existingLead?.status)) return;
 
   if (existingLead?.campaignSentAt && !existingLead?.campaignLoopHandled && config.campaignLoopEnabled === false) {
     console.log(`[Agent] Campaign loop disabled - ignoring reply from ${leadId}`);
@@ -548,6 +592,11 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   let lead = getLead(leadId) || createNewLead(leadId, displayNum, pushName, conversationPhone);
   const route = replyRoute || resolveReplyRoute(fullJid, '', conversationPhone, null, lead);
 
+  if (lead.status === 'blocked' || isOperationalStopStatus(lead.status) || isSalesStopStatus(lead.status)) {
+    console.log(`[Agent] Lead ${leadId} is paused with status ${lead.status}; skipping automatic reply.`);
+    return;
+  }
+
   lead.number = leadId;
   lead.jid = fullJid;
   lead.replyTargetJid = route.target;
@@ -601,6 +650,29 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     incomingContent: { text: combinedText, historyText: combinedText },
   });
   applyConversationDecisionToLead(lead, decision, { text: combinedText, historyText: combinedText });
+
+  if (!conversationModeContext) {
+    applySalesFactsToLead(lead, combinedText);
+    const salesEvent = detectSalesEvent({
+      text: combinedText,
+      lead,
+      phase: 'pre',
+    });
+
+    if (salesEvent) {
+      console.log(`[Agent] Sales event ${salesEvent.type} for ${leadId}: ${salesEvent.reason}`);
+      await handleSalesEvent(
+        wa,
+        leadId,
+        lead,
+        route,
+        config,
+        salesEvent,
+        { text: combinedText, historyText: combinedText },
+      );
+      return;
+    }
+  }
 
   if (decision.operationalEvent) {
     console.log(`[Agent] Buffered operational event ${decision.operationalEvent.type} for ${leadId}: ${decision.operationalEvent.reason}`);
@@ -677,6 +749,30 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
       lead.phone = extraction.phone;
       lead.displayNumber = extraction.phone;
       console.log(`[Agent] Phone from extraction: ${extraction.phone}`);
+    }
+  }
+
+  if (!conversationModeContext) {
+    applySalesFactsToLead(lead, combinedText);
+    const postSalesEvent = detectSalesEvent({
+      text: combinedText,
+      lead,
+      modelReply: cleanResponse,
+      phase: 'post',
+    });
+
+    if (postSalesEvent) {
+      console.log(`[Agent] Post-AI sales event ${postSalesEvent.type} for ${leadId}: ${postSalesEvent.reason}`);
+      await handleSalesEvent(
+        wa,
+        leadId,
+        lead,
+        route,
+        config,
+        postSalesEvent,
+        { text: combinedText, historyText: combinedText },
+      );
+      return;
     }
   }
 

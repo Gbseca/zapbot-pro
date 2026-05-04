@@ -208,8 +208,87 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
  * 2. Sends lead card to consultor
  * 3. Marks lead as transferred
  */
-export async function executeHandoff(wa, lead, config) {
+export async function executeHandoff(wa, lead, config, options = {}) {
   const consultor = selectConsultor(config);
+
+  if (!consultor) {
+    const error = new Error('Nenhum consultor configurado para handoff comercial.');
+    updateLead(lead.number, {
+      handoffError: error.message,
+      handoffFailedAt: new Date().toISOString(),
+    });
+    console.warn('[Handoff] No consultor configured - commercial handoff aborted');
+    throw error;
+  }
+
+  const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const contactPhone = lead.phone || lead.displayNumber || lead.number;
+  const waLinkNumber = buildWaLinkNumber(contactPhone);
+  const handoffReason = options.reason || lead.salesHandoffReason || 'Lead comercial pronto para cotacao.';
+  const consultorMsg =
+    `*NOVO LEAD QUALIFICADO - ZapBot Pro*\n` +
+    `------------------------------\n` +
+    `*Nome:* ${lead.name || 'Nao informado'}\n` +
+    `*WhatsApp:* ${formatNumber(contactPhone)}\n` +
+    `*Veiculo:* ${lead.model || 'Nao informado'}\n` +
+    `*Ano:* ${lead.year || 'Nao informado'}\n` +
+    `*Placa:* ${lead.plate || 'Nao informada'}\n` +
+    `*Motivo do handoff:* ${handoffReason}\n` +
+    `\n*Resumo da conversa:*\n${lead.caseSummary || lead.leadSummary?.caseSummary || buildSummary(lead)}\n` +
+    `\n*Acao sugerida:* preparar cotacao real e continuar o atendimento com o cliente.\n` +
+    `\nQualificado em: ${now}\n` +
+    `------------------------------\n` +
+    `Abrir conversa:\nhttps://wa.me/${waLinkNumber}`;
+
+  let cNum = String(consultor.number).replace(/\D/g, '');
+  if (cNum.startsWith('0')) cNum = cNum.substring(1);
+
+  console.log(`[Handoff] Notifying consultor: ${consultor.name} -> raw="${consultor.number}" clean="${cNum}"`);
+  await wa.sendMessage(cNum, consultorMsg, null, {
+    forcePhoneJid: true,
+    routeLabel: 'agent_handoff_consultor',
+    context: 'ai',
+    noInternalRetry: true,
+  });
+  console.log(`[Handoff] Consultor notified: ${consultor.name} (${cNum})`);
+
+  updateLead(lead.number, {
+    status: 'transferred',
+    stage: 'transferred',
+    transferredAt: new Date().toISOString(),
+    transferredTo: consultor.number || null,
+    transferredToName: consultor.name || null,
+    handoffReason,
+  });
+
+  const clientMessage = options.clientMessage
+    || `Recebi os dados principais${lead.name ? `, ${lead.name}` : ''}. Vou encaminhar para um consultor preparar sua cotacao e continuar o atendimento por aqui.`;
+  const handoffClientTarget = lead.replyTargetJid || lead.phone || lead.displayNumber || lead.number || lead.jid;
+
+  let clientNotified = true;
+  await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+  try {
+    await wa.sendMessage(handoffClientTarget, clientMessage, null, {
+      forcePhoneJid: true,
+      routeLabel: 'agent_handoff_client',
+      context: 'ai',
+      noInternalRetry: true,
+    });
+  } catch (err) {
+    clientNotified = false;
+    updateLead(lead.number, {
+      handoffClientError: err.message,
+      handoffClientFailedAt: new Date().toISOString(),
+    });
+    console.warn(`[Handoff] Consultant was notified, but client confirmation failed: ${err.message}`);
+  }
+
+  return {
+    ok: true,
+    consultorNotified: true,
+    clientNotified,
+    consultor,
+  };
 
   // 1. Farewell to client (humanized — wait a bit before this one)
   await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));

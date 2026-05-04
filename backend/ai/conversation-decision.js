@@ -43,7 +43,7 @@ function matchAny(text, patterns) {
 }
 
 function hasPlate(text = '') {
-  return /\b[A-Z]{3}\d[A-Z0-9]\d{2}\b/i.test(text);
+  return /\b[A-Z]{3}[-\s]?\d[A-Z0-9][-\s]?\d{2}\b/i.test(text);
 }
 
 function hasYear(text = '') {
@@ -166,6 +166,13 @@ function actionForEvent(event, conversationMode) {
 
 function forbiddenActionsFor(intent, emotion, conversationMode) {
   const actions = new Set();
+  if (conversationMode === 'sales') {
+    actions.add('nao_calcular_cotacao');
+    actions.add('nao_inventar_preco');
+    actions.add('nao_confirmar_contratacao');
+    actions.add('nao_fingir_handoff');
+    actions.add('nao_dizer_que_verificou_sistema');
+  }
   if (conversationMode !== 'sales') {
     actions.add('nao_vender_cotacao');
     actions.add('nao_pedir_modelo_ano_sem_necessidade');
@@ -217,7 +224,16 @@ function inferIntent(text, conversationMode, lead = {}, collectionsContext = nul
     return 'general_question';
   }
 
-  if (matchAny(normalized, [/\bcotacao\b/, /\borcamento\b/, /\bprotecao\b/, /\bseguro\b/, /\bcobertura\b/])) {
+  if (matchAny(normalized, [/\bconsultor\b/, /\bvendedor\b/, /\brepresentante\b/, /\bespecialista\b/, /\batendente\b/, /\bhumano\b/])) {
+    return 'sales_consultant_requested';
+  }
+  if (matchAny(normalized, [/\bquanto (fica|custa|seria)\b/, /\bqual (o )?valor\b/, /\bmensalidade\b/, /\bpreco\b/])) {
+    return 'sales_price_request';
+  }
+  if (matchAny(normalized, [/\bquero contratar\b/, /\bquero fechar\b/, /\bfechar contrato\b/, /\bfinalizar contratacao\b/])) {
+    return 'sales_contract_request';
+  }
+  if (matchAny(normalized, [/\bcotacao\b/, /\borcamento\b/, /\bsimulacao\b/, /\bquero protecao\b/, /\bseguro\b/, /\bcobertura\b/])) {
     return 'sales_quote';
   }
   if (hasPlate(text) || hasVehicleHint(text)) return 'sales_quote';
@@ -305,12 +321,12 @@ export function makeConversationDecision({
     ? (collectionsContext || { conversationMode: 'collections', campaignSubIntent: lead.campaignSubIntent || 'collections_unknown' })
     : null;
   const emotion = detectEmotion(contentText);
-  let operationalEvent = detectOperationalEvent({
+  let operationalEvent = detectorContext ? detectOperationalEvent({
     text: contentText,
     hasAttachment: incomingContent.hasAttachment,
     attachmentType: incomingContent.attachmentType,
     collectionsContext: detectorContext,
-  });
+  }) : null;
   operationalEvent = escalateAngryOperationalEvent(operationalEvent, emotion);
 
   if (!operationalEvent && (emotion === 'angry') && conversationMode !== 'sales') {
@@ -324,10 +340,19 @@ export function makeConversationDecision({
   const intent = operationalEvent
     ? mapOperationalIntent(operationalEvent.type)
     : inferIntent(contentText, conversationMode, lead, collectionsContext);
-  const nextAction = operationalEvent
-    ? actionForEvent(operationalEvent, conversationMode)
-    : (missingDataFor(intent, conversationMode, lead, contentText).length ? 'ask_missing_data' : 'reply');
   const missingData = missingDataFor(intent, conversationMode, lead, contentText);
+  let nextAction = operationalEvent
+    ? actionForEvent(operationalEvent, conversationMode)
+    : (missingData.length ? 'ask_missing_data' : 'reply');
+
+  if (!operationalEvent && conversationMode === 'sales') {
+    if (intent === 'sales_consultant_requested' || intent === 'sales_price_request' || intent === 'sales_contract_request') {
+      nextAction = missingData.length ? 'ask_vehicle_data' : 'handoff_sales';
+    } else if (intent === 'sales_quote') {
+      nextAction = missingData.length ? 'ask_vehicle_data' : 'handoff_sales';
+    }
+  }
+
   const forbiddenActions = forbiddenActionsFor(intent, emotion, conversationMode);
   const riskLevel = riskLevelFor({ event: operationalEvent, emotion, intent });
 

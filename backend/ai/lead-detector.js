@@ -34,6 +34,20 @@ function sanitizeYear(value) {
   return match ? match[1] : null;
 }
 
+export function normalizePlate(raw) {
+  const text = sanitizeString(raw);
+  if (!text) return null;
+  return text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+export function isValidBrazilPlate(raw) {
+  const plate = normalizePlate(raw);
+  if (!plate) return false;
+  if (FAKE_PLATE_VALUES.includes(plate.toLowerCase())) return false;
+  if (plate.includes('AQUI') || plate.includes('REAL')) return false;
+  return /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(plate);
+}
+
 function extractJsonPayload(rawText = '') {
   if (!rawText) return null;
   const cleaned = String(rawText)
@@ -60,12 +74,7 @@ function extractJsonPayload(rawText = '') {
 }
 
 function isRealPlate(plate) {
-  if (!plate) return false;
-  const p = plate.trim().toLowerCase();
-  if (p.length < 5) return false;
-  if (FAKE_PLATE_VALUES.includes(p)) return false;
-  if (p.includes('_aqui') || p.includes('_real') || p === 'placa') return false;
-  return true;
+  return isValidBrazilPlate(plate);
 }
 
 function isRealPhone(phone) {
@@ -97,7 +106,8 @@ export function normalizePhone(raw) {
 export function detectAndExtract(aiResponse, currentLead = {}) {
   const parsed = extractJsonPayload(aiResponse) || {};
 
-  const plate = sanitizeString(parsed.plate) || currentLead.plate || null;
+  const rawPlate = sanitizeString(parsed.plate) || currentLead.plate || null;
+  const plate = isValidBrazilPlate(rawPlate) ? normalizePlate(rawPlate) : rawPlate;
   const model = sanitizeString(parsed.model) || currentLead.model || null;
   const year = sanitizeYear(parsed.year) || sanitizeYear(currentLead.year) || null;
   const name = sanitizeString(parsed.name) || currentLead.name || null;
@@ -130,7 +140,7 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
 
   return {
     qualified,
-    plate,
+    plate: hasRealPlate ? normalizePlate(plate) : null,
     model,
     year,
     name,
