@@ -1,3 +1,5 @@
+import { normalizeRealWhatsAppPhone } from '../phone-utils.js';
+
 /**
  * lead-detector.js — v4
  * Parses structured JSON from the qualification model and validates it
@@ -87,12 +89,7 @@ function isRealPhone(phone) {
  * Normalizes a raw phone string to "5521972969475" format.
  */
 export function normalizePhone(raw) {
-  if (!raw) return null;
-  const digits = String(raw).replace(/\D/g, '');
-  if (digits.length < 10) return null;
-  if (digits.startsWith('55') && digits.length >= 12) return digits;
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  return null;
+  return normalizeRealWhatsAppPhone(raw);
 }
 
 /**
@@ -111,7 +108,7 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
   const model = sanitizeString(parsed.model) || currentLead.model || null;
   const year = sanitizeYear(parsed.year) || sanitizeYear(currentLead.year) || null;
   const name = sanitizeString(parsed.name) || currentLead.name || null;
-  const phone = normalizePhone(parsed.phone) || currentLead.phone || null;
+  const phone = normalizePhone(parsed.phone) || normalizePhone(currentLead.phone) || null;
   const profileCaptured = parseBoolean(parsed.profileCaptured) || currentLead.profileCaptured || false;
 
   const hasRealPlate = isRealPlate(plate);

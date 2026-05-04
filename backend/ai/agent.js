@@ -1,9 +1,15 @@
 import { loadConfig, resolveEffectiveAIConfig } from '../data/config-manager.js';
 import { getAllLeads, getLead, saveLead } from '../data/leads-manager.js';
+import {
+  getLeadRealPhone,
+  isLidIdentifier,
+  normalizeRealWhatsAppPhone as normalizePhone,
+  normalizeLidJid,
+} from '../phone-utils.js';
 import { buildContext, buildQualificationContext } from './context-builder.js';
 import { callAI } from './gemini.js';
 import { sendHumanized, sendTextWithConfirmation } from './humanizer.js';
-import { detectAndExtract, normalizePhone, tryExtractPhone } from './lead-detector.js';
+import { detectAndExtract, tryExtractPhone } from './lead-detector.js';
 import { executeFinancialHandoff, executeHandoff } from './handoff.js';
 import { getCollectionsContextForPhone } from '../campaign-state.js';
 import {
@@ -91,6 +97,9 @@ const CLARIFICATION_RESPONSES = [
   'Haha, pode falar! O que voce precisava?',
 ];
 
+const ASK_PHONE_FOR_HANDOFF_REPLY = 'Recebi os dados. Para eu encaminhar corretamente para o consultor, me passa seu WhatsApp com DDD? O numero nao apareceu certinho por aqui.';
+const HANDOFF_RECOVERY_REPLY = 'Recebi seus dados, mas tive uma falha ao confirmar o encaminhamento por aqui. Para encaminhar corretamente, me passa seu WhatsApp com DDD?';
+
 function normalizeText(text) {
   return String(text || '')
     .toLowerCase()
@@ -160,6 +169,50 @@ function resolveConversationPhone(displayNum, jidId, inboundRoute = null) {
 function isLidJid(value) {
   const text = String(value || '');
   return text.includes('@lid') || text.includes('@hosted.lid');
+}
+
+function shouldPauseSalesLead(lead) {
+  if (!lead) return false;
+  if (lead.status === 'transferred' && (lead.handoffClientError || lead.handoffClientConfirmed === false)) {
+    return false;
+  }
+  return isSalesStopStatus(lead.status);
+}
+
+function rememberLeadContactRoute(lead, {
+  conversationPhone = null,
+  displayNum = null,
+  fullJid = null,
+  inboundRoute = null,
+} = {}) {
+  if (!lead) return lead;
+
+  const realPhone = normalizePhone(conversationPhone)
+    || normalizePhone(inboundRoute?.mappedPhone)
+    || normalizePhone(inboundRoute?.phoneCandidates?.[0])
+    || normalizePhone(displayNum)
+    || getLeadRealPhone(lead);
+  const lidJid = inboundRoute?.lidJid
+    || (isLidIdentifier(fullJid) ? fullJid : null)
+    || (isLidIdentifier(lead.jid) ? lead.jid : null)
+    || (isLidIdentifier(lead.replyTargetJid) ? lead.replyTargetJid : null);
+
+  if (realPhone) {
+    lead.phone = realPhone;
+    lead.displayNumber = realPhone;
+    lead.phoneResolved = true;
+  } else {
+    if (!normalizePhone(lead.phone)) lead.phone = null;
+    if (!normalizePhone(lead.displayNumber)) lead.displayNumber = null;
+    lead.phoneResolved = false;
+  }
+
+  if (lidJid) {
+    lead.lidJid = normalizeLidJid(lidJid);
+    lead.internalWhatsAppId = lead.lidJid;
+  }
+
+  return lead;
 }
 
 function findStoredLeadByJid(fullJid, jidId) {
@@ -334,11 +387,14 @@ function resetSessionTimer(leadId, config) {
 }
 
 function createNewLead(leadId, displayNum, pushName, fallbackPhone = null) {
-  const phone = fallbackPhone || null;
+  const phone = normalizePhone(fallbackPhone || displayNum);
   return {
     number: leadId,
-    displayNumber: phone || displayNum,
+    displayNumber: phone || null,
     phone,
+    phoneResolved: !!phone,
+    lidJid: null,
+    internalWhatsAppId: null,
     name: pushName || null,
     status: 'new',
     history: [],
@@ -385,17 +441,37 @@ async function handleSalesEvent(wa, leadId, lead, route, config, event, content 
     return;
   }
 
+  if (!getLeadRealPhone(lead)) {
+    lead.status = 'awaiting_phone_for_handoff';
+    lead.stage = 'awaiting_phone_for_handoff';
+    lead.phoneResolved = false;
+    lead.pendingHandoffReason = event.reason;
+    saveLead(leadId, lead);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      ASK_PHONE_FOR_HANDOFF_REPLY,
+      () => ({}),
+      route.options,
+    );
+    return;
+  }
+
   try {
     const handoffResult = await executeHandoff(wa, lead, config, {
       reason: event.reason,
       clientMessage: event.clientMessage || event.reply,
+      clientSendOptions: route.options,
     });
-    lead.status = 'transferred';
-    lead.stage = 'transferred';
+    lead.status = handoffResult.clientNotified ? 'transferred' : 'handoff_client_confirmation_failed';
+    lead.stage = lead.status;
     lead.transferredAt = new Date().toISOString();
     lead.transferredTo = handoffResult.consultor?.number || null;
     lead.transferredToName = handoffResult.consultor?.name || null;
     lead.handoffReason = event.reason;
+    lead.handoffClientConfirmed = !!handoffResult.clientNotified;
     saveLead(leadId, lead);
   } catch (err) {
     console.error(`[Agent] Commercial handoff failed for ${leadId}: ${err.message}`);
@@ -410,6 +486,55 @@ async function handleSalesEvent(wa, leadId, lead, route, config, event, content 
       route.options,
     );
   }
+}
+
+async function handlePendingCommercialHandoff(wa, leadId, lead, route, config) {
+  const realPhone = getLeadRealPhone(lead);
+  if (!realPhone) {
+    lead.status = 'awaiting_phone_for_handoff';
+    lead.stage = 'awaiting_phone_for_handoff';
+    lead.phoneResolved = false;
+    saveLead(leadId, lead);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      lead.handoffClientError ? HANDOFF_RECOVERY_REPLY : ASK_PHONE_FOR_HANDOFF_REPLY,
+      () => ({}),
+      route.options,
+    );
+    return true;
+  }
+
+  try {
+    const handoffResult = await executeHandoff(wa, lead, config, {
+      reason: lead.pendingHandoffReason || lead.handoffReason || 'Cliente comercial aguardava encaminhamento.',
+      clientMessage: 'Recebi seus dados. Vou encaminhar para um consultor preparar sua cotacao e continuar o atendimento por aqui.',
+      clientSendOptions: route.options,
+    });
+    lead.status = handoffResult.clientNotified ? 'transferred' : 'handoff_client_confirmation_failed';
+    lead.stage = lead.status;
+    lead.transferredAt = new Date().toISOString();
+    lead.transferredTo = handoffResult.consultor?.number || null;
+    lead.transferredToName = handoffResult.consultor?.name || null;
+    lead.handoffClientConfirmed = !!handoffResult.clientNotified;
+    saveLead(leadId, lead);
+  } catch (err) {
+    console.error(`[Agent] Pending commercial handoff failed for ${leadId}: ${err.message}`);
+    markSalesHandoffFailure(lead, err);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      getSalesHandoffFailedReply(),
+      () => ({ handoffError: err.message }),
+      route.options,
+    );
+  }
+
+  return true;
 }
 
 export async function handleIncomingMessage(wa, rawMsg) {
@@ -444,7 +569,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
   if (!incomingContent.historyText) return;
 
-  if (existingLead?.status === 'blocked' || isOperationalStopStatus(existingLead?.status) || isSalesStopStatus(existingLead?.status)) return;
+  if (existingLead?.status === 'blocked' || isOperationalStopStatus(existingLead?.status) || shouldPauseSalesLead(existingLead)) return;
 
   if (existingLead?.campaignSentAt && !existingLead?.campaignLoopHandled && config.campaignLoopEnabled === false) {
     console.log(`[Agent] Campaign loop disabled - ignoring reply from ${leadId}`);
@@ -466,11 +591,8 @@ export async function handleIncomingMessage(wa, rawMsg) {
     lead.jid = fullJid;
     lead.replyTargetJid = replyRoute.target;
     lead.replyTargetSource = replyRoute.source;
+    rememberLeadContactRoute(lead, { conversationPhone, displayNum, fullJid, inboundRoute });
     if (!lead.name && pushName) lead.name = pushName;
-    if (conversationPhone) {
-      lead.phone = lead.phone || conversationPhone;
-      lead.displayNumber = conversationPhone;
-    }
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: incomingContent.historyText, ts: Date.now() });
     lead.lastInteraction = new Date().toISOString();
@@ -592,7 +714,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   let lead = getLead(leadId) || createNewLead(leadId, displayNum, pushName, conversationPhone);
   const route = replyRoute || resolveReplyRoute(fullJid, '', conversationPhone, null, lead);
 
-  if (lead.status === 'blocked' || isOperationalStopStatus(lead.status) || isSalesStopStatus(lead.status)) {
+  if (lead.status === 'blocked' || isOperationalStopStatus(lead.status) || shouldPauseSalesLead(lead)) {
     console.log(`[Agent] Lead ${leadId} is paused with status ${lead.status}; skipping automatic reply.`);
     return;
   }
@@ -601,12 +723,12 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   lead.jid = fullJid;
   lead.replyTargetJid = route.target;
   lead.replyTargetSource = route.source;
-  if (conversationPhone) {
-    lead.phone = lead.phone || conversationPhone;
-    lead.displayNumber = conversationPhone;
-  } else {
-    lead.displayNumber = lead.displayNumber || displayNum;
-  }
+  rememberLeadContactRoute(lead, {
+    conversationPhone,
+    displayNum,
+    fullJid,
+    inboundRoute: route.options?.inboundRoute || null,
+  });
 
   if (!lead.name && pushName) lead.name = pushName;
   if (lead.campaignSentAt && !lead.campaignLoopHandled) lead.campaignLoopHandled = true;
@@ -621,7 +743,17 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   if (extractedPhone) {
     lead.phone = extractedPhone;
     lead.displayNumber = extractedPhone;
+    lead.phoneResolved = true;
     console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
+  }
+
+  if (
+    lead.status === 'awaiting_phone_for_handoff'
+    || lead.status === 'handoff_client_confirmation_failed'
+    || (lead.status === 'transferred' && (lead.handoffClientError || lead.handoffClientConfirmed === false))
+  ) {
+    await handlePendingCommercialHandoff(wa, leadId, lead, route, config);
+    return;
   }
 
   const conversationModeContext = resolveConversationModeContext(
@@ -748,6 +880,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     if (extraction.phone) {
       lead.phone = extraction.phone;
       lead.displayNumber = extraction.phone;
+      lead.phoneResolved = true;
       console.log(`[Agent] Phone from extraction: ${extraction.phone}`);
     }
   }

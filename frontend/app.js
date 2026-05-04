@@ -2710,6 +2710,10 @@ function openLeadModal(number) {
   const risk = getLeadRisk(lead);
   const caseSummary = getLeadCaseSummary(lead);
   vehicle.innerHTML += `<div class="lead-risk-badge risk-${risk.level}">Risco ${risk.label}</div>`;
+  const internalWhatsAppId = lead.lidJid || lead.internalWhatsAppId || (String(lead.jid || '').includes('@lid') ? lead.jid : '');
+  if (!getLeadWhatsAppTarget(lead) && internalWhatsAppId) {
+    vehicle.innerHTML += `<div class="modal-vehicle-item modal-case-summary"><strong>ID interno WhatsApp:</strong> ${escapeHtml(internalWhatsAppId)}</div>`;
+  }
   if (caseSummary) {
     vehicle.innerHTML += `<div class="modal-vehicle-item modal-case-summary"><strong>Resumo:</strong> ${escapeHtml(caseSummary)}</div>`;
   }
@@ -2718,8 +2722,8 @@ function openLeadModal(number) {
   const waTarget = getLeadWhatsAppTarget(lead);
   actions.innerHTML = `
     ${lead.status !== 'human_taken_over' ? `<button class="btn btn-outline btn-sm" onclick="takeOverLead('${number}')">Assumir atendimento</button>` : ''}
-    ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
-    ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm">ðŸ’¬ Abrir no WhatsApp</a>` : ''}
+    ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','awaiting_phone_for_handoff','handoff_client_confirmation_failed','handoff_failed','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
+    ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm">ðŸ’¬ Abrir no WhatsApp</a>` : `<span class="btn btn-outline btn-sm disabled">WhatsApp nao resolvido</span>`}
     ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">â›” Pausar bot</button>` : ''}
     <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">ðŸ—‘ï¸ Excluir lead</button>
   `;
@@ -2796,10 +2800,9 @@ function timeSince(dateStr) {
 
 function normalizeBrazilPhone(number) {
   let digits = String(number || '').replace(/\D/g, '');
-  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
-    digits = digits.slice(2);
-  }
-  return digits;
+  if (/^55[1-9]\d\d{8,9}$/.test(digits)) return digits.slice(2);
+  if (/^[1-9]\d\d{8,9}$/.test(digits)) return digits;
+  return '';
 }
 
 function formatPhone(number) {
@@ -2810,12 +2813,12 @@ function formatPhone(number) {
 }
 
 function getLeadContactValue(lead) {
-  return lead?.displayNumber || lead?.phone || lead?.number || '';
+  return lead?.phone || lead?.displayNumber || lead?.number || '';
 }
 
 function formatLeadPhone(lead) {
   const digits = normalizeBrazilPhone(getLeadContactValue(lead));
-  if (!digits) return 'Nao informado';
+  if (!digits) return 'Telefone nao resolvido';
   if (digits.length === 10 || digits.length === 11) {
     return `+55 ${formatPhone(digits)}`;
   }
@@ -2823,12 +2826,9 @@ function formatLeadPhone(lead) {
 }
 
 function getLeadWhatsAppTarget(lead) {
-  let digits = String(getLeadContactValue(lead)).replace(/\D/g, '');
+  let digits = normalizeBrazilPhone(getLeadContactValue(lead));
   if (!digits) return '';
-  if (!digits.startsWith('55') && (digits.length === 10 || digits.length === 11)) {
-    digits = `55${digits}`;
-  }
-  return digits;
+  return `55${digits}`;
 }
 
 function getLeadCaseSummary(lead) {
@@ -2854,9 +2854,11 @@ function getLeadRisk(lead) {
     'billing_disputed',
     'transferred_to_financial',
     'transferred_to_support',
+    'handoff_client_confirmation_failed',
+    'handoff_failed',
     'human_taken_over',
   ]);
-  const mediumStatuses = new Set(['payment_claimed', 'inspection_pending', 'app_blocked']);
+  const mediumStatuses = new Set(['payment_claimed', 'inspection_pending', 'app_blocked', 'awaiting_phone_for_handoff']);
   if (highStatuses.has(lead?.status)) return { level: 'alto', label: 'alto' };
   if (mediumStatuses.has(lead?.status)) return { level: 'medio', label: 'medio' };
   return { level: 'baixo', label: 'baixo' };
@@ -2881,6 +2883,9 @@ function statusLabel(status) {
     billing_disputed: 'Cobranca contestada',
     transferred_to_financial: 'Transferido financeiro',
     transferred_to_support: 'Transferido suporte',
+    awaiting_phone_for_handoff: 'Aguardando telefone',
+    handoff_client_confirmation_failed: 'Falha na confirmacao',
+    handoff_failed: 'Falha no encaminhamento',
     human_taken_over: 'Humano assumiu',
   };
   return m[status] || status;

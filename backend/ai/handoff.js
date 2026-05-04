@@ -1,4 +1,11 @@
 import { updateLead } from '../data/leads-manager.js';
+import {
+  buildClientSendOptions,
+  buildWaLinkNumber,
+  formatRealWhatsAppPhone,
+  getLeadInternalWhatsAppId,
+  getLeadRealPhone,
+} from '../phone-utils.js';
 
 let _consultorIndex = 0;
 
@@ -19,21 +26,7 @@ function selectConsultor(config) {
 }
 
 function formatNumber(raw) {
-  let digits = String(raw).replace(/\D/g, '');
-  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
-    digits = digits.slice(2);
-  }
-  if (digits.length === 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
-  if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
-  return digits;
-}
-
-function buildWaLinkNumber(raw) {
-  let digits = String(raw || '').replace(/\D/g, '');
-  if (!digits.startsWith('55') && (digits.length === 10 || digits.length === 11)) {
-    digits = `55${digits}`;
-  }
-  return digits;
+  return formatRealWhatsAppPhone(raw);
 }
 
 function buildSummary(lead) {
@@ -57,6 +50,26 @@ function buildFinancialSummary(lead) {
     || structured.lastUserMessage
     || buildSummary(lead)
     || 'Sem resumo disponivel.';
+}
+
+function buildContactCardFields(lead) {
+  const realPhone = getLeadRealPhone(lead);
+  const internalId = getLeadInternalWhatsAppId(lead);
+  const waLinkNumber = realPhone ? buildWaLinkNumber(realPhone) : null;
+  const unresolvedWarning = realPhone
+    ? ''
+    : '\n*ATENCAO:* o cliente entrou por LID e o numero real ainda nao foi resolvido. Nao use wa.me com o ID interno; assuma pelo painel/conversa interna ou aguarde o cliente informar o telefone.\n';
+
+  return {
+    realPhone,
+    internalId,
+    waLinkNumber,
+    phoneResolved: !!realPhone,
+    phoneLabel: realPhone ? formatNumber(realPhone) : 'Nao resolvido',
+    internalLabel: internalId || 'Nao informado',
+    waLinkLabel: waLinkNumber ? `https://wa.me/${waLinkNumber}` : 'Indisponivel',
+    unresolvedWarning,
+  };
 }
 
 function resolveOperationalHandoff(event = {}, lead = {}) {
@@ -148,8 +161,7 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
   }
 
   const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  const contactPhone = lead.phone || lead.displayNumber || lead.number;
-  const waLinkNumber = buildWaLinkNumber(contactPhone);
+  const contact = buildContactCardFields(lead);
   const status = lead.status || event.status || 'awaiting_financial_review';
   const reason = event.reason || lead.operationalReason || 'Atendimento operacional de cobranca.';
   const handoff = resolveOperationalHandoff(event, lead);
@@ -158,7 +170,9 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
     `*${handoff.title} - ZapBot Pro*\n` +
     `------------------------------\n` +
     `*Cliente:* ${lead.name || 'Nao informado'}\n` +
-    `*WhatsApp:* ${formatNumber(contactPhone)}\n` +
+    `*Telefone real:* ${contact.phoneLabel}\n` +
+    `*ID interno WhatsApp:* ${contact.internalLabel}\n` +
+    `*Telefone resolvido:* ${contact.phoneResolved ? 'sim' : 'nao'}\n` +
     `*Placa:* ${lead.plate || 'Nao informada'}\n` +
     `*Status:* ${status}\n` +
     `*Motivo:* ${reason}\n` +
@@ -170,11 +184,12 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
     `*Revistoria questionada:* ${yesNo(lead.inspectionDisputed)}\n` +
     `*Recebeu codigo de revistoria:* ${yesNo(lead.inspectionCodeMentioned)}\n` +
     `*Enviou video/fotos:* ${yesNo(lead.inspectionMediaSent)}\n` +
+    contact.unresolvedWarning +
     `\n*Resumo da conversa:*\n${buildFinancialSummary(lead)}\n` +
     `\n*Acao sugerida:* ${handoff.action}\n` +
     `\nEncaminhado em: ${now}\n` +
     `------------------------------\n` +
-    `Abrir conversa:\nhttps://wa.me/${waLinkNumber}`;
+    `Link wa.me:\n${contact.waLinkLabel}`;
 
   let cNum = String(consultor.number).replace(/\D/g, '');
   if (cNum.startsWith('0')) cNum = cNum.substring(1);
@@ -203,12 +218,97 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
 }
 
 /**
- * Executes the handoff:
- * 1. Sends farewell to client
- * 2. Sends lead card to consultor
- * 3. Marks lead as transferred
+ * Executes the commercial handoff. Consultant notification happens before
+ * client confirmation, so the bot never claims a fake transfer.
  */
 export async function executeHandoff(wa, lead, config, options = {}) {
+  const consultor = selectConsultor(config);
+
+  if (!consultor) {
+    const error = new Error('Nenhum consultor configurado para handoff comercial.');
+    updateLead(lead.number, {
+      handoffError: error.message,
+      handoffFailedAt: new Date().toISOString(),
+    });
+    console.warn('[Handoff] No consultor configured - commercial handoff aborted');
+    throw error;
+  }
+
+  const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const contact = buildContactCardFields(lead);
+  const handoffReason = options.reason || lead.salesHandoffReason || 'Lead comercial pronto para cotacao.';
+  const consultorMsg =
+    `*NOVO LEAD QUALIFICADO - ZapBot Pro*\n` +
+    `------------------------------\n` +
+    `*Cliente:* ${lead.name || 'Nao informado'}\n` +
+    `*Telefone real:* ${contact.phoneLabel}\n` +
+    `*ID interno WhatsApp:* ${contact.internalLabel}\n` +
+    `*Telefone resolvido:* ${contact.phoneResolved ? 'sim' : 'nao'}\n` +
+    `*Veiculo:* ${lead.model || 'Nao informado'}\n` +
+    `*Ano:* ${lead.year || 'Nao informado'}\n` +
+    `*Placa:* ${lead.plate || 'Nao informada'}\n` +
+    `*Motivo:* ${handoffReason}\n` +
+    contact.unresolvedWarning +
+    `\n*Resumo da conversa:*\n${lead.caseSummary || lead.leadSummary?.caseSummary || buildSummary(lead)}\n` +
+    `\n*Acao sugerida:* preparar cotacao real e continuar o atendimento com o cliente.\n` +
+    `\nQualificado em: ${now}\n` +
+    `------------------------------\n` +
+    `Link wa.me:\n${contact.waLinkLabel}`;
+
+  let cNum = String(consultor.number).replace(/\D/g, '');
+  if (cNum.startsWith('0')) cNum = cNum.substring(1);
+
+  console.log(`[Handoff] Notifying consultor: ${consultor.name} -> raw="${consultor.number}" clean="${cNum}"`);
+  await wa.sendMessage(cNum, consultorMsg, null, {
+    forcePhoneJid: true,
+    routeLabel: 'agent_handoff_consultor',
+    context: 'ai',
+    noInternalRetry: true,
+  });
+  console.log(`[Handoff] Consultor notified: ${consultor.name} (${cNum})`);
+
+  const clientMessage = options.clientMessage
+    || `Recebi os dados principais${lead.name ? `, ${lead.name}` : ''}. Vou encaminhar para um consultor preparar sua cotacao e continuar o atendimento por aqui.`;
+  const handoffClientTarget = lead.replyTargetJid || getLeadRealPhone(lead) || lead.jid;
+  const clientSendOptions = {
+    ...buildClientSendOptions(handoffClientTarget, options.clientSendOptions || {}),
+    routeLabel: 'agent_handoff_client',
+    context: 'ai',
+    noInternalRetry: true,
+  };
+
+  let clientNotified = true;
+  await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+  try {
+    await wa.sendMessage(handoffClientTarget, clientMessage, null, clientSendOptions);
+  } catch (err) {
+    clientNotified = false;
+    console.warn(`[Handoff] Consultant was notified, but client confirmation failed: ${err.message}`);
+  }
+
+  const finalStatus = clientNotified ? 'transferred' : 'handoff_client_confirmation_failed';
+  updateLead(lead.number, {
+    status: finalStatus,
+    stage: finalStatus,
+    transferredAt: new Date().toISOString(),
+    transferredTo: consultor.number || null,
+    transferredToName: consultor.name || null,
+    handoffReason,
+    handoffClientConfirmed: clientNotified,
+    handoffClientError: clientNotified ? null : 'Falha ao confirmar o encaminhamento para o cliente.',
+    handoffClientFailedAt: clientNotified ? null : new Date().toISOString(),
+  });
+
+  return {
+    ok: true,
+    consultorNotified: true,
+    clientNotified,
+    status: finalStatus,
+    consultor,
+  };
+}
+
+async function executeHandoffLegacy(wa, lead, config, options = {}) {
   const consultor = selectConsultor(config);
 
   if (!consultor) {

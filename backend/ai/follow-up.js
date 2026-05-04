@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { getAllLeads, updateLead } from '../data/leads-manager.js';
 import { loadConfig } from '../data/config-manager.js';
+import { getLeadRealPhone } from '../phone-utils.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -34,6 +35,8 @@ async function runFollowUp(wa) {
   for (const lead of leads) {
     if (SKIP_STATUSES.has(lead.status)) continue;
     if (lead.status !== 'talking') continue;
+    const realPhone = getLeadRealPhone(lead);
+    if (!realPhone) continue;
 
     const lastInteraction = new Date(lead.lastInteraction || lead.createdAt).getTime();
     const hoursSince = (now - lastInteraction) / (1000 * 60 * 60);
@@ -53,7 +56,7 @@ async function runFollowUp(wa) {
         const name = lead.name ? `${lead.name}, só` : 'Só';
         const msg = `${name} passando pra dar um oi 👋\n\nSei que o dia a dia é corrido! Se quiser saber mais sobre como proteger seu veículo, é só chamar aqui.\n\nEstarei à disposição sempre que precisar 🙂`;
         await sleep(3000 + Math.random() * 2000);
-        await wa.sendMessage(lead.number, msg, null);
+        await wa.sendMessage(realPhone, msg, null, { forcePhoneJid: true, routeLabel: 'follow_up_2' });
         await updateLead(lead.number, {
           followUp2Sent: true,
           lastInteraction: new Date().toISOString(),
@@ -65,7 +68,7 @@ async function runFollowUp(wa) {
         const greeting = lead.name ? `Oi ${lead.name}!` : 'Oi!';
         const msg = `${greeting} Tudo bem? 😊\n\nVi que a gente tava conversando sobre proteção veicular e não queria que você ficasse com alguma dúvida em aberto.\n\nPosso te ajudar com alguma coisa?`;
         await sleep(3000 + Math.random() * 3000);
-        await wa.sendMessage(lead.number, msg, null);
+        await wa.sendMessage(realPhone, msg, null, { forcePhoneJid: true, routeLabel: 'follow_up_1' });
         await updateLead(lead.number, {
           followUp1Sent: true,
           lastInteraction: new Date().toISOString(),

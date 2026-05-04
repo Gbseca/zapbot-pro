@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { LEADS_FILE } from '../storage/paths.js';
+import { getLeadInternalWhatsAppId, getLeadRealPhone } from '../phone-utils.js';
 
 function ensureDir() {
   const dir = path.dirname(LEADS_FILE);
@@ -56,9 +57,10 @@ export function clearAllLeads() {
 
 export function exportLeadsCSV() {
   const leads = getAllLeads();
-  const headers = ['Número', 'Nome', 'Modelo', 'Placa', 'Status', 'Criado em', 'Atualizado em', 'Transferido para'];
+  const headers = ['Telefone real', 'ID interno WhatsApp', 'Nome', 'Modelo', 'Placa', 'Status', 'Criado em', 'Atualizado em', 'Transferido para'];
   const rows = leads.map(l => [
-    l.phone || l.displayNumber || l.number,
+    getLeadRealPhone(l) || 'Nao resolvido',
+    getLeadInternalWhatsAppId(l) || '',
     l.name || '',
     l.model || '',
     l.plate || '',

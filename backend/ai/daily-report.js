@@ -1,22 +1,12 @@
 import cron from 'node-cron';
 import { getAllLeads, getLeadStats } from '../data/leads-manager.js';
 import { loadConfig } from '../data/config-manager.js';
+import { formatRealWhatsAppPhone, getLeadRealPhone } from '../phone-utils.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function normalizeContactNumber(number) {
-  let digits = String(number || '').replace(/\D/g, '');
-  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
-    digits = digits.slice(2);
-  }
-  return digits;
-}
-
 function formatPhone(number) {
-  const d = normalizeContactNumber(number);
-  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
-  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
-  return d;
+  return formatRealWhatsAppPhone(number);
 }
 
 async function sendDailyReport(wa) {
@@ -45,7 +35,7 @@ async function sendDailyReport(wa) {
       todayQualified.map((l, i) =>
         `${i + 1}. ${l.name || 'Sem nome'}\n` +
         `   🚗 ${l.model || '?'} | 🔑 ${l.plate || '?'}\n` +
-        `   📱 ${formatPhone(l.phone || l.displayNumber || l.number)}`
+        `   📱 ${formatPhone(getLeadRealPhone(l))}`
       ).join('\n\n') + '\n\n'
     : '\n_Nenhum lead qualificado hoje._\n\n';
 

@@ -1,5 +1,6 @@
 import { KNOWLEDGE_BASE } from '../knowledge/knowledge-base.js';
 import { loadExtractedPDFs } from '../knowledge/pdf-loader.js';
+import { getLeadRealPhone } from '../phone-utils.js';
 
 export async function buildContext(config, lead, alreadyTransferred = false, options = {}) {
   const docs = await loadExtractedPDFs();
@@ -21,7 +22,7 @@ export async function buildQualificationContext(config, lead, latestUserMessage 
     .map((entry) => `${entry.role === 'assistant' ? 'ASSISTENTE' : 'CLIENTE'}: ${entry.content}`)
     .join('\n');
 
-  const knownPhone = lead.phone || lead.displayNumber || lead.number || null;
+  const knownPhone = getLeadRealPhone(lead);
   const systemPrompt = `Voce analisa conversas de WhatsApp para qualificacao comercial.
 
 Responda APENAS com JSON valido.
@@ -87,7 +88,7 @@ function formatTemplate(template, values) {
 }
 
 function buildLeadStatus(lead, alreadyTransferred = false) {
-  const knownPhone = lead.phone || lead.displayNumber || null;
+  const knownPhone = getLeadRealPhone(lead);
   const msgCount = (lead.history || []).filter((entry) => entry.role === 'user').length;
 
   let urgencyNote = '';
