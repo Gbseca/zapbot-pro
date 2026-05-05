@@ -18,6 +18,7 @@ import { createAdResearchService } from './ad-research/service.js';
 import { createSystemStatusService } from './system-status.js';
 import {
   createConsultant,
+  deleteConsultant,
   listConsultants,
   setConsultantActive,
   updateConsultant,
@@ -375,6 +376,17 @@ app.patch('/api/consultants/:id/active', async (req, res) => {
     if (!consultant) return res.status(404).json({ error: 'Consultor nao encontrado' });
     systemStatus.emitSnapshot();
     res.json(consultant);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/consultants/:id', async (req, res) => {
+  try {
+    const deleted = await deleteConsultant(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Consultor nao encontrado' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

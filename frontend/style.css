@@ -1060,6 +1060,11 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   font-family: var(--mono);
   margin: 8px 0 10px;
 }
+.internal-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .internal-empty {
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);

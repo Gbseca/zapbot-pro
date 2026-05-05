@@ -262,6 +262,45 @@ export async function setConsultantActive(id, active) {
   return updateConsultant(id, { active: !!active });
 }
 
+export async function deleteConsultant(id) {
+  const safeId = String(id || '').trim();
+  if (!safeId) return false;
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error, count } = await supabase
+        .from('consultants')
+        .delete({ count: 'exact' })
+        .eq('id', safeId);
+      if (error) throw error;
+      if ((count || 0) > 0) return true;
+    } catch (error) {
+      warnSupabaseFallback('consultants.delete', error);
+    }
+  }
+
+  const local = readLocalConsultants();
+  const nextLocal = local.filter(item => String(item.id) !== safeId && item.phone !== safeId);
+  if (nextLocal.length !== local.length) {
+    writeLocalConsultants(nextLocal);
+    return true;
+  }
+
+  const config = loadConfig();
+  const configItems = Array.isArray(config.consultors) ? config.consultors : [];
+  const nextConfig = configItems.filter((item) => {
+    const normalized = normalizeConsultant(item, 'config');
+    return String(normalized.id) !== safeId && normalized.phone !== safeId;
+  });
+  if (nextConfig.length !== configItems.length) {
+    saveConfig({ consultors: nextConfig });
+    return true;
+  }
+
+  return false;
+}
+
 export async function linkConsultantLid({ phone, lidJid, config = loadConfig() } = {}) {
   const normalizedPhone = normalizeRealWhatsAppPhone(phone);
   const normalizedLid = isLidIdentifier(lidJid) ? normalizeLidJid(lidJid) : null;

@@ -4,6 +4,7 @@ import { searchFaq } from '../data/faq-repository.js';
 import { addLeadTag, listLeadTags } from '../data/tags-repository.js';
 import { createReminder, listOpenReminders } from '../data/reminders-repository.js';
 import { recordEvent } from '../data/events-repository.js';
+import { callAI } from './gemini.js';
 import {
   formatRealWhatsAppPhone,
   getLeadInternalWhatsAppId,
@@ -101,7 +102,7 @@ function buildMenu() {
   return [
     'Modo consultor ativo.',
     '',
-    'Comandos:',
+    'Voce pode falar comigo normalmente. Tambem aceito estes atalhos quando quiser:',
     '/status',
     '/pendentes',
     '/resumo telefone_ou_placa',
@@ -114,6 +115,97 @@ function buildMenu() {
     '/doc termo',
     '/vincularconsultor 5521999999999',
   ].join('\n');
+}
+
+function buildInternalSnapshot({ wa, consultantPhone = null } = {}) {
+  const stats = getLeadStats();
+  const leads = getAllLeads();
+  const pendingLeads = leads.filter(lead => PENDING_STATUSES.has(lead.status)).slice(0, 8);
+  const unresolved = leads.filter(lead => !getLeadRealPhone(lead) && getLeadInternalWhatsAppId(lead)).length;
+  const waStatus = typeof wa.getStatus === 'function' ? wa.getStatus() : {};
+
+  return {
+    stats,
+    whatsappStatus: waStatus.status || 'desconhecido',
+    whatsappRecommendation: waStatus.outboundDiagnostics?.recommendation || '',
+    unresolvedPhones: unresolved,
+    pendingLeads: pendingLeads.map(formatLeadLine),
+    consultantPhone,
+  };
+}
+
+function buildConsultantSystemPrompt({ consultantLabel, faqMatches = [], snapshot = {} } = {}) {
+  const faqText = faqMatches.length
+    ? faqMatches.map(item => `- ${item.title || item.category || 'FAQ'}: ${item.answer}`).join('\n')
+    : 'Nenhum item de FAQ relevante encontrado.';
+  const pendingText = snapshot.pendingLeads?.length
+    ? snapshot.pendingLeads.map((line, index) => `${index + 1}. ${line}`).join('\n')
+    : 'Nenhum lead pendente listado.';
+
+  return `Voce e o assistente interno do ZapBot Pro para consultores.
+
+CONSULTOR: ${consultantLabel || 'consultor'}
+
+OBJETIVO
+- Responder como apoio operacional interno, nao como vendedor falando com cliente.
+- O remetente e consultor/equipe interna. Nunca trate como lead ou cliente.
+- Pode explicar como usar o ZapBot, resumir status, orientar sobre atendimento, FAQ, leads pendentes e boas respostas.
+- Seja direto, util e natural. Nao responda mandando lista de comandos, a menos que o consultor peça menu/comandos.
+
+LIMITES
+- Nao invente acesso ao financeiro, baixa, boleto, app, placa, FIPE ou sistema externo.
+- Nao diga que consultou sistemas que nao existem.
+- Se faltar dado real, diga que nao tem informacao suficiente e oriente o proximo passo seguro.
+- Se envolver pagamento, comprovante, app bloqueado ou revistoria, recomende conferencia humana/setor responsavel.
+- Para acoes que exigem alterar estado, diga que o painel/comandos internos podem ser usados, mas nao finja que alterou se a mensagem nao acionou uma acao deterministica.
+
+STATUS RESUMIDO
+- WhatsApp: ${snapshot.whatsappStatus || 'desconhecido'}
+- Leads totais: ${snapshot.stats?.total ?? 0}
+- Conversas ativas: ${snapshot.stats?.talking ?? 0}
+- Telefones nao resolvidos: ${snapshot.unresolvedPhones ?? 0}
+- Recomendacao WhatsApp: ${snapshot.whatsappRecommendation || 'sem alerta'}
+
+PENDENTES RECENTES
+${pendingText}
+
+FAQ RELEVANTE
+${faqText}`;
+}
+
+async function buildConsultantAIReply({ wa, consultantLabel, consultantPhone, text, config } = {}) {
+  const [faqMatches, reminders] = await Promise.all([
+    searchFaq(text, { limit: 3 }).catch(() => []),
+    listOpenReminders({ consultantPhone, limit: 5 }).catch(() => []),
+  ]);
+  const snapshot = buildInternalSnapshot({ wa, consultantPhone });
+  const reminderText = reminders.length
+    ? reminders.map((item, index) => `${index + 1}. ${item.lead_key}: ${item.reminder_text}`).join('\n')
+    : 'Nenhum lembrete aberto para este consultor.';
+  const systemPrompt = `${buildConsultantSystemPrompt({ consultantLabel, faqMatches, snapshot })}
+
+LEMBRETES DO CONSULTOR
+${reminderText}`;
+
+  if (!config?.hasEffectiveKey) {
+    return 'Estou em modo consultor e nao vou tratar seu numero como cliente. A IA interna nao esta com chave ativa agora, mas posso responder atalhos como /status, /pendentes ou /resumo placa.';
+  }
+
+  try {
+    const reply = await callAI(
+      config,
+      {
+        systemPrompt,
+        history: [],
+        userMessage: text,
+      },
+      { purpose: 'reply', mode: 'consultant' },
+    );
+    return String(reply || '').trim() || 'Entendi. Nao encontrei informacao suficiente para responder com seguranca.';
+  } catch (error) {
+    console.warn(`[ConsultantAgent] AI reply failed: ${error.message}`);
+    return 'Estou em modo consultor, mas tive uma falha ao gerar a resposta agora. Seu numero continua marcado como interno e nao vai entrar no fluxo de cliente.';
+  }
 }
 
 function parseReminder(rest = '') {
@@ -187,7 +279,19 @@ export async function handleConsultantMessage({
   }
 
   if (!command.startsWith('/')) {
-    await sendConsultantReply(wa, route, 'Voce esta em modo consultor. Envie /menu para ver os comandos disponiveis.');
+    const reply = await buildConsultantAIReply({
+      wa,
+      consultantLabel,
+      consultantPhone,
+      text,
+      config,
+    });
+    await recordEvent({
+      leadKey: consultantPhone || inboundRoute?.lidJid || fullJid || null,
+      eventType: 'consultant_ai_reply',
+      payload: { consultant: consultantLabel, textLength: text.length },
+    });
+    await sendConsultantReply(wa, route, reply);
     return { handled: true };
   }
 

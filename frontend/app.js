@@ -2525,7 +2525,10 @@ function renderInternalConsultants() {
         <span>LID: ${escapeHtml(c.lid_jid || 'nao vinculado')}</span>
         <span>Fonte: ${escapeHtml(c.source || 'local')}</span>
       </div>
-      <button class="btn btn-outline btn-sm" onclick="saveInternalConsultant('${escapeAttr(c.id)}')">Salvar alteracoes</button>
+      <div class="internal-row-actions">
+        <button class="btn btn-outline btn-sm" onclick="saveInternalConsultant('${escapeAttr(c.id)}')">Salvar alteracoes</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteInternalConsultant('${escapeAttr(c.id)}', '${escapeAttr(c.name || 'Consultor')}')">Remover</button>
+      </div>
     </div>
   `).join('');
 }
@@ -2592,6 +2595,19 @@ async function saveInternalConsultant(id) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || 'Erro ao atualizar consultor.');
     showToast('Consultor atualizado.', 'success');
+    await loadInternalConsultants();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function deleteInternalConsultant(id, name = 'consultor') {
+  if (!confirm(`Remover ${name}? Esse numero deixara de ser tratado como consultor.`)) return;
+  try {
+    const r = await fetch(`/api/consultants/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Erro ao remover consultor.');
+    showToast('Consultor removido.', 'success');
     await loadInternalConsultants();
   } catch (error) {
     showToast(error.message, 'error');
