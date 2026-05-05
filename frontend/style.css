@@ -977,6 +977,112 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .consultor-remove { background: none; border: none; color: var(--text-3); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: var(--transition); }
 .consultor-remove:hover { color: var(--red); background: var(--red-dim); }
 
+/* Internal Panel */
+.internal-card { min-height: 520px; }
+.internal-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.internal-checks {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 14px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.internal-checks.compact { margin: 8px 0; }
+.internal-checks label,
+.internal-inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.internal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+.internal-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 12px;
+}
+.internal-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.internal-row-head strong { color: var(--text-1); font-size: 13px; }
+.internal-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.internal-row-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.internal-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.internal-pill.active {
+  color: var(--green);
+  background: rgba(34,197,94,.10);
+  border-color: rgba(34,197,94,.28);
+}
+.internal-pill.inactive {
+  color: var(--text-3);
+  background: var(--surface-3);
+}
+.internal-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--mono);
+  margin: 8px 0 10px;
+}
+.internal-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 13px;
+  padding: 14px;
+  text-align: center;
+}
+.internal-help-card { margin-top: 16px; }
+.internal-command-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+.internal-command-grid code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
 /* PDF Docs List */
 .docs-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .doc-item {

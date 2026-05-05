@@ -4,6 +4,7 @@ node_modules/
 backend/node_modules/
 backend/auth_info/
 backend/data/*.json
+backend/data/*.jsonl
 backend/knowledge/docs/
 *.log
 .env

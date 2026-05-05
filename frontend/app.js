@@ -243,6 +243,7 @@ function switchTab(tabId) {
 
   if (tabId === 'schedule') updateEstimate();
   if (tabId === 'ai-agent') loadAIConfig();
+  if (tabId === 'internal') loadInternalPanel();
   if (tabId === 'ad-research') loadAdResearchTab();
   if (tabId === 'status') loadSystemStatus();
   if (tabId === 'leads') loadLeads();
@@ -2457,6 +2458,245 @@ function addConsultorRow(name, number) {
     <button class="consultor-remove" onclick="this.parentElement.remove()">âœ•</button>
   `;
   list.appendChild(div);
+}
+
+// Internal panel
+const internalState = {
+  consultants: [],
+  faq: [],
+};
+
+function escapeAttr(text) {
+  return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function normalizeKeywordsInput(value = '') {
+  return String(value || '')
+    .split(/[,;\n]/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+async function loadInternalPanel() {
+  await Promise.all([loadInternalConsultants(), loadInternalFaq()]);
+}
+
+async function loadInternalConsultants() {
+  const list = document.getElementById('internal-consultants-list');
+  if (list) list.innerHTML = '<div class="internal-empty">Carregando consultores...</div>';
+  try {
+    const r = await fetch('/api/consultants');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Erro ao carregar consultores.');
+    internalState.consultants = Array.isArray(data) ? data : [];
+    renderInternalConsultants();
+    updateBadge('internal', String(internalState.consultants.filter(c => c.active).length || ''));
+  } catch (error) {
+    if (list) list.innerHTML = `<div class="internal-empty">Erro: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderInternalConsultants() {
+  const list = document.getElementById('internal-consultants-list');
+  if (!list) return;
+  if (!internalState.consultants.length) {
+    list.innerHTML = '<div class="internal-empty">Nenhum consultor cadastrado ainda.</div>';
+    return;
+  }
+
+  list.innerHTML = internalState.consultants.map((c) => `
+    <div class="internal-row" data-id="${escapeAttr(c.id)}">
+      <div class="internal-row-head">
+        <strong>${escapeHtml(c.name || 'Consultor')}</strong>
+        <span class="internal-pill ${c.active ? 'active' : 'inactive'}">${c.active ? 'ativo' : 'inativo'}</span>
+      </div>
+      <div class="internal-row-grid">
+        <label>Nome<input class="form-input" data-field="name" value="${escapeAttr(c.name || '')}"></label>
+        <label>Telefone<input class="form-input" data-field="phone" value="${escapeAttr(c.phone || c.number || '')}"></label>
+        <label>Funcao<input class="form-input" data-field="role" value="${escapeAttr(c.role || 'general')}"></label>
+        <label>Prioridade<input class="form-input" type="number" data-field="priority" value="${escapeAttr(c.priority ?? 100)}"></label>
+      </div>
+      <div class="internal-checks compact">
+        <label><input type="checkbox" data-field="receive_sales" ${c.receive_sales !== false ? 'checked' : ''}> Vendas</label>
+        <label><input type="checkbox" data-field="receive_support" ${c.receive_support !== false ? 'checked' : ''}> Suporte</label>
+        <label><input type="checkbox" data-field="active" ${c.active !== false ? 'checked' : ''}> Ativo</label>
+      </div>
+      <div class="internal-meta">
+        <span>LID: ${escapeHtml(c.lid_jid || 'nao vinculado')}</span>
+        <span>Fonte: ${escapeHtml(c.source || 'local')}</span>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="saveInternalConsultant('${escapeAttr(c.id)}')">Salvar alteracoes</button>
+    </div>
+  `).join('');
+}
+
+function getInternalRowPayload(id) {
+  const row = document.querySelector(`.internal-row[data-id="${CSS.escape(id)}"]`);
+  if (!row) return null;
+  const value = field => row.querySelector(`[data-field="${field}"]`)?.value?.trim() || '';
+  const checked = field => !!row.querySelector(`[data-field="${field}"]`)?.checked;
+  return {
+    name: value('name'),
+    phone: value('phone'),
+    role: value('role') || 'general',
+    priority: parseInt(value('priority'), 10) || 100,
+    receive_sales: checked('receive_sales'),
+    receive_support: checked('receive_support'),
+    active: checked('active'),
+  };
+}
+
+async function createInternalConsultant() {
+  const payload = {
+    name: document.getElementById('internal-consultant-name')?.value?.trim(),
+    phone: document.getElementById('internal-consultant-phone')?.value?.trim(),
+    role: document.getElementById('internal-consultant-role')?.value?.trim() || 'general',
+    priority: parseInt(document.getElementById('internal-consultant-priority')?.value, 10) || 100,
+    receive_sales: document.getElementById('internal-consultant-sales')?.checked !== false,
+    receive_support: document.getElementById('internal-consultant-support')?.checked !== false,
+    active: document.getElementById('internal-consultant-active')?.checked !== false,
+  };
+  if (!payload.name || !payload.phone) {
+    showToast('Informe nome e telefone do consultor.', 'warning');
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/consultants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Erro ao criar consultor.');
+    ['internal-consultant-name', 'internal-consultant-phone', 'internal-consultant-role'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    showToast('Consultor salvo.', 'success');
+    await loadInternalConsultants();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function saveInternalConsultant(id) {
+  const payload = getInternalRowPayload(id);
+  if (!payload) return;
+  try {
+    const r = await fetch(`/api/consultants/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Erro ao atualizar consultor.');
+    showToast('Consultor atualizado.', 'success');
+    await loadInternalConsultants();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function loadInternalFaq() {
+  const list = document.getElementById('internal-faq-list');
+  if (list) list.innerHTML = '<div class="internal-empty">Carregando FAQ...</div>';
+  try {
+    const r = await fetch('/api/faq');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Erro ao carregar FAQ.');
+    internalState.faq = Array.isArray(data) ? data : [];
+    renderInternalFaq();
+  } catch (error) {
+    if (list) list.innerHTML = `<div class="internal-empty">Erro: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderInternalFaq() {
+  const list = document.getElementById('internal-faq-list');
+  if (!list) return;
+  if (!internalState.faq.length) {
+    list.innerHTML = '<div class="internal-empty">Nenhuma FAQ cadastrada ainda.</div>';
+    return;
+  }
+
+  list.innerHTML = internalState.faq.map((item) => `
+    <div class="internal-row" data-faq-id="${escapeAttr(item.id)}">
+      <div class="internal-row-head">
+        <strong>${escapeHtml(item.title || 'FAQ')}</strong>
+        <span class="internal-pill ${item.active ? 'active' : 'inactive'}">${item.active ? 'ativo' : 'inativo'}</span>
+      </div>
+      <div class="internal-row-grid">
+        <label>Titulo<input class="form-input" data-field="title" value="${escapeAttr(item.title || '')}"></label>
+        <label>Categoria<input class="form-input" data-field="category" value="${escapeAttr(item.category || '')}"></label>
+        <label>Keywords<input class="form-input" data-field="keywords" value="${escapeAttr((item.keywords || []).join(', '))}"></label>
+      </div>
+      <textarea class="form-textarea" rows="4" data-field="answer">${escapeHtml(item.answer || '')}</textarea>
+      <div class="internal-checks compact">
+        <label><input type="checkbox" data-field="active" ${item.active !== false ? 'checked' : ''}> Ativo</label>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="saveInternalFaq('${escapeAttr(item.id)}')">Salvar FAQ</button>
+    </div>
+  `).join('');
+}
+
+async function createInternalFaq() {
+  const payload = {
+    title: document.getElementById('internal-faq-title')?.value?.trim(),
+    category: document.getElementById('internal-faq-category')?.value?.trim(),
+    keywords: normalizeKeywordsInput(document.getElementById('internal-faq-keywords')?.value),
+    answer: document.getElementById('internal-faq-answer')?.value?.trim(),
+    active: document.getElementById('internal-faq-active')?.checked !== false,
+  };
+  if (!payload.title || !payload.answer) {
+    showToast('Informe titulo e resposta da FAQ.', 'warning');
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/faq', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Erro ao criar FAQ.');
+    ['internal-faq-title', 'internal-faq-category', 'internal-faq-keywords', 'internal-faq-answer'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    showToast('FAQ salva.', 'success');
+    await loadInternalFaq();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function saveInternalFaq(id) {
+  const row = document.querySelector(`.internal-row[data-faq-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  const value = field => row.querySelector(`[data-field="${field}"]`)?.value?.trim() || '';
+  const payload = {
+    title: value('title'),
+    category: value('category'),
+    keywords: normalizeKeywordsInput(value('keywords')),
+    answer: value('answer'),
+    active: !!row.querySelector('[data-field="active"]')?.checked,
+  };
+
+  try {
+    const r = await fetch(`/api/faq/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Erro ao atualizar FAQ.');
+    showToast('FAQ atualizada.', 'success');
+    await loadInternalFaq();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
 }
 
 // PDFs

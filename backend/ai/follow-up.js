@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { getAllLeads, updateLead } from '../data/leads-manager.js';
 import { loadConfig } from '../data/config-manager.js';
 import { getLeadRealPhone } from '../phone-utils.js';
+import { findActiveConsultant } from '../data/consultants-repository.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -37,6 +38,8 @@ async function runFollowUp(wa) {
     if (lead.status !== 'talking') continue;
     const realPhone = getLeadRealPhone(lead);
     if (!realPhone) continue;
+    const consultant = await findActiveConsultant({ phone: realPhone, config });
+    if (consultant) continue;
 
     const lastInteraction = new Date(lead.lastInteraction || lead.createdAt).getTime();
     const hoursSince = (now - lastInteraction) / (1000 * 60 * 60);

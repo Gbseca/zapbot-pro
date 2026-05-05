@@ -1,4 +1,6 @@
 import { getAllLeads, getLead, saveLead } from './data/leads-manager.js';
+import { upsertLidPhoneMapping } from './data/lid-phone-map-repository.js';
+import { findActiveConsultant } from './data/consultants-repository.js';
 import {
     clearActiveCampaign,
     registerActiveCampaign,
@@ -378,9 +380,14 @@ class MessageQueue {
         };
     }
 
-    seedCampaignLead(number, message, delivery = {}) {
+    async seedCampaignLead(number, message, delivery = {}) {
         const normalized = normalizeCampaignNumber(number);
         if (!normalized) return;
+        const consultant = await findActiveConsultant({ phone: normalized, config: this.loadConfig() });
+        if (consultant) {
+            this.log('warning', `Contato ${number} e consultor interno (${consultant.name}); nao vou salvar como lead de campanha.`);
+            return;
+        }
 
         const now = new Date().toISOString();
         const existing = getLead(normalized) || {};
@@ -787,6 +794,14 @@ class MessageQueue {
             item.messageId = delivery.messageId;
             item.resolvedTarget = delivery.resolvedTarget;
             item.targetKind = delivery.targetKind;
+            if (item.normalizedNumber && isLidJid(item.resolvedTarget)) {
+                void upsertLidPhoneMapping({
+                    lid_jid: item.resolvedTarget,
+                    phone: item.normalizedNumber,
+                    source: 'campaign_recipient',
+                    confidence: 0.9,
+                });
+            }
 
             const acceptedAttempts = Math.max(1, delivery.acceptedAttempts || 1);
             this.stats.accepted += acceptedAttempts;
@@ -831,7 +846,7 @@ class MessageQueue {
                 item.sentAt = new Date().toISOString();
                 this.stats.confirmed += 1;
                 this.consecutiveFailures = 0;
-                this.seedCampaignLead(item.number, text || item.pollQuestion || '', {
+                await this.seedCampaignLead(item.number, text || item.pollQuestion || '', {
                     status: 'confirmed',
                     messageId: item.messageId,
                     targetJid: item.resolvedTarget,

@@ -1,10 +1,13 @@
 import { updateLead } from '../data/leads-manager.js';
+import { listHandoffConsultants } from '../data/consultants-repository.js';
+import { recordEvent } from '../data/events-repository.js';
 import {
   buildClientSendOptions,
   buildWaLinkNumber,
   formatRealWhatsAppPhone,
   getLeadInternalWhatsAppId,
   getLeadRealPhone,
+  normalizeRealWhatsAppPhone,
 } from '../phone-utils.js';
 
 let _consultorIndex = 0;
@@ -12,8 +15,8 @@ let _consultorIndex = 0;
 /**
  * Selects the next consultor based on distribution config.
  */
-function selectConsultor(config) {
-  const consultors = config.consultors || [];
+async function selectConsultor(config, type = 'sales') {
+  const consultors = await listHandoffConsultants({ type, config });
   if (consultors.length === 0) return null;
 
   if (config.consultorDistribution === 'first') return consultors[0];
@@ -27,6 +30,40 @@ function selectConsultor(config) {
 
 function formatNumber(raw) {
   return formatRealWhatsAppPhone(raw);
+}
+
+function getEventLeadKey(lead = {}) {
+  return lead.number || getLeadRealPhone(lead) || getLeadInternalWhatsAppId(lead) || null;
+}
+
+function resolveConsultorSendTarget(consultor = {}, routeLabel) {
+  const phone = normalizeRealWhatsAppPhone(consultor.phone || consultor.number);
+  if (phone) {
+    return {
+      target: phone,
+      options: {
+        forcePhoneJid: true,
+        routeLabel,
+        context: 'ai',
+        noInternalRetry: true,
+      },
+    };
+  }
+
+  if (consultor.lid_jid) {
+    return {
+      target: consultor.lid_jid,
+      options: {
+        allowRawLid: true,
+        forcePhoneJid: false,
+        routeLabel,
+        context: 'ai',
+        noInternalRetry: true,
+      },
+    };
+  }
+
+  throw new Error(`Consultor ${consultor.name || 'sem nome'} nao tem telefone nem LID para envio.`);
 }
 
 function buildSummary(lead) {
@@ -154,9 +191,14 @@ function resolveOperationalHandoff(event = {}, lead = {}) {
 }
 
 export async function executeFinancialHandoff(wa, lead, config, event = {}) {
-  const consultor = selectConsultor(config);
+  const consultor = await selectConsultor(config, 'support');
   if (!consultor) {
     console.warn('[Handoff] No consultor configured - skipping financial notification');
+    await recordEvent({
+      leadKey: getEventLeadKey(lead),
+      eventType: 'handoff_failed',
+      payload: { type: 'financial', reason: 'no_consultant_configured' },
+    });
     return;
   }
 
@@ -191,18 +233,16 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
     `------------------------------\n` +
     `Link wa.me:\n${contact.waLinkLabel}`;
 
-  let cNum = String(consultor.number).replace(/\D/g, '');
-  if (cNum.startsWith('0')) cNum = cNum.substring(1);
-
-  console.log(`[Handoff] Notifying financial/consultor: ${consultor.name} -> raw="${consultor.number}" clean="${cNum}"`);
+  const consultorTarget = resolveConsultorSendTarget(consultor, 'agent_financial_handoff');
+  console.log(`[Handoff] Notifying financial/consultor: ${consultor.name} -> target="${consultorTarget.target}"`);
+  await recordEvent({
+    leadKey: getEventLeadKey(lead),
+    eventType: 'handoff_started',
+    payload: { type: 'financial', consultant: consultor.name, consultant_phone: consultor.phone || consultor.number },
+  });
 
   try {
-    await wa.sendMessage(cNum, consultorMsg, null, {
-      forcePhoneJid: true,
-      routeLabel: 'agent_financial_handoff',
-      context: 'ai',
-      noInternalRetry: true,
-    });
+    await wa.sendMessage(consultorTarget.target, consultorMsg, null, consultorTarget.options);
     updateLead(lead.number, {
       status: handoff.status,
       operationalStatus: status,
@@ -211,9 +251,19 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
       financialTransferredToName: consultor.name || null,
       stage: handoff.status,
     });
-    console.log(`[Handoff] Financial notification sent: ${consultor.name} (${cNum})`);
+    console.log(`[Handoff] Financial notification sent: ${consultor.name} (${consultorTarget.target})`);
+    await recordEvent({
+      leadKey: getEventLeadKey(lead),
+      eventType: 'handoff_success',
+      payload: { type: 'financial', consultant: consultor.name, status: handoff.status },
+    });
   } catch (err) {
-    console.error(`[Handoff] FAILED financial notification ${consultor.name} (${cNum}): ${err.message}`);
+    console.error(`[Handoff] FAILED financial notification ${consultor.name} (${consultorTarget.target}): ${err.message}`);
+    await recordEvent({
+      leadKey: getEventLeadKey(lead),
+      eventType: 'handoff_failed',
+      payload: { type: 'financial', consultant: consultor.name, error: err.message },
+    });
   }
 }
 
@@ -222,7 +272,7 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
  * client confirmation, so the bot never claims a fake transfer.
  */
 export async function executeHandoff(wa, lead, config, options = {}) {
-  const consultor = selectConsultor(config);
+  const consultor = await selectConsultor(config, 'sales');
 
   if (!consultor) {
     const error = new Error('Nenhum consultor configurado para handoff comercial.');
@@ -231,6 +281,11 @@ export async function executeHandoff(wa, lead, config, options = {}) {
       handoffFailedAt: new Date().toISOString(),
     });
     console.warn('[Handoff] No consultor configured - commercial handoff aborted');
+    await recordEvent({
+      leadKey: getEventLeadKey(lead),
+      eventType: 'handoff_failed',
+      payload: { type: 'sales', reason: 'no_consultant_configured' },
+    });
     throw error;
   }
 
@@ -255,17 +310,15 @@ export async function executeHandoff(wa, lead, config, options = {}) {
     `------------------------------\n` +
     `Link wa.me:\n${contact.waLinkLabel}`;
 
-  let cNum = String(consultor.number).replace(/\D/g, '');
-  if (cNum.startsWith('0')) cNum = cNum.substring(1);
-
-  console.log(`[Handoff] Notifying consultor: ${consultor.name} -> raw="${consultor.number}" clean="${cNum}"`);
-  await wa.sendMessage(cNum, consultorMsg, null, {
-    forcePhoneJid: true,
-    routeLabel: 'agent_handoff_consultor',
-    context: 'ai',
-    noInternalRetry: true,
+  const consultorTarget = resolveConsultorSendTarget(consultor, 'agent_handoff_consultor');
+  console.log(`[Handoff] Notifying consultor: ${consultor.name} -> target="${consultorTarget.target}"`);
+  await recordEvent({
+    leadKey: getEventLeadKey(lead),
+    eventType: 'handoff_started',
+    payload: { type: 'sales', consultant: consultor.name, consultant_phone: consultor.phone || consultor.number },
   });
-  console.log(`[Handoff] Consultor notified: ${consultor.name} (${cNum})`);
+  await wa.sendMessage(consultorTarget.target, consultorMsg, null, consultorTarget.options);
+  console.log(`[Handoff] Consultor notified: ${consultor.name} (${consultorTarget.target})`);
 
   const clientMessage = options.clientMessage
     || `Recebi os dados principais${lead.name ? `, ${lead.name}` : ''}. Vou encaminhar para um consultor preparar sua cotacao e continuar o atendimento por aqui.`;
@@ -299,6 +352,17 @@ export async function executeHandoff(wa, lead, config, options = {}) {
     handoffClientFailedAt: clientNotified ? null : new Date().toISOString(),
   });
 
+  await recordEvent({
+    leadKey: getEventLeadKey(lead),
+    eventType: clientNotified ? 'handoff_success' : 'handoff_failed',
+    payload: {
+      type: 'sales',
+      consultant: consultor.name,
+      status: finalStatus,
+      clientNotified,
+    },
+  });
+
   return {
     ok: true,
     consultorNotified: true,
@@ -309,7 +373,7 @@ export async function executeHandoff(wa, lead, config, options = {}) {
 }
 
 async function executeHandoffLegacy(wa, lead, config, options = {}) {
-  const consultor = selectConsultor(config);
+  const consultor = await selectConsultor(config, 'sales');
 
   if (!consultor) {
     const error = new Error('Nenhum consultor configurado para handoff comercial.');

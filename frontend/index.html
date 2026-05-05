@@ -77,6 +77,13 @@
           <span class="nav-label">Agente IA</span>
           <span class="nav-badge" id="badge-ai-agent"></span>
         </button>
+        <button class="nav-item" data-tab="internal" id="nav-internal">
+          <span class="nav-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          </span>
+          <span class="nav-label">Interno</span>
+          <span class="nav-badge" id="badge-internal"></span>
+        </button>
         <button class="nav-item" data-tab="ad-research" id="nav-ad-research">
           <span class="nav-icon">
             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
@@ -1016,6 +1023,82 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
         <!-- Save -->
         <button class="btn btn-primary btn-lg" onclick="saveAIConfig()" style="width:100%;">💾 Salvar Configurações</button>
 
+      </section>
+
+      <!-- ── Tab: Internal ─────────────── -->
+      <section id="tab-internal" class="tab-pane">
+        <div class="page-header">
+          <h1 class="page-title">Modo Interno</h1>
+          <p class="page-sub">Cadastre consultores e respostas de FAQ usadas pelos comandos internos do WhatsApp.</p>
+        </div>
+
+        <div class="content-grid two-col">
+          <div class="card internal-card">
+            <div class="card-header">
+              <span class="card-icon">👥</span>
+              <h2 class="card-title">Consultores</h2>
+              <div class="card-actions">
+                <button class="btn btn-outline btn-sm" onclick="loadInternalPanel()">Atualizar</button>
+              </div>
+            </div>
+
+            <div class="internal-form-grid">
+              <input type="text" id="internal-consultant-name" class="form-input" placeholder="Nome">
+              <input type="text" id="internal-consultant-phone" class="form-input" placeholder="Telefone com DDD">
+              <input type="text" id="internal-consultant-role" class="form-input" placeholder="Funcao (ex: comercial)">
+              <input type="number" id="internal-consultant-priority" class="form-input" placeholder="Prioridade" value="100">
+            </div>
+            <div class="internal-checks">
+              <label><input type="checkbox" id="internal-consultant-sales" checked> Recebe vendas</label>
+              <label><input type="checkbox" id="internal-consultant-support" checked> Recebe suporte</label>
+              <label><input type="checkbox" id="internal-consultant-active" checked> Ativo</label>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="createInternalConsultant()">Salvar consultor</button>
+
+            <div id="internal-consultants-list" class="internal-list">
+              <div class="internal-empty">Carregando consultores...</div>
+            </div>
+          </div>
+
+          <div class="card internal-card">
+            <div class="card-header">
+              <span class="card-icon">📚</span>
+              <h2 class="card-title">FAQ / Docs</h2>
+              <div class="card-actions">
+                <button class="btn btn-outline btn-sm" onclick="loadInternalPanel()">Atualizar</button>
+              </div>
+            </div>
+
+            <div class="internal-form-grid">
+              <input type="text" id="internal-faq-title" class="form-input" placeholder="Titulo">
+              <input type="text" id="internal-faq-category" class="form-input" placeholder="Categoria">
+              <input type="text" id="internal-faq-keywords" class="form-input" placeholder="Palavras-chave separadas por virgula">
+            </div>
+            <textarea id="internal-faq-answer" class="form-textarea" rows="5" placeholder="Resposta segura para o consultor usar"></textarea>
+            <label class="internal-inline-check"><input type="checkbox" id="internal-faq-active" checked> FAQ ativo</label>
+            <button class="btn btn-primary btn-sm" onclick="createInternalFaq()">Salvar FAQ</button>
+
+            <div id="internal-faq-list" class="internal-list">
+              <div class="internal-empty">Carregando FAQ...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card internal-help-card">
+          <div class="card-header"><span class="card-icon">⌘</span><h2 class="card-title">Comandos no WhatsApp</h2></div>
+          <div class="internal-command-grid">
+            <code>/menu</code>
+            <code>/status</code>
+            <code>/pendentes</code>
+            <code>/resumo telefone_ou_placa</code>
+            <code>/assumir telefone_ou_placa</code>
+            <code>/liberarbot telefone_ou_placa</code>
+            <code>/tag telefone_ou_placa tag</code>
+            <code>/lembrar telefone_ou_placa texto</code>
+            <code>/faq termo</code>
+            <code>/vincularconsultor telefone</code>
+          </div>
+        </div>
       </section>
 
       <!-- ── Tab: Ad Research ───────────── -->

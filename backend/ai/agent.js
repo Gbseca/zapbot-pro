@@ -12,6 +12,7 @@ import { sendHumanized, sendTextWithConfirmation } from './humanizer.js';
 import { detectAndExtract, tryExtractPhone } from './lead-detector.js';
 import { executeFinancialHandoff, executeHandoff } from './handoff.js';
 import { getCollectionsContextForPhone } from '../campaign-state.js';
+import { handleConsultantMessage, isConsultantLinkCommand, resolveConsultantForRoute } from './consultant-agent.js';
 import {
   extractIncomingContent,
   isOperationalStopStatus,
@@ -28,6 +29,8 @@ import {
   isSalesStopStatus,
   markSalesHandoffFailure,
 } from './sales-guard.js';
+import { recordEvent } from '../data/events-repository.js';
+import { resolvePhoneByLid, upsertLidPhoneMapping } from '../data/lid-phone-map-repository.js';
 
 const messageBuffers = new Map();
 const sessionTimers = new Map();
@@ -164,6 +167,29 @@ function resolveConversationPhone(displayNum, jidId, inboundRoute = null) {
     || normalizePhone(displayNum)
     || normalizePhone(jidId)
     || null;
+}
+
+function resolveInboundLidJid(fullJid, inboundRoute = null) {
+  return inboundRoute?.lidJid
+    || (isLidIdentifier(fullJid) ? fullJid : null)
+    || null;
+}
+
+async function resolvePersistentPhoneForLid(fullJid, inboundRoute = null) {
+  const lidJid = resolveInboundLidJid(fullJid, inboundRoute);
+  if (!lidJid) return null;
+  return resolvePhoneByLid(lidJid);
+}
+
+async function persistLidPhonePair({ lidJid = null, phone = null, source = 'unknown', confidence = 0.8 } = {}) {
+  const normalizedPhone = normalizePhone(phone);
+  if (!lidJid || !normalizedPhone) return null;
+  return upsertLidPhoneMapping({
+    lid_jid: lidJid,
+    phone: normalizedPhone,
+    source,
+    confidence,
+  });
 }
 
 function isLidJid(value) {
@@ -541,6 +567,50 @@ export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
 
   const config = resolveEffectiveAIConfig(loadConfig());
+  const fullJid = rawMsg.key.remoteJid;
+  const fullJidAlt = rawMsg.key.remoteJidAlt || '';
+  const jidId = fullJid.split('@')[0].split(':')[0];
+  const inboundRoute = typeof wa.getInboundRouteContext === 'function' ? wa.getInboundRouteContext(rawMsg) : null;
+  const persistentPhone = await resolvePersistentPhoneForLid(fullJid, inboundRoute);
+  const displayNum = persistentPhone || inboundRoute?.mappedPhone || inboundRoute?.phoneCandidates?.[0] || wa.resolvePhone(fullJidAlt || fullJid);
+  const conversationPhone = persistentPhone || resolveConversationPhone(displayNum, jidId, inboundRoute);
+  const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone, fullJid);
+  const replyRoute = resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute, leadFromStore);
+  const incomingContent = extractIncomingContent(rawMsg);
+  const text = incomingContent.text;
+  const pushName = rawMsg.pushName || null;
+  const inboundLidJid = resolveInboundLidJid(fullJid, inboundRoute);
+
+  console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${incomingContent.historyText.slice(0, 60)}"`);
+  console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source}) candidates=${inboundRoute?.phoneCandidates?.join(',') || '-'} mapped=${inboundRoute?.mappedPhone || '-'}`);
+
+  if (inboundLidJid && conversationPhone) {
+    void persistLidPhonePair({
+      lidJid: inboundLidJid,
+      phone: conversationPhone,
+      source: persistentPhone ? 'previous_lead' : 'contact_sync',
+      confidence: persistentPhone ? 0.95 : 0.85,
+    });
+  }
+
+  const consultant = await resolveConsultantForRoute({
+    phone: conversationPhone || displayNum,
+    lidJid: inboundLidJid,
+    config,
+  });
+  if (consultant || isConsultantLinkCommand(incomingContent.historyText)) {
+    await handleConsultantMessage({
+      wa,
+      consultant,
+      message: incomingContent.historyText,
+      route: replyRoute,
+      config,
+      inboundRoute,
+      fullJid,
+    });
+    return;
+  }
+
   if (!config.aiEnabled) return;
 
   const provider = config.effectiveProvider || 'groq';
@@ -550,26 +620,29 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  const fullJid = rawMsg.key.remoteJid;
-  const fullJidAlt = rawMsg.key.remoteJidAlt || '';
-  const jidId = fullJid.split('@')[0].split(':')[0];
-  const inboundRoute = typeof wa.getInboundRouteContext === 'function' ? wa.getInboundRouteContext(rawMsg) : null;
-  const displayNum = inboundRoute?.mappedPhone || inboundRoute?.phoneCandidates?.[0] || wa.resolvePhone(fullJidAlt || fullJid);
-  const conversationPhone = resolveConversationPhone(displayNum, jidId, inboundRoute);
-  const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone, fullJid);
-  const replyRoute = resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute, leadFromStore);
-  const incomingContent = extractIncomingContent(rawMsg);
-  const text = incomingContent.text;
-  const pushName = rawMsg.pushName || null;
-
-  console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${incomingContent.historyText.slice(0, 60)}"`);
-  console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source}) candidates=${inboundRoute?.phoneCandidates?.join(',') || '-'} mapped=${inboundRoute?.mappedPhone || '-'}`);
+  void recordEvent({
+    leadKey: conversationPhone || leadId,
+    eventType: 'client_message_received',
+    payload: {
+      jid: fullJid,
+      phoneResolved: !!conversationPhone,
+      hasLid: !!inboundLidJid,
+      textLength: incomingContent.historyText.length,
+    },
+  });
 
   const existingLead = leadFromStore;
   const collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
   if (!incomingContent.historyText) return;
 
-  if (existingLead?.status === 'blocked' || isOperationalStopStatus(existingLead?.status) || shouldPauseSalesLead(existingLead)) return;
+  if (existingLead?.status === 'blocked' || isOperationalStopStatus(existingLead?.status) || shouldPauseSalesLead(existingLead)) {
+    void recordEvent({
+      leadKey: conversationPhone || leadId,
+      eventType: 'ai_reply_blocked',
+      payload: { status: existingLead?.status || 'unknown', reason: 'paused_status' },
+    });
+    return;
+  }
 
   if (existingLead?.campaignSentAt && !existingLead?.campaignLoopHandled && config.campaignLoopEnabled === false) {
     console.log(`[Agent] Campaign loop disabled - ignoring reply from ${leadId}`);
@@ -716,6 +789,11 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
   if (lead.status === 'blocked' || isOperationalStopStatus(lead.status) || shouldPauseSalesLead(lead)) {
     console.log(`[Agent] Lead ${leadId} is paused with status ${lead.status}; skipping automatic reply.`);
+    void recordEvent({
+      leadKey: leadId,
+      eventType: 'ai_reply_blocked',
+      payload: { status: lead.status, reason: 'paused_status_buffered' },
+    });
     return;
   }
 
@@ -745,6 +823,12 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     lead.displayNumber = extractedPhone;
     lead.phoneResolved = true;
     console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
+    void persistLidPhonePair({
+      lidJid: lead.lidJid || resolveInboundLidJid(fullJid, route.options?.inboundRoute || null),
+      phone: extractedPhone,
+      source: 'phone_extracted_from_user',
+      confidence: 0.95,
+    });
   }
 
   if (

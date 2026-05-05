@@ -16,6 +16,20 @@ import { extractAndSavePDF, getUploadedDocs, removePDF } from './knowledge/pdf-l
 import { testAPIKey } from './ai/gemini.js';
 import { createAdResearchService } from './ad-research/service.js';
 import { createSystemStatusService } from './system-status.js';
+import {
+  createConsultant,
+  listConsultants,
+  setConsultantActive,
+  updateConsultant,
+} from './data/consultants-repository.js';
+import {
+  createFaqItem,
+  listFaqItems,
+  setFaqItemActive,
+  updateFaqItem,
+} from './data/faq-repository.js';
+import { upsertLidPhoneMapping } from './data/lid-phone-map-repository.js';
+import { isLidIdentifier, normalizeLidJid, normalizeRealWhatsAppPhone } from './phone-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,6 +136,24 @@ const adResearch = createAdResearchService({ loadConfig, broadcast });
 const systemStatus = createSystemStatusService({ wa, queue, adResearch, loadConfig, broadcast });
 
 wa.onMessage = handleIncomingMessage;
+wa.on('contact-map-update', ({ alias, phone, source }) => {
+  const normalizedPhone = normalizeRealWhatsAppPhone(phone);
+  const aliasText = String(alias || '');
+  const lidJid = isLidIdentifier(aliasText)
+    ? normalizeLidJid(aliasText)
+    : (/lid/i.test(String(source || '')) && !normalizeRealWhatsAppPhone(aliasText))
+      ? normalizeLidJid(aliasText)
+      : null;
+
+  if (lidJid && normalizedPhone) {
+    void upsertLidPhoneMapping({
+      lid_jid: lidJid,
+      phone: normalizedPhone,
+      source: String(source || 'contact_sync'),
+      confidence: /phoneNumberShare|onWhatsApp|contacts\.upsert/i.test(String(source || '')) ? 0.9 : 0.8,
+    });
+  }
+});
 
 startFollowUpCron(wa);
 startDailyReportCron(wa);
@@ -304,6 +336,87 @@ app.post('/api/campaign/clear', (req, res) => {
   const success = queue.clear();
   systemStatus.emitSnapshot();
   success ? res.json({ success: true }) : res.status(400).json({ error: 'Pare a campanha antes de limpar.' });
+});
+
+app.get('/api/consultants', async (req, res) => {
+  try {
+    const includeInactive = String(req.query.includeInactive || 'true') !== 'false';
+    const consultants = await listConsultants({ config: loadConfig(), includeInactive });
+    res.json(consultants);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/consultants', async (req, res) => {
+  try {
+    const consultant = await createConsultant(req.body || {});
+    systemStatus.emitSnapshot();
+    res.status(201).json(consultant);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/consultants/:id', async (req, res) => {
+  try {
+    const consultant = await updateConsultant(req.params.id, req.body || {});
+    if (!consultant) return res.status(404).json({ error: 'Consultor nao encontrado' });
+    systemStatus.emitSnapshot();
+    res.json(consultant);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/consultants/:id/active', async (req, res) => {
+  try {
+    const consultant = await setConsultantActive(req.params.id, !!req.body?.active);
+    if (!consultant) return res.status(404).json({ error: 'Consultor nao encontrado' });
+    systemStatus.emitSnapshot();
+    res.json(consultant);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/faq', async (req, res) => {
+  try {
+    const includeInactive = String(req.query.includeInactive || 'true') !== 'false';
+    const items = await listFaqItems({ includeInactive });
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/faq', async (req, res) => {
+  try {
+    const item = await createFaqItem(req.body || {});
+    res.status(201).json(item);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/faq/:id', async (req, res) => {
+  try {
+    const item = await updateFaqItem(req.params.id, req.body || {});
+    if (!item) return res.status(404).json({ error: 'FAQ nao encontrada' });
+    res.json(item);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/faq/:id/active', async (req, res) => {
+  try {
+    const item = await setFaqItemActive(req.params.id, !!req.body?.active);
+    if (!item) return res.status(404).json({ error: 'FAQ nao encontrada' });
+    res.json(item);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.post('/api/ad-research/search', (req, res) => {
