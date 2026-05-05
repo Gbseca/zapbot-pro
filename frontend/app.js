@@ -3168,7 +3168,181 @@ function updateKnowledgeCounter(textarea) {
   counter.textContent = `${len.toLocaleString()} / ${MAX.toLocaleString()} caracteres${remaining < 200 ? ' â€” quase no limite!' : ''}`;
 }
 
+
 document.addEventListener('DOMContentLoaded', () => {
   const ta = document.getElementById('ai-company-info');
   if (ta) updateKnowledgeCounter(ta);
 });
+
+/* ═══════════════════════════════════════════════════════════════
+   REDESIGN VISUAL — ZapBot Pro SaaS Upgrade (app.js additions)
+═══════════════════════════════════════════════════════════════ */
+
+// ── Mobile Sidebar Toggle ────────────────────────────────────
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!sidebar) return;
+  const isOpen = sidebar.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('visible', isOpen);
+}
+function closeSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar) sidebar.classList.remove('open');
+  if (overlay) overlay.classList.remove('visible');
+}
+
+// ── Topbar WA status updater ─────────────────────────────────
+(function patchHandleStatusUpdate() {
+  const _orig = window.handleStatusUpdate;
+  window.handleStatusUpdate = function(status, details) {
+    if (_orig) _orig(status, details);
+    const pill = document.getElementById('topbar-wa-pill');
+    const dot  = document.getElementById('topbar-wa-dot');
+    const txt  = document.getElementById('topbar-wa-text');
+    if (!pill) return;
+    if (status === 'connected') {
+      pill.className = 'topbar-wa-pill connected';
+      if (txt) txt.textContent = 'Conectado';
+    } else if (status === 'qr_ready') {
+      pill.className = 'topbar-wa-pill';
+      if (txt) txt.textContent = 'Aguardando QR';
+    } else {
+      pill.className = 'topbar-wa-pill';
+      if (txt) txt.textContent = 'Desconectado';
+    }
+  };
+})();
+
+// ── Topbar section label updater ─────────────────────────────
+(function patchSwitchTab() {
+  const _orig = window.switchTab;
+  const LABELS = {
+    connection: 'Conexão WhatsApp', contacts: 'Contatos', message: 'Mensagem',
+    schedule: 'Agendamento', campaign: 'Campanha', 'ai-agent': 'Agente IA',
+    leads: 'Leads', internal: 'Consultores / FAQ',
+    'ad-research': 'Pesquisa Ads', status: 'Status do Sistema',
+  };
+  window.switchTab = function(tabId) {
+    if (_orig) _orig(tabId);
+    const el = document.getElementById('topbar-section');
+    if (el) el.textContent = LABELS[tabId] || tabId;
+    if (window.innerWidth <= 768) closeSidebar();
+  };
+})();
+
+// ── Upgraded showToast ───────────────────────────────────────
+(function() {
+  const ICONS = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+  window.showToast = function(message, type = 'info', duration = 4000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    const icon = ICONS[type] || ICONS.info;
+    toast.innerHTML = `
+      <span class="toast-icon">${icon}</span>
+      <div class="toast-body"><span class="toast-msg">${message}</span></div>
+      <div class="toast-progress"></div>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add('removing');
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  };
+})();
+
+// ── Enhanced Lead Card renderer ──────────────────────────────
+(function patchRenderLeadCard() {
+  const STATUS_LABELS = {
+    new: 'Novo', talking: 'Em conversa', qualified: 'Qualificado',
+    transferred: 'Transferido', cold: 'Frio', no_interest: 'Sem interesse',
+    blocked: 'Bloqueado', awaiting_phone_for_handoff: 'Aguard. telefone',
+    handoff_client_confirmation_failed: 'Erro handoff',
+    awaiting_operational_data: 'Aguard. dados', payment_claimed: 'Pag. reclamado',
+    transferred_to_financial: 'Transf. financeiro', transferred_to_support: 'Transf. suporte',
+    human_taken_over: 'Humano assumiu', human_requested: 'Humano solicitado',
+  };
+
+  window.renderLeadCard = function(lead) {
+    const status  = lead.status || 'new';
+    const name    = lead.pushName || lead.name || 'Sem nome';
+    const phone   = lead.phone || lead.displayNum || '';
+    const lid     = lead.leadId || '';
+    const plate   = lead.plate || '';
+    const vehicle = [lead.vehicle, lead.year].filter(Boolean).join(' ');
+    const summary = lead.lastMessage || lead.summary || '';
+    const initial = name.charAt(0).toUpperCase();
+    const coldAv  = ['cold', 'no_interest', 'blocked'].includes(status) ? ' cold-av' : '';
+    const badgeLbl = STATUS_LABELS[status] || status;
+    const phoneCls = phone ? '' : ' unresolved';
+    const phoneTxt = phone || 'Telefone não resolvido';
+
+    const card = document.createElement('div');
+    card.className = 'lead-card';
+    card.onclick = () => openLeadModal && openLeadModal(lead);
+    card.innerHTML = `
+      <div class="lead-avatar${coldAv}">${initial}</div>
+      <div class="lead-info">
+        <div class="lead-name">${name}</div>
+        <div class="lead-meta-row">
+          <span class="lead-phone-tag${phoneCls}">${phoneTxt}</span>
+          ${lid ? `<span class="lead-lid-tag">${lid.slice(0,10)}…</span>` : ''}
+        </div>
+        ${summary ? `<div class="lead-summary-text">${summary.slice(0,80)}</div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+        <span class="lead-status-badge lsb-${status}">${badgeLbl}</span>
+        ${vehicle ? `<span class="lead-model">${vehicle}</span>` : ''}
+        ${plate ? `<span class="lead-plate">${plate}</span>` : ''}
+      </div>
+      <div class="lead-actions-mini">
+        <button class="lead-btn danger" onclick="event.stopPropagation();blockLead&&blockLead('${lid}')" title="Bloquear">🚫</button>
+      </div>`;
+    return card;
+  };
+})();
+
+// ── Enhanced internal consultant renderer ────────────────────
+(function patchRenderInternalConsultant() {
+  window.renderInternalConsultantCard = function(c) {
+    const initial = (c.name || '?').charAt(0).toUpperCase();
+    const tags = [];
+    if (c.active !== false) tags.push('<span class="internal-cons-tag green">Ativo</span>');
+    else tags.push('<span class="internal-cons-tag inactive">Inativo</span>');
+    if (c.receivesSales) tags.push('<span class="internal-cons-tag">Vendas</span>');
+    if (c.receivesSupport) tags.push('<span class="internal-cons-tag">Suporte</span>');
+
+    const card = document.createElement('div');
+    card.className = 'internal-consultant-card';
+    card.innerHTML = `
+      <div class="internal-cons-avatar">${initial}</div>
+      <div class="internal-cons-info">
+        <div class="internal-cons-name">${c.name || '—'}</div>
+        <div class="internal-cons-meta">${c.phone || ''} ${c.role ? '· ' + c.role : ''}</div>
+        <div class="internal-cons-tags">${tags.join('')}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button class="btn btn-outline btn-sm" onclick="toggleConsultantActive('${c.id}', ${!c.active})">${c.active !== false ? 'Desativar' : 'Ativar'}</button>
+      </div>`;
+    return card;
+  };
+
+  window.renderInternalFaqCard = function(f) {
+    const keywords = (f.keywords || []).slice(0, 4);
+    const card = document.createElement('div');
+    card.className = 'internal-faq-card';
+    card.innerHTML = `
+      <div class="internal-faq-head">
+        <span class="internal-faq-title">${f.title || '—'}</span>
+        ${f.category ? `<span class="internal-faq-cat">${f.category}</span>` : ''}
+      </div>
+      <div class="internal-faq-preview">${(f.answer || '').slice(0, 120)}${(f.answer || '').length > 120 ? '…' : ''}</div>
+      ${keywords.length ? `<div class="internal-faq-keywords">${keywords.map(k => `<span class="internal-faq-kw">${k}</span>`).join('')}</div>` : ''}
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button class="btn btn-outline btn-sm" onclick="toggleFaqActive('${f.id}', ${!f.active})">${f.active !== false ? 'Desativar' : 'Ativar'}</button>
+      </div>`;
+    return card;
+  };
+})();
