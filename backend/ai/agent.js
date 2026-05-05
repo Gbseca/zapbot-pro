@@ -9,7 +9,7 @@ import {
 import { buildContext, buildQualificationContext } from './context-builder.js';
 import { callAI } from './gemini.js';
 import { sendHumanized, sendTextWithConfirmation } from './humanizer.js';
-import { detectAndExtract, tryExtractPhone } from './lead-detector.js';
+import { detectAndExtract } from './lead-detector.js';
 import { executeFinancialHandoff, executeHandoff } from './handoff.js';
 import { getCollectionsContextForPhone } from '../campaign-state.js';
 import { handleConsultantMessage, isConsultantLinkCommand, resolveConsultantForRoute } from './consultant-agent.js';
@@ -29,6 +29,11 @@ import {
   isSalesStopStatus,
   markSalesHandoffFailure,
 } from './sales-guard.js';
+import {
+  applyDeterministicFactsToLead,
+  buildRecentUserText,
+  hasKnownPlate,
+} from './deterministic-facts.js';
 import { recordEvent } from '../data/events-repository.js';
 import { resolvePhoneByLid, upsertLidPhoneMapping } from '../data/lid-phone-map-repository.js';
 
@@ -102,6 +107,7 @@ const CLARIFICATION_RESPONSES = [
 
 const ASK_PHONE_FOR_HANDOFF_REPLY = 'Recebi os dados. Para eu encaminhar corretamente para o consultor, me passa seu WhatsApp com DDD? O numero nao apareceu certinho por aqui.';
 const HANDOFF_RECOVERY_REPLY = 'Recebi seus dados, mas tive uma falha ao confirmar o encaminhamento por aqui. Para encaminhar corretamente, me passa seu WhatsApp com DDD?';
+const OPERATIONAL_PENDING_DATA_STATUS = 'awaiting_operational_data';
 
 function normalizeText(text) {
   return String(text || '')
@@ -238,6 +244,154 @@ function rememberLeadContactRoute(lead, {
     lead.internalWhatsAppId = lead.lidJid;
   }
 
+  return lead;
+}
+
+function buildLeadFactText(lead, currentText = '') {
+  return buildRecentUserText(lead, currentText, 8);
+}
+
+async function applyLatestFactsToLead(lead, {
+  currentText = '',
+  fullJid = null,
+  inboundRoute = null,
+  source = 'message',
+} = {}) {
+  if (!lead) return {};
+  const beforePlate = lead.plate || null;
+  const beforePhone = getLeadRealPhone(lead);
+  const facts = applyDeterministicFactsToLead(lead, buildLeadFactText(lead, currentText));
+  const lidJid = lead.lidJid || resolveInboundLidJid(fullJid, inboundRoute);
+
+  if (facts.plate && facts.plate !== beforePlate) {
+    console.log(`[Agent] Plate captured deterministically: ${facts.plate}`);
+  }
+
+  if (facts.phone && facts.phone !== beforePhone) {
+    console.log(`[Agent] Phone extracted from message: ${facts.phone}`);
+    void persistLidPhonePair({
+      lidJid,
+      phone: facts.phone,
+      source,
+      confidence: 0.95,
+    });
+  }
+
+  return facts;
+}
+
+function getOperationalEventType(event = {}) {
+  return event.type || event.lastIntent || '';
+}
+
+function shouldRequirePlateBeforeOperationalHandoff(event = {}, lead = {}, text = '') {
+  if (hasKnownPlate(lead, text) || lead.receiptReceived || event.receiptReceived || event.billingDisputed || event.inspectionDisputed) {
+    return false;
+  }
+
+  return [
+    'boleto_request',
+    'regularization_request',
+    'payment_claimed',
+    'inspection_pending',
+    'system_check_request',
+  ].includes(getOperationalEventType(event));
+}
+
+function shouldRequirePhoneBeforeOperationalHandoff(event = {}, lead = {}, config = {}) {
+  if (getLeadRealPhone(lead)) return false;
+  if (config.allowHandoffWithoutPhone === true || process.env.WA_ALLOW_HANDOFF_WITHOUT_PHONE === 'true') return false;
+
+  const type = getOperationalEventType(event);
+  if (type === 'human_requested' || type === 'cancel_request' || type === 'angry_customer') return false;
+  return true;
+}
+
+function rememberPendingOperationalHandoff(lead, event = {}) {
+  lead.pendingOperationalHandoff = true;
+  lead.pendingOperationalEvent = {
+    ...event,
+    reply: event.reply || '',
+    reason: event.reason || '',
+  };
+  lead.pendingHandoffReason = event.reason || lead.pendingHandoffReason || null;
+  lead.conversationMode = event.conversationMode || lead.conversationMode || 'collections';
+  return lead;
+}
+
+function clearPendingOperationalHandoff(lead) {
+  delete lead.pendingOperationalHandoff;
+  delete lead.pendingOperationalEvent;
+  delete lead.pendingHandoffReason;
+  return lead;
+}
+
+function buildOperationalPhoneRequest(lead = {}) {
+  if (lead.plate) {
+    return `Recebi a placa ${lead.plate}. Para eu encaminhar corretamente para o consultor, me passa seu WhatsApp com DDD? O numero nao apareceu certinho por aqui.`;
+  }
+  return 'Entendi. Para eu encaminhar corretamente para o consultor, me passa seu WhatsApp com DDD? O numero nao apareceu certinho por aqui.';
+}
+
+function buildOperationalPlateRequest(event = {}) {
+  const type = getOperationalEventType(event);
+  if (type === 'inspection_pending') {
+    return 'Entendi. Para encaminhar sua revistoria certinho, pode me passar a placa do veiculo?';
+  }
+  if (type === 'payment_claimed') {
+    return 'Entendi. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro. Para localizar mais rapido, pode me passar a placa do veiculo?';
+  }
+  return event.reply || 'Entendi. Para localizar mais rapido, pode me passar a placa do veiculo?';
+}
+
+function buildOperationalReply(event = {}, lead = {}) {
+  const type = getOperationalEventType(event);
+  if (!lead.plate) return event.reply || '';
+
+  if (type === 'boleto_request' || type === 'regularization_request' || type === 'system_check_request') {
+    return `Recebi a placa ${lead.plate}. Vou encaminhar para um consultor verificar a melhor forma de regularizar seu caso.`;
+  }
+
+  if (type === 'payment_claimed') {
+    return `Recebi a placa ${lead.plate}. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro. Vou encaminhar seu caso para continuidade.`;
+  }
+
+  if (type === 'inspection_pending') {
+    return `Recebi a placa ${lead.plate}. Vou encaminhar para um consultor acompanhar sua revistoria e dar continuidade por aqui.`;
+  }
+
+  return event.reply || '';
+}
+
+function refreshOperationalCaseSummary(lead, event = {}, content = {}) {
+  if (!lead) return lead;
+  const latestText = content.historyText || content.text || '';
+  const userHistory = (lead.history || [])
+    .filter((entry) => entry?.role === 'user' && entry.content)
+    .slice(-4)
+    .map((entry) => entry.content)
+    .join(' | ');
+  const facts = [
+    'Atendimento operacional/regularizacao.',
+    event.reason || lead.operationalReason || '',
+    lead.plate ? `Placa informada: ${lead.plate}.` : '',
+    getLeadRealPhone(lead) ? `Telefone real resolvido: ${getLeadRealPhone(lead)}.` : 'Telefone real ainda nao resolvido.',
+    lead.paymentClaimed ? 'Cliente informou pagamento.' : '',
+    lead.receiptReceived ? 'Comprovante recebido ou mencionado.' : '',
+    lead.appBlocked ? 'Cliente relatou app bloqueado.' : '',
+    lead.billingDisputed ? 'Cliente contestou cobranca/vencimento.' : '',
+    lead.inspectionDisputed ? 'Cliente contestou revistoria.' : '',
+    latestText ? `Ultima mensagem: "${String(latestText).slice(0, 160)}".` : '',
+    userHistory ? `Historico recente: ${userHistory.slice(0, 260)}.` : '',
+  ].filter(Boolean);
+
+  lead.caseSummary = facts.join(' ');
+  lead.leadSummary = {
+    ...(typeof lead.leadSummary === 'object' && lead.leadSummary ? lead.leadSummary : {}),
+    caseSummary: lead.caseSummary,
+    lastUserMessage: latestText || lead.leadSummary?.lastUserMessage || '',
+    updatedAt: new Date().toISOString(),
+  };
   return lead;
 }
 
@@ -563,6 +717,99 @@ async function handlePendingCommercialHandoff(wa, leadId, lead, route, config) {
   return true;
 }
 
+async function handleOperationalEventAction(wa, leadId, lead, route, config, event, content = {}) {
+  if (!event) return false;
+  const text = content.historyText || content.text || '';
+
+  if (!event.shouldNotifyHuman) {
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      buildOperationalReply(event, lead) || event.reply,
+      () => ({}),
+      route.options,
+    );
+    return true;
+  }
+
+  rememberPendingOperationalHandoff(lead, event);
+
+  if (shouldRequirePlateBeforeOperationalHandoff(event, lead, text)) {
+    lead.status = OPERATIONAL_PENDING_DATA_STATUS;
+    lead.stage = OPERATIONAL_PENDING_DATA_STATUS;
+    lead.operationalStatus = 'awaiting_plate_for_handoff';
+    saveLead(leadId, lead);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      buildOperationalPlateRequest(event),
+      () => ({}),
+      route.options,
+    );
+    return true;
+  }
+
+  if (shouldRequirePhoneBeforeOperationalHandoff(event, lead, config)) {
+    lead.status = 'awaiting_phone_for_handoff';
+    lead.stage = 'awaiting_phone_for_handoff';
+    lead.phoneResolved = false;
+    lead.operationalStatus = 'awaiting_phone_for_handoff';
+    saveLead(leadId, lead);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      buildOperationalPhoneRequest(lead),
+      () => ({}),
+      route.options,
+    );
+    return true;
+  }
+
+  lead.status = event.status || lead.status || 'awaiting_financial_review';
+  lead.stage = event.stage || lead.stage || lead.status;
+  lead.operationalStatus = 'handoff_ready';
+  refreshOperationalCaseSummary(lead, event, content);
+
+  const reply = buildOperationalReply(event, lead) || event.reply;
+  await persistSimpleReply(
+    wa,
+    leadId,
+    lead,
+    route.target,
+    reply,
+    () => ({}),
+    route.options,
+  );
+
+  await executeFinancialHandoff(wa, lead, config, event);
+  const storedLead = getLead(leadId) || lead;
+  clearPendingOperationalHandoff(storedLead);
+  saveLead(leadId, storedLead);
+  return true;
+}
+
+async function handlePendingOperationalHandoff(wa, leadId, lead, route, config, content = {}) {
+  const event = lead.pendingOperationalEvent || {
+    type: lead.lastIntent || 'regularization_request',
+    status: lead.status || 'awaiting_financial_review',
+    stage: lead.stage || 'awaiting_financial_review',
+    reply: 'Recebi. Vou encaminhar para um consultor dar continuidade por aqui.',
+    reason: lead.pendingHandoffReason || lead.operationalReason || 'Cliente aguardava encaminhamento operacional.',
+    shouldNotifyHuman: true,
+    shouldStopAutomation: true,
+    lastIntent: lead.lastIntent || 'regularization_request',
+    conversationMode: lead.conversationMode || 'collections',
+  };
+
+  return handleOperationalEventAction(wa, leadId, lead, route, config, event, content);
+}
+
 export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
 
@@ -649,9 +896,18 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
+  const decisionLeadSeed = existingLead
+    ? { ...existingLead, history: existingLead.history || [] }
+    : createNewLead(leadId, displayNum, pushName, conversationPhone);
+  rememberLeadContactRoute(decisionLeadSeed, { conversationPhone, displayNum, fullJid, inboundRoute });
+  applyDeterministicFactsToLead(
+    decisionLeadSeed,
+    buildRecentUserText(existingLead || {}, incomingContent.historyText, 8),
+  );
+
   const decision = makeConversationDecision({
     text,
-    lead: existingLead || {},
+    lead: decisionLeadSeed,
     collectionsContext,
     incomingContent,
   });
@@ -669,12 +925,14 @@ export async function handleIncomingMessage(wa, rawMsg) {
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: incomingContent.historyText, ts: Date.now() });
     lead.lastInteraction = new Date().toISOString();
+    await applyLatestFactsToLead(lead, {
+      fullJid,
+      inboundRoute,
+      source: 'phone_extracted_from_user',
+    });
     applyConversationDecisionToLead(lead, decision, incomingContent);
 
-    await persistSimpleReply(wa, leadId, lead, replyRoute.target, operationalEvent.reply, () => ({}), replyRoute.options);
-    if (operationalEvent.shouldNotifyHuman) {
-      await executeFinancialHandoff(wa, lead, config, operationalEvent);
-    }
+    await handleOperationalEventAction(wa, leadId, lead, replyRoute, config, operationalEvent, incomingContent);
     return;
   }
 
@@ -817,18 +1075,22 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   lead.followUp1Sent = false;
   lead.followUp2Sent = false;
 
-  const extractedPhone = tryExtractPhone(combinedText);
-  if (extractedPhone) {
-    lead.phone = extractedPhone;
-    lead.displayNumber = extractedPhone;
-    lead.phoneResolved = true;
-    console.log(`[Agent] Phone extracted from message: ${extractedPhone}`);
-    void persistLidPhonePair({
-      lidJid: lead.lidJid || resolveInboundLidJid(fullJid, route.options?.inboundRoute || null),
-      phone: extractedPhone,
-      source: 'phone_extracted_from_user',
-      confidence: 0.95,
-    });
+  await applyLatestFactsToLead(lead, {
+    fullJid,
+    inboundRoute: route.options?.inboundRoute || null,
+    source: 'phone_extracted_from_user',
+  });
+
+  if (lead.pendingOperationalHandoff || lead.pendingOperationalEvent || lead.status === OPERATIONAL_PENDING_DATA_STATUS) {
+    await handlePendingOperationalHandoff(
+      wa,
+      leadId,
+      lead,
+      route,
+      config,
+      { text: combinedText, historyText: combinedText },
+    );
+    return;
   }
 
   if (
@@ -892,18 +1154,15 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
   if (decision.operationalEvent) {
     console.log(`[Agent] Buffered operational event ${decision.operationalEvent.type} for ${leadId}: ${decision.operationalEvent.reason}`);
-    await persistSimpleReply(
+    await handleOperationalEventAction(
       wa,
       leadId,
       lead,
-      route.target,
-      decision.operationalEvent.reply,
-      () => ({}),
-      route.options,
+      route,
+      config,
+      decision.operationalEvent,
+      { text: combinedText, historyText: combinedText },
     );
-    if (decision.operationalEvent.shouldNotifyHuman) {
-      await executeFinancialHandoff(wa, lead, config, decision.operationalEvent);
-    }
     return;
   }
 

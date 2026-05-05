@@ -2980,7 +2980,7 @@ function openLeadModal(number) {
   const waTarget = getLeadWhatsAppTarget(lead);
   actions.innerHTML = `
     ${lead.status !== 'human_taken_over' ? `<button class="btn btn-outline btn-sm" onclick="takeOverLead('${number}')">Assumir atendimento</button>` : ''}
-    ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','awaiting_phone_for_handoff','handoff_client_confirmation_failed','handoff_failed','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
+    ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','awaiting_operational_data','awaiting_phone_for_handoff','handoff_client_confirmation_failed','handoff_failed','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
     ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm">ðŸ’¬ Abrir no WhatsApp</a>` : `<span class="btn btn-outline btn-sm disabled">WhatsApp nao resolvido</span>`}
     ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">â›” Pausar bot</button>` : ''}
     <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">ðŸ—‘ï¸ Excluir lead</button>
@@ -3116,7 +3116,7 @@ function getLeadRisk(lead) {
     'handoff_failed',
     'human_taken_over',
   ]);
-  const mediumStatuses = new Set(['payment_claimed', 'inspection_pending', 'app_blocked', 'awaiting_phone_for_handoff']);
+  const mediumStatuses = new Set(['payment_claimed', 'inspection_pending', 'app_blocked', 'awaiting_operational_data', 'awaiting_phone_for_handoff']);
   if (highStatuses.has(lead?.status)) return { level: 'alto', label: 'alto' };
   if (mediumStatuses.has(lead?.status)) return { level: 'medio', label: 'medio' };
   return { level: 'baixo', label: 'baixo' };
@@ -3141,6 +3141,7 @@ function statusLabel(status) {
     billing_disputed: 'Cobranca contestada',
     transferred_to_financial: 'Transferido financeiro',
     transferred_to_support: 'Transferido suporte',
+    awaiting_operational_data: 'Aguardando dados',
     awaiting_phone_for_handoff: 'Aguardando telefone',
     handoff_client_confirmation_failed: 'Falha na confirmacao',
     handoff_failed: 'Falha no encaminhamento',

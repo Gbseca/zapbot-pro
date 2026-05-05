@@ -1144,6 +1144,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .status-dot-blocked { background: #ef4444; }
 .status-dot-human_requested,
 .status-dot-awaiting_financial_review,
+.status-dot-awaiting_operational_data,
 .status-dot-payment_claimed,
 .status-dot-receipt_received,
 .status-dot-inspection_pending,

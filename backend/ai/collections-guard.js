@@ -1,3 +1,5 @@
+import { isValidBrazilPlate, normalizePlate } from './lead-detector.js';
+
 const HUMAN_REPLY = [
   'Entendi. Vou encaminhar seu caso para um atendente humano verificar com cuidado.',
   '',
@@ -184,9 +186,13 @@ const BILLING_DISPUTE_PATTERNS = [
 ];
 
 const BOLETO_REQUEST_PATTERNS = [
+  /\bquero (o )?boleto\b/,
+  /\bquero pagar (o )?boleto\b/,
+  /\bpagar (o )?boleto\b/,
   /\bpreciso (do|de um|da) boleto\b/,
   /\bme manda (o )?boleto\b/,
   /\bme envia (o )?boleto\b/,
+  /\benvie (meu|o )?boleto\b/,
   /\breenviar (o )?boleto\b/,
   /\bsegunda via\b/,
   /\bgerar boleto\b/,
@@ -252,8 +258,11 @@ const INSPECTION_PROGRESS_HINTS = [
 ];
 
 function extractPlate(text = '') {
-  const match = String(text || '').toUpperCase().match(/\b[A-Z]{3}\d[A-Z0-9]\d{2}\b/);
-  return match ? match[0] : null;
+  const tokens = String(text || '').match(/\b[A-Za-z]{3}[-\s]?\d[A-Za-z0-9][-\s]?\d{2}\b/g) || [];
+  for (const token of tokens) {
+    if (isValidBrazilPlate(token)) return normalizePlate(token);
+  }
+  return null;
 }
 
 function extractPaymentAmount(text = '') {

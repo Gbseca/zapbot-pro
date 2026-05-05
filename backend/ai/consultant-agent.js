@@ -16,6 +16,7 @@ import { sendTextWithConfirmation } from './humanizer.js';
 
 const PENDING_STATUSES = new Set([
   'awaiting_phone_for_handoff',
+  'awaiting_operational_data',
   'handoff_client_confirmation_failed',
   'human_requested',
   'human_taken_over',
