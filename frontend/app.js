@@ -2508,7 +2508,10 @@ function renderInternalConsultants() {
     <div class="internal-row" data-id="${escapeAttr(c.id)}">
       <div class="internal-row-head">
         <strong>${escapeHtml(c.name || 'Consultor')}</strong>
-        <span class="internal-pill ${c.active ? 'active' : 'inactive'}">${c.active ? 'ativo' : 'inativo'}</span>
+        <div class="internal-row-head-actions">
+          <span class="internal-pill ${c.active ? 'active' : 'inactive'}">${c.active ? 'ativo' : 'inativo'}</span>
+          <button class="btn btn-danger btn-sm" onclick="deleteInternalConsultant('${escapeAttr(c.id)}', '${escapeAttr(c.name || 'Consultor')}')">Remover</button>
+        </div>
       </div>
       <div class="internal-row-grid">
         <label>Nome<input class="form-input" data-field="name" value="${escapeAttr(c.name || '')}"></label>
@@ -2527,7 +2530,6 @@ function renderInternalConsultants() {
       </div>
       <div class="internal-row-actions">
         <button class="btn btn-outline btn-sm" onclick="saveInternalConsultant('${escapeAttr(c.id)}')">Salvar alteracoes</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteInternalConsultant('${escapeAttr(c.id)}', '${escapeAttr(c.name || 'Consultor')}')">Remover</button>
       </div>
     </div>
   `).join('');
