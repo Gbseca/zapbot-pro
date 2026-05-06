@@ -141,6 +141,7 @@ function mapOperationalIntent(type) {
     human_requested: 'human_requested',
     payment_claimed: 'billing_payment_claimed',
     receipt_received: 'billing_receipt_sent',
+    receipt_available: 'billing_receipt_available',
     billing_disputed: 'billing_due_date_dispute',
     app_blocked: 'billing_app_blocked',
     boleto_request: 'boleto_request',
@@ -297,7 +298,8 @@ function buildCaseSummary(lead, decision, content = {}) {
   if (decision.emotion && decision.emotion !== 'neutral') facts.push(`Cliente aparenta estar ${decision.emotion}.`);
   if (decision.operationalEvent?.reason) facts.push(decision.operationalEvent.reason);
   if (lead.paymentClaimed) facts.push('Cliente informou pagamento.');
-  if (lead.receiptReceived) facts.push('Comprovante recebido ou mencionado.');
+  if (lead.receiptReceived) facts.push('Comprovante recebido.');
+  if (!lead.receiptReceived && lead.receiptAvailable) facts.push('Cliente informou que tem comprovante, mas ainda nao enviou.');
   if (lead.paymentDate) facts.push(`Data informada: ${lead.paymentDate}.`);
   if (lead.paymentAmount) facts.push(`Valor informado: ${lead.paymentAmount}.`);
   if (lead.appBlocked) facts.push('Cliente relatou app bloqueado.');

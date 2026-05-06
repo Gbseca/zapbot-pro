@@ -9,7 +9,7 @@ const HUMAN_REPLY = [
 const PAYMENT_CLAIMED_REPLY = [
   'Entendi. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro.',
   '',
-  'Para localizar mais rapido, pode me enviar o comprovante e a placa do veiculo, se ainda nao enviou?',
+  'Vou encaminhar para um consultor verificar e orientar o proximo passo.',
 ].join('\n');
 
 const RECEIPT_RECEIVED_REPLY = [
@@ -17,6 +17,8 @@ const RECEIPT_RECEIVED_REPLY = [
   '',
   'Nao vou te pedir novo pagamento nem revistoria sem validacao interna.',
 ].join('\n');
+
+const RECEIPT_AVAILABLE_REPLY = 'Perfeito. Pode me enviar o comprovante por aqui?';
 
 const WEEKEND_DUE_REPLY = [
   'Voce tem razao em questionar.',
@@ -45,13 +47,13 @@ const INSPECTION_PENDING_REPLY = [
 const BOLETO_REQUEST_REPLY = [
   'Entendi. Como boleto e regularizacao dependem de consulta do financeiro, vou encaminhar para um consultor verificar seu caso.',
   '',
-  'Para localizar mais rapido, pode me passar a placa do veiculo?',
+  'Para anexar seu contato certinho no encaminhamento, me confirma seu WhatsApp com DDD?',
 ].join('\n');
 
 const REGULARIZATION_REPLY = [
   'Entendi. Vou encaminhar para um consultor verificar a melhor forma de regularizar seu caso.',
   '',
-  'Se puder, me envie a placa do veiculo para agilizar o atendimento.',
+  'Para anexar seu contato certinho no encaminhamento, me confirma seu WhatsApp com DDD?',
 ].join('\n');
 
 const SYSTEM_CHECK_REPLY = [
@@ -161,13 +163,24 @@ const PAYMENT_CLAIMED_PATTERNS = [
   /\bquitei\b/,
 ];
 
-const RECEIPT_PATTERNS = [
+const RECEIPT_AVAILABLE_PATTERNS = [
+  /\btenho (o )?(comprovante|recibo)\b/,
+  /\bestou com (o )?(comprovante|recibo)\b/,
+  /\bcomprovante eu tenho\b/,
+  /\bposso mandar (o )?(comprovante|recibo)\b/,
+  /\bvou enviar (o )?(comprovante|recibo)\b/,
+  /\bvou mandar (o )?(comprovante|recibo)\b/,
+  /\bquer que eu mande (o )?(comprovante|recibo)\b/,
+  /\btenho como comprovar\b/,
+];
+
+const RECEIPT_MENTION_PATTERNS = [
   /\bcomprovante\b/,
   /\brecibo\b/,
-  /\bsegue (o )?(comprovante|recibo)\b/,
   /\bmandei (o )?(comprovante|recibo)\b/,
   /\benviei (o )?(comprovante|recibo)\b/,
   /\bja enviei\b/,
+  /\bsegue (o )?(comprovante|recibo)\b/,
   /\besta anex(o|ado)\b/,
 ];
 
@@ -186,6 +199,8 @@ const BILLING_DISPUTE_PATTERNS = [
 ];
 
 const BOLETO_REQUEST_PATTERNS = [
+  /\bboleto pendente\b/,
+  /\btratar (um )?boleto\b/,
   /\bquero (o )?boleto\b/,
   /\bquero pagar (o )?boleto\b/,
   /\bpagar (o )?boleto\b/,
@@ -201,6 +216,8 @@ const BOLETO_REQUEST_PATTERNS = [
 
 const REGULARIZATION_PATTERNS = [
   /\bquero regularizar\b/,
+  /\bquero pagar\b/,
+  /\bpreciso pagar\b/,
   /\bregularizar\b/,
   /\bnegociar\b/,
   /\bacordo\b/,
@@ -278,6 +295,18 @@ function extractPaymentDate(text = '') {
   return dateMatch ? dateMatch[0] : null;
 }
 
+function hasClearReceiptData(text = '') {
+  const normalized = normalizeText(text);
+  const amount = extractPaymentAmount(text);
+  const date = extractPaymentDate(text);
+  const transactionHint = matchAny(normalized, [
+    /\b(id|codigo|cod|autenticacao|transacao|protocolo|comprovante|e2e)\b/,
+    /\bpix\b/,
+  ]);
+  const longIdentifier = /\b[A-Z0-9]{8,}\b/i.test(String(text || '').replace(/\s+/g, ' '));
+  return !!(amount && date && (transactionHint || longIdentifier));
+}
+
 function makeEvent(type, overrides = {}) {
   const base = {
     type,
@@ -341,16 +370,30 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
     });
   }
 
-  const hasReceiptLanguage = matchAny(normalized, RECEIPT_PATTERNS);
-  if (hasAttachment || hasReceiptLanguage) {
+  const hasReceiptEvidence = hasAttachment || hasClearReceiptData(text);
+  if (hasReceiptEvidence) {
     return makeEvent('receipt_received', {
       status: 'receipt_received',
       reply: RECEIPT_RECEIVED_REPLY,
       reason: hasAttachment
         ? `Cliente enviou anexo em modo cobranca (${attachmentType || 'midia'}).`
-        : 'Cliente informou ou mencionou comprovante.',
+        : 'Cliente enviou dados claros de comprovante.',
       paymentClaimed: true,
       receiptReceived: true,
+    });
+  }
+
+  if (matchAny(normalized, RECEIPT_AVAILABLE_PATTERNS) || matchAny(normalized, RECEIPT_MENTION_PATTERNS)) {
+    return makeEvent('receipt_available', {
+      status: 'talking',
+      stage: 'engaged',
+      reply: RECEIPT_AVAILABLE_REPLY,
+      reason: 'Cliente informou que tem comprovante, mas ainda nao enviou anexo ou dados suficientes.',
+      shouldNotifyHuman: false,
+      shouldStopAutomation: false,
+      lastIntent: 'receipt_available',
+      paymentClaimed: true,
+      receiptAvailable: true,
     });
   }
 
@@ -465,6 +508,7 @@ export function applyOperationalEventToLead(lead, event, content = {}) {
   lead.lastOperationalEventAt = now;
 
   if (event.paymentClaimed) lead.paymentClaimed = true;
+  if (event.receiptAvailable) lead.receiptAvailable = true;
   if (event.receiptReceived) lead.receiptReceived = true;
   if (event.appBlocked) lead.appBlocked = true;
   if (event.billingDisputed) lead.billingDisputed = true;
@@ -485,6 +529,7 @@ export function applyOperationalEventToLead(lead, event, content = {}) {
     reason: event.reason,
     lastUserMessage: content.historyText || content.text || '',
     paymentClaimed: !!lead.paymentClaimed,
+    receiptAvailable: !!lead.receiptAvailable,
     receiptReceived: !!lead.receiptReceived,
     paymentDate: lead.paymentDate || null,
     paymentAmount: lead.paymentAmount || null,

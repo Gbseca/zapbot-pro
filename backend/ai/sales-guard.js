@@ -1,10 +1,11 @@
 import { isValidBrazilPlate, normalizePlate } from './lead-detector.js';
 
 const PRICE_REPLY = 'Eu nao consigo calcular o valor exato por aqui. Para nao te passar valor errado, vou encaminhar para um consultor preparar a cotacao com os dados do veiculo.';
-const READY_REPLY = 'Recebi os dados principais. Vou encaminhar para um consultor preparar sua cotacao e continuar o atendimento por aqui.';
+const READY_REPLY = 'Recebi os dados principais. Vou encaminhar para um consultor preparar sua cotacao real e continuar o atendimento por aqui.';
 const CONSULTANT_REPLY = 'Claro. Vou encaminhar para um consultor continuar seu atendimento por aqui.';
 const CONTRACT_REPLY = 'Essa etapa precisa ser finalizada com um consultor. Vou encaminhar para ele continuar com seguranca.';
 const HANDOFF_FAILED_REPLY = 'Tentei encaminhar automaticamente, mas nao consegui confirmar o envio para o consultor agora. Vou deixar seu atendimento registrado para o time verificar.';
+const HIGH_VALUE_REPLY = 'Entendi. Por ser um veiculo importado/de alto valor, o consultor precisa confirmar as condicoes certinhas para protecao.';
 
 export const SALES_STOP_STATUSES = new Set([
   'transferred',
@@ -84,6 +85,13 @@ const GENERATED_HANDOFF_PATTERNS = [
   /\bestou (te )?(transferindo|encaminhando)\b/i,
   /\bconsultor (vai|ira) (entrar em contato|continuar|te chamar)\b/i,
   /\baguarde (um )?momento\b/i,
+];
+
+const INFORMAL_HIGH_VALUE_PATTERNS = [
+  /\bcarro de sonho\b/i,
+  /\bmaquina dos sonhos\b/i,
+  /\bmaquina\b/i,
+  /\bnave\b/i,
 ];
 
 const VEHICLE_STOP_WORDS = new Set([
@@ -273,6 +281,7 @@ function inspectGeneratedReply(reply = '') {
   if (matchAny(reply, FORBIDDEN_PRICE_PATTERNS)) return 'forbidden_price';
   if (matchAny(reply, FORBIDDEN_ACTION_PATTERNS)) return 'forbidden_action';
   if (matchAny(reply, GENERATED_HANDOFF_PATTERNS)) return 'generated_handoff';
+  if (matchAny(reply, INFORMAL_HIGH_VALUE_PATTERNS)) return 'informal_high_value';
   return null;
 }
 
@@ -330,7 +339,9 @@ export function detectSalesEvent({
     }
 
     return makeSalesEvent(generatedIssue, {
-      reply: generatedIssue === 'forbidden_price'
+      reply: generatedIssue === 'informal_high_value'
+        ? HIGH_VALUE_REPLY
+        : generatedIssue === 'forbidden_price'
         ? missingReply(state.missingData, 'price')
         : missingReply(state.missingData, 'quote'),
       reason: `Resposta generativa substituida por seguranca comercial: ${generatedIssue}.`,
