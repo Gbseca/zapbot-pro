@@ -6,6 +6,17 @@ const CONSULTANT_REPLY = 'Claro. Vou encaminhar para um consultor continuar seu 
 const CONTRACT_REPLY = 'Essa etapa precisa ser finalizada com um consultor. Vou encaminhar para ele continuar com seguranca.';
 const HANDOFF_FAILED_REPLY = 'Tentei encaminhar automaticamente, mas nao consegui confirmar o envio para o consultor agora. Vou deixar seu atendimento registrado para o time verificar.';
 const HIGH_VALUE_REPLY = 'Entendi. Por ser um veiculo importado/de alto valor, o consultor precisa confirmar as condicoes certinhas para protecao.';
+const COVERAGE_INFO_REPLY = [
+  'A cobertura depende das regras do regulamento e da analise do caso.',
+  '',
+  'Para nao te passar informacao errada, o consultor confirma criterios, limites, participacao e valores certinhos.',
+].join('\n');
+const PROTECTION_INFO_REPLY = [
+  'A protecao veicular funciona como uma associacao: os associados contribuem para ajudar nos custos de eventos previstos, como roubo, furto, colisao e outros casos cobertos pelo regulamento.',
+  '',
+  'Se voce quiser uma cotacao real, eu coleto os dados do veiculo e encaminho para um consultor confirmar tudo certinho.',
+].join('\n');
+const MULTI_VEHICLE_REPLY = 'Vamos por partes para eu nao misturar as informacoes: voce quer comecar pelo carro ou pela scooter?';
 
 export const SALES_STOP_STATUSES = new Set([
   'transferred',
@@ -30,6 +41,28 @@ const PRICE_PATTERNS = [
   /\bmensalidade\b/,
   /\bpreco\b/,
   /\bcusta quanto\b/,
+];
+
+const COVERAGE_INFO_PATTERNS = [
+  /\bperda total\b/,
+  /\broubo\b/,
+  /\bfurto\b/,
+  /\bfipe\b/,
+  /\b100\s*%\b/,
+  /\bcobertura\b/,
+  /\bcobre\b/,
+  /\bcoberto\b/,
+  /\bindeniza/,
+  /\bindeni[sz]acao\b/,
+  /\bfranquia\b/,
+  /\bparticipacao\b/,
+  /\bprotecao veicular\b/,
+  /\bmutualismo\b/,
+  /\bassociacao\b/,
+  /\bcomo funciona\b/,
+  /\bpago o mesmo (preco|valor)\b/,
+  /\bmesmo (preco|valor) que (eu )?comprei\b/,
+  /\bquanto eu pago\b/,
 ];
 
 const CONSULTANT_PATTERNS = [
@@ -69,7 +102,8 @@ const FORBIDDEN_ACTION_PATTERNS = [
   /\bverifiquei\b/i,
   /\bconsultei\b/i,
   /\bcalculei\b/i,
-  /\bfipe\b/i,
+  /\b(verifiquei|consultei|calculei).{0,40}\bfipe\b/i,
+  /\bfipe.{0,40}\b(verifiquei|consultei|calculei)\b/i,
   /\bsistema\b/i,
   /\bcadastro aprovado\b/i,
   /\bcontratacao (foi )?(realizada|concluida|finalizada)\b/i,
@@ -78,6 +112,14 @@ const FORBIDDEN_ACTION_PATTERNS = [
   /\bboleto gerado\b/i,
   /\benviarei? por e-?mail\b/i,
   /\bvoce recebera (um )?e-?mail\b/i,
+];
+
+const FORBIDDEN_COVERAGE_CLAIM_PATTERNS = [
+  /\b100\s*%\s*(da )?fipe\b/i,
+  /\b(recebe|recebera|receberia|paga|pagamos|indeniza|indenizamos).{0,45}\b100\s*%\b/i,
+  /\b12 parcelas\b/i,
+  /\bequivalente a \d+\s*parcelas\b/i,
+  /\bo associado paga o equivalente\b/i,
 ];
 
 const GENERATED_HANDOFF_PATTERNS = [
@@ -92,6 +134,29 @@ const INFORMAL_HIGH_VALUE_PATTERNS = [
   /\bmaquina dos sonhos\b/i,
   /\bmaquina\b/i,
   /\bnave\b/i,
+];
+
+const MULTI_VEHICLE_PATTERNS = [
+  /\bcarro\b.*\b(scooter|moto)\b/,
+  /\b(scooter|moto)\b.*\bcarro\b/,
+  /\bdois veiculos\b/,
+];
+
+const AMBIGUOUS_YES_PATTERNS = [
+  /^(sim|isso|pode ser|ok|certo|blz|beleza|aham|uhum)$/i,
+];
+
+const NO_PLATE_PATTERNS = [
+  /\bnao (possui|tenho|tem) placa\b/,
+  /\bsem placa\b/,
+  /\bainda nao (tem|possui) placa\b/,
+];
+
+const SCOOTER_PATTERNS = [
+  /\bscooter\b/,
+  /\bmoto eletrica\b/,
+  /\bciclomotor\b/,
+  /\bpatinete\b/,
 ];
 
 const VEHICLE_STOP_WORDS = new Set([
@@ -138,6 +203,65 @@ function matchAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+export function isCoverageInfoQuestion(text = '') {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  if (!matchAny(normalized, COVERAGE_INFO_PATTERNS)) return false;
+  return !matchAny(normalized, [
+    /\bquero (fazer )?(uma )?cotacao\b/,
+    /\bfazer (uma )?cotacao\b/,
+    /\bcotacao\b/,
+    /\borcamento\b/,
+    /\bsimulacao\b/,
+    /\bmensalidade\b/,
+    /\bpreco do plano\b/,
+    /\bvalor do plano\b/,
+  ]);
+}
+
+export function getCoverageInfoReply(text = '') {
+  const normalized = normalizeText(text);
+  const asksGeneralProtection = matchAny(normalized, [
+    /\bcomo funciona\b/,
+    /\bprotecao veicular\b/,
+    /\bmutualismo\b/,
+    /\bassociacao\b/,
+  ]);
+  const asksClaimRule = matchAny(normalized, [
+    /\bperda total\b/,
+    /\broubo\b/,
+    /\bfurto\b/,
+    /\bfipe\b/,
+    /\b100\s*%\b/,
+    /\bcobertura\b/,
+    /\bcobre\b/,
+    /\bcoberto\b/,
+    /\bindeniza/,
+    /\bparticipacao\b/,
+    /\bquanto eu pago\b/,
+    /\bpago o mesmo (preco|valor)\b/,
+    /\bmesmo (preco|valor) que (eu )?comprei\b/,
+  ]);
+  return asksGeneralProtection && !asksClaimRule ? PROTECTION_INFO_REPLY : COVERAGE_INFO_REPLY;
+}
+
+function detectVehicleType(text = '') {
+  const normalized = normalizeText(text);
+  if (matchAny(normalized, SCOOTER_PATTERNS)) return normalized.includes('eletrica') ? 'scooter_eletrica' : 'scooter';
+  if (/\bmoto\b/.test(normalized)) return 'moto';
+  if (/\bcarro\b/.test(normalized)) return 'carro';
+  return null;
+}
+
+function extractPower(text = '') {
+  const match = String(text || '').match(/\b\d{2,5}\s*w\b/i);
+  return match ? match[0].replace(/\s+/g, '').toUpperCase() : null;
+}
+
+function hasNoPlateStatement(text = '') {
+  return matchAny(normalizeText(text), NO_PLATE_PATTERNS);
+}
+
 function extractValidPlate(text = '') {
   const tokens = String(text || '').match(/\b[A-Za-z]{3}[-\s]?\d[A-Za-z0-9][-\s]?\d{2}\b/g) || [];
   for (const token of tokens) {
@@ -174,6 +298,7 @@ function titleCaseModel(text = '') {
 }
 
 function extractVehicleModel(text = '') {
+  if (isCoverageInfoQuestion(text)) return null;
   const normalized = normalizeText(text);
   const year = extractYear(text);
   const withoutPlate = normalized
@@ -209,35 +334,45 @@ export function isSalesStopStatus(status) {
 
 export function applySalesFactsToLead(lead, text = '') {
   if (!lead) return lead;
+  const normalized = normalizeText(text);
+  const multiVehicleMention = matchAny(normalized, MULTI_VEHICLE_PATTERNS);
   const plate = extractValidPlate(text);
   const year = extractYear(text);
-  const model = extractVehicleModel(text);
+  const model = multiVehicleMention ? null : extractVehicleModel(text);
+  const vehicleType = multiVehicleMention ? null : detectVehicleType(text);
+  const power = extractPower(text);
 
   if (plate) lead.plate = plate;
   if (year) lead.year = year;
   if (model && !lead.model) lead.model = model;
+  if (vehicleType) lead.vehicleType = vehicleType;
+  if (power) lead.vehiclePower = power;
+  if (hasNoPlateStatement(text)) lead.plateUnavailable = true;
+  if (lead.awaitingVehicleChoice && vehicleType) delete lead.awaitingVehicleChoice;
   if (!lead.conversationMode) lead.conversationMode = 'sales';
   return lead;
 }
 
 export function getSalesQualificationState(lead = {}, text = '') {
   const validPlate = extractValidPlate(text) || (isValidBrazilPlate(lead.plate) ? normalizePlate(lead.plate) : null);
-  const invalidPlate = !validPlate ? extractInvalidPlateCandidate(text) : null;
+  const plateUnavailable = !!lead.plateUnavailable || hasNoPlateStatement(text);
+  const invalidPlate = !validPlate && !plateUnavailable ? extractInvalidPlateCandidate(text) : null;
   const model = lead.model || extractVehicleModel(text) || null;
   const year = lead.year || extractYear(text) || null;
   const missingData = [];
 
   if (!model) missingData.push('model');
   if (!year) missingData.push('year');
-  if (!validPlate) missingData.push('plate');
+  if (!validPlate && !plateUnavailable) missingData.push('plate');
 
   return {
     plate: validPlate,
+    plateUnavailable,
     invalidPlate,
     model,
     year,
     missingData,
-    hasMinimumData: !!(validPlate && model && year),
+    hasMinimumData: !!((validPlate || plateUnavailable) && model && year),
   };
 }
 
@@ -254,11 +389,11 @@ function missingReply(missingData, reason = 'quote') {
   }
 
   if (missing.has('plate')) {
-    return 'Boa. Falta so a placa para eu encaminhar ao consultor.';
+    return 'Falta so a placa para eu encaminhar ao consultor.';
   }
 
-  if (missing.has('model')) return 'Boa. Me passa o modelo do veiculo?';
-  if (missing.has('year')) return 'Boa. Me passa o ano do veiculo?';
+  if (missing.has('model')) return 'Me passa o modelo do veiculo?';
+  if (missing.has('year')) return 'Me passa o ano do veiculo?';
   return READY_REPLY;
 }
 
@@ -278,6 +413,7 @@ function makeSalesEvent(type, overrides = {}) {
 
 function inspectGeneratedReply(reply = '') {
   if (!reply) return null;
+  if (matchAny(reply, FORBIDDEN_COVERAGE_CLAIM_PATTERNS)) return 'forbidden_coverage_claim';
   if (matchAny(reply, FORBIDDEN_PRICE_PATTERNS)) return 'forbidden_price';
   if (matchAny(reply, FORBIDDEN_ACTION_PATTERNS)) return 'forbidden_action';
   if (matchAny(reply, GENERATED_HANDOFF_PATTERNS)) return 'generated_handoff';
@@ -298,13 +434,40 @@ export function detectSalesEvent({
   const priceRequested = matchAny(normalized, PRICE_PATTERNS);
   const consultantRequested = matchAny(normalized, CONSULTANT_PATTERNS);
   const contractRequested = matchAny(normalized, CONTRACT_PATTERNS);
+  const coverageInfoQuestion = isCoverageInfoQuestion(text);
   const repeatedConsultantRequest = !!lead.salesConsultantRequestedAt || lead.lastIntent === 'sales_consultant_requested';
+
+  if (phase === 'pre' && lead.awaitingVehicleChoice && matchAny(normalized, AMBIGUOUS_YES_PATTERNS)) {
+    return makeSalesEvent('ambiguous_vehicle_choice', {
+      reply: MULTI_VEHICLE_REPLY,
+      reason: 'Cliente respondeu de forma ambigua a escolha entre veiculos.',
+      awaitingVehicleChoice: true,
+    });
+  }
+
+  if (phase === 'pre' && matchAny(normalized, MULTI_VEHICLE_PATTERNS)) {
+    return makeSalesEvent('multi_vehicle_clarification', {
+      reply: MULTI_VEHICLE_REPLY,
+      reason: 'Cliente mencionou mais de um tipo de veiculo; precisa escolher um para nao misturar dados.',
+      awaitingVehicleChoice: true,
+    });
+  }
 
   if (state.invalidPlate) {
     return makeSalesEvent('invalid_plate', {
       reply: 'Essa placa parece nao estar no formato correto. Pode conferir e me mandar de novo? Exemplo: ABC1D23.',
       reason: `Placa fora do padrao brasileiro: ${state.invalidPlate}.`,
       invalidPlate: state.invalidPlate,
+    });
+  }
+
+  if (coverageInfoQuestion) {
+    return makeSalesEvent('sales_info_question', {
+      reply: getCoverageInfoReply(text),
+      reason: 'Cliente fez uma duvida comercial/FAQ sobre cobertura, nao um pedido de cotacao.',
+      shouldHandoff: false,
+      shouldStopAutomation: false,
+      lastIntent: 'sales_info_question',
     });
   }
 
@@ -341,6 +504,8 @@ export function detectSalesEvent({
     return makeSalesEvent(generatedIssue, {
       reply: generatedIssue === 'informal_high_value'
         ? HIGH_VALUE_REPLY
+        : generatedIssue === 'forbidden_coverage_claim'
+        ? getCoverageInfoReply(text)
         : generatedIssue === 'forbidden_price'
         ? missingReply(state.missingData, 'price')
         : missingReply(state.missingData, 'quote'),
@@ -455,6 +620,8 @@ export function applySalesEventToLead(lead, event, content = {}) {
   lead.lastSalesEventAt = now;
 
   if (event.salesConsultantRequested) lead.salesConsultantRequestedAt = now;
+  if (event.awaitingVehicleChoice) lead.awaitingVehicleChoice = true;
+  if (event.type && !event.awaitingVehicleChoice && event.type !== 'ambiguous_vehicle_choice') delete lead.awaitingVehicleChoice;
   if (event.invalidPlate) lead.invalidPlate = event.invalidPlate;
   if (event.forbiddenGeneratedIssue) lead.forbiddenGeneratedIssue = event.forbiddenGeneratedIssue;
 

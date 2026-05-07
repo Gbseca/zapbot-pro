@@ -25,7 +25,9 @@ import {
   applySalesEventToLead,
   applySalesFactsToLead,
   detectSalesEvent,
+  getCoverageInfoReply,
   getSalesHandoffFailedReply,
+  isCoverageInfoQuestion,
   isSalesStopStatus,
   markSalesHandoffFailure,
 } from './sales-guard.js';
@@ -415,12 +417,13 @@ function refreshOperationalCaseSummary(lead, event = {}, content = {}) {
 }
 
 function buildSalesVehicleConfirmation(lead = {}) {
-  if (!lead.model || !lead.year || !lead.plate) return '';
+  const plateText = lead.plate || (lead.plateUnavailable ? 'nao possui placa' : '');
+  if (!lead.model || !lead.year || !plateText) return '';
   return [
     'Recebi:',
     `Veiculo: ${lead.model}`,
     `Ano: ${lead.year}`,
-    `Placa: ${lead.plate}`,
+    `Placa: ${plateText}`,
   ].join('\n');
 }
 
@@ -606,6 +609,53 @@ function sanitizeReply(text) {
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
+}
+
+function isLikelyIncompleteReply(reply = '') {
+  const cleaned = String(reply || '')
+    .trim()
+    .replace(/[“”"']+$/g, '')
+    .trim();
+  if (!cleaned) return true;
+  if (/[,:;]$/.test(cleaned)) return true;
+
+  const normalized = normalizeText(cleaned);
+  return [
+    /\b(a|e|de|do|da|dos|das|em|para|pra|por|com|ou|que)$/i,
+    /\bem caso de$/i,
+    /\bo equivalente a$/i,
+    /\ba gente calcula$/i,
+    /\bsim em caso de$/i,
+    /\broubo ou$/i,
+    /\bfurt(o|a) ou$/i,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function buildIncompleteReplyFallback(lead = {}, latestUserText = '', mode = 'sales') {
+  if (mode === 'sales' && isCoverageInfoQuestion(latestUserText)) {
+    return getCoverageInfoReply(latestUserText);
+  }
+
+  if (mode === 'collections') {
+    return 'Vou reformular para nao te passar informacao incompleta. Esse caso precisa de conferencia do setor responsavel, entao vou encaminhar para um consultor dar continuidade.';
+  }
+
+  if (lead?.model || lead?.year || lead?.plate || lead?.plateUnavailable) {
+    return 'Vou reformular para nao ficar incompleto. Posso te ajudar com informacoes gerais e, se voce quiser uma cotacao real, encaminho para um consultor com os dados do veiculo.';
+  }
+
+  return 'Vou reformular para nao ficar incompleto. Me diz se voce quer entender melhor a protecao ou fazer uma cotacao.';
+}
+
+function ensureCompleteReply(reply, {
+  lead = {},
+  latestUserText = '',
+  mode = 'sales',
+} = {}) {
+  if (!isLikelyIncompleteReply(reply)) return reply;
+  const fallback = buildIncompleteReplyFallback(lead, latestUserText, mode);
+  console.warn(`[Agent] Incomplete AI reply replaced. original="${String(reply || '').slice(0, 120)}"`);
+  return fallback;
 }
 
 function buildAssistantHistoryEntry(content, delivery = {}) {
@@ -1060,6 +1110,11 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const pushName = rawMsg.pushName || null;
   const inboundLidJid = resolveInboundLidJid(fullJid, inboundRoute);
 
+  if (incomingContent.isDeleted) {
+    console.log(`[Agent] Ignoring deleted/protocol message from ${displayNum} (jid: ${fullJid})`);
+    return;
+  }
+
   console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${incomingContent.historyText.slice(0, 60)}"`);
   console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source}) candidates=${inboundRoute?.phoneCandidates?.join(',') || '-'} mapped=${inboundRoute?.mappedPhone || '-'}`);
 
@@ -1452,7 +1507,10 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
   if (conversationModeContext) {
     try {
-      cleanResponse = sanitizeReply(await callAI(config, replyContext, { purpose: 'reply', mode: 'collections' }));
+      cleanResponse = ensureCompleteReply(
+        sanitizeReply(await callAI(config, replyContext, { purpose: 'reply', mode: 'collections' })),
+        { lead, latestUserText: combinedText, mode: 'collections' },
+      );
     } catch (error) {
       console.error('[Agent] Collections reply error:', error.message || error);
       return;
@@ -1470,7 +1528,10 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
       return;
     }
 
-    cleanResponse = sanitizeReply(replyResult.value);
+    cleanResponse = ensureCompleteReply(
+      sanitizeReply(replyResult.value),
+      { lead, latestUserText: combinedText, mode: 'sales' },
+    );
 
     if (qualificationResult.status === 'fulfilled') {
       extraction = detectAndExtract(qualificationResult.value, lead);

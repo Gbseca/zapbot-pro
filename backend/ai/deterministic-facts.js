@@ -23,6 +23,21 @@ const VEHICLE_STOP_WORDS = new Set([
   'vistoria',
   'consultor',
   'atendente',
+  'for',
+  'fosse',
+  'roubado',
+  'roubo',
+  'furto',
+  'perca',
+  'perder',
+  'recebo',
+  'receber',
+  'funciona',
+  'pago',
+  'preco',
+  'comprei',
+  'ele',
+  'etc',
   'e',
   'eh',
   'um',
@@ -33,6 +48,19 @@ const VEHICLE_STOP_WORDS = new Set([
   'o',
   'a',
 ]);
+
+const NO_PLATE_PATTERNS = [
+  /\bnao (possui|tenho|tem) placa\b/,
+  /\bsem placa\b/,
+  /\bainda nao (tem|possui) placa\b/,
+];
+
+const SCOOTER_PATTERNS = [
+  /\bscooter\b/,
+  /\bmoto eletrica\b/,
+  /\bciclomotor\b/,
+  /\bpatinete\b/,
+];
 
 function normalizeText(value = '') {
   return String(value || '')
@@ -50,6 +78,37 @@ function titleCaseModel(text = '') {
     .filter(Boolean)
     .map((part) => part.length <= 3 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1).toLowerCase())
     .join(' ');
+}
+
+function isCoverageLikeText(text = '') {
+  const normalized = normalizeText(text);
+  return [
+    /\bperda total\b/,
+    /\broubo\b/,
+    /\bfurto\b/,
+    /\bfipe\b/,
+    /\b100\s*%\b/,
+    /\bcobertura\b/,
+    /\bcobre\b/,
+    /\bcoberto\b/,
+    /\bindeniza/,
+    /\bparticipacao\b/,
+    /\bprotecao veicular\b/,
+    /\bmutualismo\b/,
+    /\bcomo funciona\b/,
+    /\bpago o mesmo (preco|valor)\b/,
+    /\bmesmo (preco|valor) que (eu )?comprei\b/,
+    /\bquanto eu pago\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function isMultiVehicleText(text = '') {
+  const normalized = normalizeText(text);
+  return [
+    /\bcarro\b.*\b(scooter|moto)\b/,
+    /\b(scooter|moto)\b.*\bcarro\b/,
+    /\bdois veiculos\b/,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 export function extractValidPlateFromText(text = '') {
@@ -77,7 +136,29 @@ export function extractYearFromText(text = '') {
   return match ? match[1] : null;
 }
 
+export function extractVehicleTypeFromText(text = '') {
+  const normalized = normalizeText(text);
+  if (SCOOTER_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return normalized.includes('eletrica') ? 'scooter_eletrica' : 'scooter';
+  }
+  if (/\bmoto\b/.test(normalized)) return 'moto';
+  if (/\bcarro\b/.test(normalized)) return 'carro';
+  return null;
+}
+
+export function extractVehiclePowerFromText(text = '') {
+  const match = String(text || '').match(/\b\d{2,5}\s*w\b/i);
+  return match ? match[0].replace(/\s+/g, '').toUpperCase() : null;
+}
+
+export function hasNoPlateStatement(text = '') {
+  const normalized = normalizeText(text);
+  return NO_PLATE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 export function extractVehicleModelFromText(text = '') {
+  if (isCoverageLikeText(text)) return null;
+  if (isMultiVehicleText(text)) return null;
   const normalized = normalizeText(text);
   const year = extractYearFromText(text);
   const withoutPlate = normalized
@@ -123,6 +204,9 @@ export function extractDeterministicFacts(text = '') {
     phone: extractPhoneFromText(text),
     year: extractYearFromText(text),
     model: extractVehicleModelFromText(text),
+    vehicleType: extractVehicleTypeFromText(text),
+    vehiclePower: extractVehiclePowerFromText(text),
+    plateUnavailable: hasNoPlateStatement(text),
   };
 }
 
@@ -138,6 +222,9 @@ export function applyDeterministicFactsToLead(lead, text = '', options = {}) {
   }
   if (facts.year) lead.year = facts.year;
   if (facts.model && (!lead.model || options.overwriteModel)) lead.model = facts.model;
+  if (facts.vehicleType) lead.vehicleType = facts.vehicleType;
+  if (facts.vehiclePower) lead.vehiclePower = facts.vehiclePower;
+  if (facts.plateUnavailable) lead.plateUnavailable = true;
 
   return facts;
 }

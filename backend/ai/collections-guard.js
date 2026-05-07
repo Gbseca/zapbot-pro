@@ -107,8 +107,28 @@ function extractTextFromMessage(msg = {}) {
   ).trim();
 }
 
+function isDeletedOrProtocolMessage(rawMsg = {}, msg = {}) {
+  if (msg.protocolMessage) return true;
+  if (rawMsg.messageStubType) {
+    const stubText = String(rawMsg.messageStubType || '').toLowerCase();
+    if (stubText.includes('revoke') || stubText.includes('delete')) return true;
+  }
+  return false;
+}
+
 export function extractIncomingContent(rawMsg) {
   const msg = rawMsg?.message || {};
+  const isDeleted = isDeletedOrProtocolMessage(rawMsg, msg);
+  if (isDeleted) {
+    return {
+      text: '',
+      hasAttachment: false,
+      attachmentType: null,
+      historyText: '',
+      isDeleted: true,
+    };
+  }
+
   const text = extractTextFromMessage(msg);
   const attachmentType = msg.imageMessage
     ? 'image'
@@ -125,6 +145,7 @@ export function extractIncomingContent(rawMsg) {
     hasAttachment: !!attachmentType,
     attachmentType,
     historyText: text || (attachmentType ? `[${attachmentType} enviado]` : ''),
+    isDeleted: false,
   };
 }
 
@@ -385,12 +406,12 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
 
   if (matchAny(normalized, RECEIPT_AVAILABLE_PATTERNS) || matchAny(normalized, RECEIPT_MENTION_PATTERNS)) {
     return makeEvent('receipt_available', {
-      status: 'talking',
-      stage: 'engaged',
-      reply: RECEIPT_AVAILABLE_REPLY,
+      status: 'awaiting_financial_review',
+      stage: 'awaiting_financial_review',
+      reply: 'Perfeito. Vou encaminhar para um consultor orientar o envio do comprovante e continuar seu atendimento.',
       reason: 'Cliente informou que tem comprovante, mas ainda nao enviou anexo ou dados suficientes.',
-      shouldNotifyHuman: false,
-      shouldStopAutomation: false,
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
       lastIntent: 'receipt_available',
       paymentClaimed: true,
       receiptAvailable: true,
