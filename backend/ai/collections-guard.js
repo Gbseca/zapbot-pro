@@ -50,6 +50,12 @@ const BOLETO_REQUEST_REPLY = [
   'Para anexar seu contato certinho no encaminhamento, me confirma seu WhatsApp com DDD?',
 ].join('\n');
 
+const REACTIVATION_REPLY = [
+  'Entendi, vou encaminhar para o setor responsavel verificar sua reativacao.',
+  '',
+  'Me confirma seu nome completo e WhatsApp com DDD?',
+].join('\n');
+
 const REGULARIZATION_REPLY = [
   'Entendi. Vou encaminhar para um consultor verificar a melhor forma de regularizar seu caso.',
   '',
@@ -229,6 +235,8 @@ const BOLETO_REQUEST_PATTERNS = [
   /\bme manda (o )?boleto\b/,
   /\bme envia (o )?boleto\b/,
   /\benvie (meu|o )?boleto\b/,
+  /\bver (meu |o |os )?boleto(s)?\b/,
+  /\bconsultar (meu |o |os )?boleto(s)?\b/,
   /\breenviar (o )?boleto\b/,
   /\bsegunda via\b/,
   /\bgerar boleto\b/,
@@ -246,10 +254,22 @@ const REGULARIZATION_PATTERNS = [
   /\bcomo faco para pagar\b/,
 ];
 
+const REACTIVATION_PATTERNS = [
+  /\breativar (minha |a )?protecao\b/,
+  /\bquero reativar\b/,
+  /\breativacao\b/,
+  /\bprote[cç][aã]o suspensa\b/,
+  /\bminha protecao (esta|ta|foi) suspensa\b/,
+  /\bvoltar com (a )?protecao\b/,
+  /\bliberar (minha |a )?protecao\b/,
+];
+
 const SYSTEM_CHECK_PATTERNS = [
   /\bverificar (meu )?(cadastro|contrato|pendencia|situacao)\b/,
   /\bconsultar (meu )?(cadastro|contrato|pendencia|situacao)\b/,
   /\btem pendencia\b/,
+  /\bpendencia(s)?\b/,
+  /\bpendente\b/,
   /\bbaixa\b/,
   /\bliberacao\b/,
   /\bliberar\b/,
@@ -347,6 +367,20 @@ export function isOperationalStopStatus(status) {
   return OPERATIONAL_STOP_STATUSES.has(status);
 }
 
+function hasStandaloneOperationalIntent(normalized = '') {
+  return [
+    REACTIVATION_PATTERNS,
+    BOLETO_REQUEST_PATTERNS,
+    REGULARIZATION_PATTERNS,
+    SYSTEM_CHECK_PATTERNS,
+    APP_BLOCKED_PATTERNS,
+    PAYMENT_CLAIMED_PATTERNS,
+    RECEIPT_AVAILABLE_PATTERNS,
+    RECEIPT_MENTION_PATTERNS,
+    BILLING_DISPUTE_PATTERNS,
+  ].some((patterns) => matchAny(normalized, patterns));
+}
+
 export function detectOperationalEvent({ text = '', hasAttachment = false, attachmentType = null, collectionsContext = null } = {}) {
   const normalized = normalizeText(text);
   const mentionsInspection = matchAny(normalized, INSPECTION_PATTERNS);
@@ -371,7 +405,7 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
     });
   }
 
-  if (!collectionsContext) return null;
+  if (!collectionsContext && !hasStandaloneOperationalIntent(normalized)) return null;
 
   if (mentionsInspection && (hasAttachment || matchAny(normalized, INSPECTION_PROGRESS_HINTS))) {
     return makeEvent('inspection_pending', {
@@ -457,6 +491,18 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
       shouldNotifyHuman: true,
       shouldStopAutomation: true,
       lastIntent: 'boleto_request',
+    });
+  }
+
+  if (matchAny(normalized, REACTIVATION_PATTERNS)) {
+    return makeEvent('reactivation_request', {
+      status: 'awaiting_financial_review',
+      stage: 'awaiting_financial_review',
+      reply: REACTIVATION_REPLY,
+      reason: 'Cliente pediu reativacao da protecao ou informou protecao suspensa.',
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+      lastIntent: 'reactivation_request',
     });
   }
 

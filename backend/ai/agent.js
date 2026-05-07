@@ -110,8 +110,9 @@ const CLARIFICATION_RESPONSES = [
 const ASK_PHONE_FOR_HANDOFF_REPLY = 'Para anexar seu contato certinho no encaminhamento ao consultor, me confirma seu WhatsApp com DDD?';
 const ASK_PHONE_FOR_HANDOFF_FORMAT_REPLY = 'Para eu encaminhar corretamente para o consultor, preciso do WhatsApp com DDD. Pode me enviar nesse formato? Exemplo: 21999999999.';
 const HANDOFF_RECOVERY_REPLY = 'Recebi seus dados, mas tive uma falha ao confirmar o encaminhamento por aqui. Para anexar seu contato certinho, me confirma seu WhatsApp com DDD?';
-const OPERATIONAL_PHONE_RECEIVED_REPLY = 'Perfeito, recebi seu WhatsApp. Vou encaminhar para um consultor verificar e continuar seu atendimento.';
+const OPERATIONAL_CONTACT_RECEIVED_REPLY = 'Perfeito, vou encaminhar para um consultor verificar sua reativacao e continuar por aqui.';
 const OPERATIONAL_PENDING_DATA_STATUS = 'awaiting_operational_data';
+const OPERATIONAL_PENDING_CONTACT_STATUS = 'awaiting_contact_for_handoff';
 
 function normalizeText(text) {
   return String(text || '')
@@ -311,6 +312,26 @@ function shouldRequirePhoneBeforeOperationalHandoff(event = {}, lead = {}, confi
   return true;
 }
 
+function shouldRequireNameBeforeOperationalHandoff(event = {}, lead = {}) {
+  const type = getOperationalEventType(event);
+  if (type === 'human_requested' || type === 'cancel_request' || type === 'angry_customer') return false;
+  return [
+    'reactivation_request',
+    'boleto_request',
+    'regularization_request',
+    'system_check_request',
+    'payment_claimed',
+    'receipt_available',
+    'receipt_received',
+    'app_blocked',
+  ].includes(type) && !hasConfirmedOperationalName(lead);
+}
+
+function shouldRequireContactBeforeOperationalHandoff(event = {}, lead = {}, config = {}) {
+  return shouldRequirePhoneBeforeOperationalHandoff(event, lead, config)
+    || shouldRequireNameBeforeOperationalHandoff(event, lead);
+}
+
 function rememberPendingOperationalHandoff(lead, event = {}) {
   lead.pendingOperationalHandoff = true;
   lead.pendingOperationalEvent = {
@@ -339,6 +360,23 @@ function buildOperationalPhoneRequest(lead = {}, event = {}) {
   return `${prefix}${ASK_PHONE_FOR_HANDOFF_REPLY}`;
 }
 
+function buildOperationalContactRequest(lead = {}, event = {}, config = {}) {
+  const needsPhone = shouldRequirePhoneBeforeOperationalHandoff(event, lead, config);
+  const needsName = shouldRequireNameBeforeOperationalHandoff(event, lead);
+  const type = getOperationalEventType(event);
+  const subject = type === 'reactivation_request' ? 'sua reativacao' : 'seu atendimento';
+
+  if (needsName && needsPhone) {
+    return `Entendi, vou encaminhar para o setor responsavel verificar ${subject}. Me confirma seu nome completo e WhatsApp com DDD?`;
+  }
+
+  if (needsName) {
+    return 'Entendi, vou encaminhar para o setor responsavel. Me fala seu nome completo pra eu encaminhar certinho?';
+  }
+
+  return buildOperationalPhoneRequest(lead, event);
+}
+
 function buildOperationalPlateRequest(event = {}) {
   const type = getOperationalEventType(event);
   if (type === 'inspection_pending') {
@@ -352,6 +390,10 @@ function buildOperationalPlateRequest(event = {}) {
 
 function buildOperationalReply(event = {}, lead = {}) {
   const type = getOperationalEventType(event);
+  if (type === 'reactivation_request') {
+    return 'Perfeito, vou encaminhar para um consultor verificar sua reativacao e continuar por aqui.';
+  }
+
   if (type === 'receipt_available') {
     return 'Perfeito. Vou encaminhar para um consultor orientar o envio do comprovante e continuar seu atendimento.';
   }
@@ -381,6 +423,14 @@ function buildOperationalReply(event = {}, lead = {}) {
   if (!lead.plate) return event.reply || '';
 
   return event.reply || '';
+}
+
+function buildOperationalContactReceivedReply(event = {}) {
+  const type = getOperationalEventType(event);
+  if (type === 'reactivation_request') return OPERATIONAL_CONTACT_RECEIVED_REPLY;
+  if (type === 'boleto_request') return 'Perfeito, vou encaminhar para um consultor verificar seu boleto e continuar por aqui.';
+  if (type === 'regularization_request') return 'Perfeito, vou encaminhar para um consultor verificar sua regularizacao e continuar por aqui.';
+  return 'Perfeito, vou encaminhar para um consultor verificar e continuar por aqui.';
 }
 
 function refreshOperationalCaseSummary(lead, event = {}, content = {}) {
@@ -611,6 +661,59 @@ function sanitizeReply(text) {
     .trim();
 }
 
+function titleCaseName(value = '') {
+  return String(value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.length <= 2 ? part.toLowerCase() : part[0].toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function extractCustomerNameFromText(text = '') {
+  const withoutPhone = String(text || '')
+    .replace(/(?:\+?55[\s.-]?)?(?:\(?[1-9]{2}\)?[\s.-]?)9?\d{4}[\s.-]?\d{4}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const explicit = withoutPhone.match(/\b(?:meu nome (?:e|eh|é)|sou(?: o| a)?|nome completo (?:e|eh|é))\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'.-]{4,80})/i);
+  const candidate = (explicit?.[1] || withoutPhone)
+    .replace(/[^\p{L}\s'.-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const words = candidate
+    .split(/\s+/)
+    .filter((word) => /^[\p{L}][\p{L}'.-]{1,}$/u.test(word));
+  const normalized = normalizeText(candidate);
+  const blocked = [
+    'boa tarde',
+    'bom dia',
+    'boa noite',
+    'quero reativar',
+    'reativar minha protecao',
+    'quero pagar',
+    'quero boleto',
+    'boleto pendente',
+  ].some((term) => normalized.includes(term));
+
+  if (blocked || words.length < 2 || words.length > 6) return null;
+  return titleCaseName(words.join(' '));
+}
+
+function applyCustomerNameFromText(lead, text = '') {
+  const name = extractCustomerNameFromText(text);
+  if (!name) return null;
+  lead.name = name;
+  lead.nameConfirmed = true;
+  lead.nameSource = 'user';
+  return name;
+}
+
+function hasConfirmedOperationalName(lead = {}) {
+  if (lead.nameConfirmed && lead.name) return true;
+  const words = String(lead.name || '').trim().split(/\s+/).filter(Boolean);
+  return words.length >= 2;
+}
+
 function isLikelyIncompleteReply(reply = '') {
   const cleaned = String(reply || '')
     .trim()
@@ -803,6 +906,33 @@ async function handleAwaitingPhonePriority(wa, {
     inboundRoute,
     source: 'phone_extracted_from_user',
   });
+  applyCustomerNameFromText(lead, text);
+
+  const pendingOperational = lead.pendingOperationalHandoff || lead.pendingOperationalEvent || lead.conversationMode === 'collections' || lead.status === OPERATIONAL_PENDING_CONTACT_STATUS;
+  const pendingOperationalEvent = lead.pendingOperationalEvent || {
+    type: lead.lastIntent || 'regularization_request',
+    reason: lead.pendingHandoffReason || lead.operationalReason || 'Cliente aguardava encaminhamento operacional.',
+  };
+
+  if (pendingOperational && shouldRequireContactBeforeOperationalHandoff(pendingOperationalEvent, lead, config)) {
+    lead.status = OPERATIONAL_PENDING_CONTACT_STATUS;
+    lead.stage = OPERATIONAL_PENDING_CONTACT_STATUS;
+    lead.operationalStatus = OPERATIONAL_PENDING_CONTACT_STATUS;
+    saveLead(leadId, lead);
+    const reply = isReceiptCorrectionText(text)
+      ? buildRecoveryReply(lead, text)
+      : buildOperationalContactRequest(lead, pendingOperationalEvent, config);
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      route.target,
+      reply,
+      () => ({}),
+      route.options,
+    );
+    return true;
+  }
 
   if (!getLeadRealPhone(lead)) {
     lead.status = 'awaiting_phone_for_handoff';
@@ -846,7 +976,7 @@ async function handleAwaitingPhonePriority(wa, {
         text,
         historyText: text,
         phoneJustProvided: true,
-        clientConfirmationReply: OPERATIONAL_PHONE_RECEIVED_REPLY,
+        clientConfirmationReply: buildOperationalContactReceivedReply(lead.pendingOperationalEvent),
       },
     );
     return true;
@@ -1035,18 +1165,18 @@ async function handleOperationalEventAction(wa, leadId, lead, route, config, eve
     return true;
   }
 
-  if (shouldRequirePhoneBeforeOperationalHandoff(event, lead, config)) {
-    lead.status = 'awaiting_phone_for_handoff';
-    lead.stage = 'awaiting_phone_for_handoff';
-    lead.phoneResolved = false;
-    lead.operationalStatus = 'awaiting_phone_for_handoff';
+  if (shouldRequireContactBeforeOperationalHandoff(event, lead, config)) {
+    lead.status = OPERATIONAL_PENDING_CONTACT_STATUS;
+    lead.stage = OPERATIONAL_PENDING_CONTACT_STATUS;
+    lead.phoneResolved = !!getLeadRealPhone(lead);
+    lead.operationalStatus = OPERATIONAL_PENDING_CONTACT_STATUS;
     saveLead(leadId, lead);
     await persistSimpleReply(
       wa,
       leadId,
       lead,
       route.target,
-      buildOperationalPhoneRequest(lead, event),
+      buildOperationalContactRequest(lead, event, config),
       () => ({}),
       route.options,
     );
@@ -1169,7 +1299,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
   if (!incomingContent.historyText) return;
 
-  if (existingLead?.status === 'awaiting_phone_for_handoff') {
+  if (existingLead?.status === 'awaiting_phone_for_handoff' || existingLead?.status === OPERATIONAL_PENDING_CONTACT_STATUS) {
     await handleAwaitingPhonePriority(wa, {
       leadId,
       lead: existingLead,
@@ -1248,6 +1378,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
       inboundRoute,
       source: 'phone_extracted_from_user',
     });
+    applyCustomerNameFromText(lead, incomingContent.historyText);
     applyConversationDecisionToLead(lead, decision, incomingContent);
 
     await handleOperationalEventAction(wa, leadId, lead, replyRoute, config, operationalEvent, incomingContent);
@@ -1399,7 +1530,9 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     source: 'phone_extracted_from_user',
   });
 
-  if (lead.pendingOperationalHandoff || lead.pendingOperationalEvent || lead.status === OPERATIONAL_PENDING_DATA_STATUS) {
+  applyCustomerNameFromText(lead, combinedText);
+
+  if (lead.pendingOperationalHandoff || lead.pendingOperationalEvent || lead.status === OPERATIONAL_PENDING_DATA_STATUS || lead.status === OPERATIONAL_PENDING_CONTACT_STATUS) {
     await handlePendingOperationalHandoff(
       wa,
       leadId,

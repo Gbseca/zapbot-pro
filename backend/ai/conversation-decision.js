@@ -118,11 +118,15 @@ function inferConversationMode(text, lead = {}, collectionsContext = null) {
     /\bgerar boleto\b/,
     /\breenviar boleto\b/,
     /\bvencimento\b/,
+    /\breativar\b/,
+    /\breativacao\b/,
+    /\bprotecao suspensa\b/,
     /\bregularizar\b/,
     /\bnegociar\b/,
     /\bacordo\b/,
     /\bcadastro\b/,
     /\bpendencia\b/,
+    /\bpendente\b/,
     /\bfinanceiro\b/,
     /\bbaixa\b/,
     /\bliberacao\b/,
@@ -145,6 +149,7 @@ function mapOperationalIntent(type) {
     billing_disputed: 'billing_due_date_dispute',
     app_blocked: 'billing_app_blocked',
     boleto_request: 'boleto_request',
+    reactivation_request: 'reactivation_request',
     regularization_request: 'regularization_request',
     system_check_request: 'system_check_request',
     inspection_pending: 'inspection_requested',
@@ -206,6 +211,12 @@ function missingDataFor(intent, conversationMode, lead = {}, text = '') {
     return missing;
   }
 
+  if (['reactivation_request', 'boleto_request', 'regularization_request', 'system_check_request'].includes(intent)) {
+    if (!lead.name) missing.push('name');
+    if (!lead.phone && !lead.displayNumber) missing.push('phone');
+    return missing;
+  }
+
   if (intent === 'billing_payment_claimed' && !lead.receiptReceived) missing.push('receipt');
   if (intent === 'inspection_requested' && !lead.inspectionCodeMentioned) missing.push('inspection_code_or_video_status');
   if (!lead.plate && !lead.receiptReceived && !hasPlate(text)) missing.push('plate');
@@ -219,6 +230,9 @@ function inferIntent(text, conversationMode, lead = {}, collectionsContext = nul
     if (collectionsContext?.campaignSubIntent === 'collections_inspection') return 'inspection_requested';
     if (collectionsContext?.campaignSubIntent === 'collections_receipt') return 'billing_receipt_sent';
     if (collectionsContext?.campaignSubIntent === 'collections_payment') return 'billing_payment_claimed';
+    if (matchAny(normalized, [/\breativar\b/, /\breativacao\b/, /\bprotecao suspensa\b/])) {
+      return 'reactivation_request';
+    }
     if (matchAny(normalized, [/\bregularizar\b/, /\bboleto\b/, /\bpagar\b/, /\bvencimento\b/])) {
       return 'billing_payment_claimed';
     }

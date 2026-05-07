@@ -109,8 +109,70 @@ function buildContactCardFields(lead) {
   };
 }
 
+function buildShortContactLines(lead = {}, contact = {}) {
+  const lines = [
+    `*Cliente:* ${lead.name || 'Nao informado'}`,
+    `*WhatsApp:* ${contact.phoneLabel}`,
+  ];
+
+  if (!contact.phoneResolved) {
+    lines.push(`*ID interno:* ${contact.internalLabel}`);
+  }
+
+  return lines;
+}
+
+function buildWaLinkLine(contact = {}) {
+  return contact.waLinkNumber
+    ? `*Abrir conversa:* ${contact.waLinkLabel}`
+    : '*Abrir conversa:* indisponivel';
+}
+
+function buildOperationalWant(event = {}, lead = {}) {
+  const eventType = event.type || lead.lastDetectedIntent || lead.lastIntent || '';
+  const map = {
+    reactivation_request: 'reativar protecao',
+    boleto_request: 'boleto / segunda via',
+    regularization_request: 'regularizar pendencia',
+    payment_claimed: 'informou pagamento',
+    receipt_available: 'tem comprovante para enviar',
+    receipt_received: 'enviou comprovante',
+    system_check_request: 'verificar cadastro/pendencia',
+    app_blocked: 'app bloqueado',
+    billing_disputed: 'contestou cobranca',
+    inspection_pending: 'revistoria',
+    inspection_disputed: 'contestou revistoria',
+    human_requested: 'falar com atendente',
+    cancel_request: 'cancelamento',
+  };
+  return map[eventType] || lead.operationalReason || 'atendimento operacional';
+}
+
+function buildOperationalExtraLines(lead = {}, event = {}) {
+  const lines = [];
+  if (lead.plate) lines.push(`*Placa:* ${lead.plate}`);
+  if (lead.paymentDate) lines.push(`*Pagamento:* ${lead.paymentDate}${lead.paymentAmount ? ` | ${lead.paymentAmount}` : ''}`);
+  if (lead.receiptReceived) lines.push('*Comprovante:* enviado');
+  if (lead.receiptAvailable && !lead.receiptReceived) lines.push('*Comprovante:* cliente disse que tem');
+  if (lead.appBlocked) lines.push('*App:* bloqueado');
+  if (lead.inspectionDisputed) lines.push('*Revistoria:* questionada');
+  if (lead.inspectionPending && !lead.inspectionDisputed) lines.push('*Revistoria:* pendente');
+  if (event.reason && !['reactivation_request', 'boleto_request', 'regularization_request'].includes(event.type)) {
+    lines.push(`*Motivo:* ${event.reason}`);
+  }
+  return lines;
+}
+
 function resolveOperationalHandoff(event = {}, lead = {}) {
   const eventType = event.type || lead.lastDetectedIntent || lead.lastIntent || '';
+  if (eventType === 'reactivation_request') {
+    return {
+      title: 'ATENDIMENTO DE REATIVACAO',
+      status: 'transferred_to_financial',
+      action: 'Verificar reativacao/pendencia e retornar ao cliente.',
+    };
+  }
+
   if (eventType === 'payment_claimed') {
     return {
       title: 'ATENDIMENTO FINANCEIRO / PAGAMENTO INFORMADO',
@@ -202,36 +264,17 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
     return;
   }
 
-  const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const contact = buildContactCardFields(lead);
   const status = lead.status || event.status || 'awaiting_financial_review';
-  const reason = event.reason || lead.operationalReason || 'Atendimento operacional de cobranca.';
   const handoff = resolveOperationalHandoff(event, lead);
-
-  const consultorMsg =
-    `*${handoff.title} - ZapBot Pro*\n` +
-    `------------------------------\n` +
-    `*Cliente:* ${lead.name || 'Nao informado'}\n` +
-    `*Telefone real:* ${contact.phoneLabel}\n` +
-    `*ID interno WhatsApp:* ${contact.internalLabel}\n` +
-    `*Telefone resolvido:* ${contact.phoneResolved ? 'sim' : 'nao'}\n` +
-    `*Placa:* ${lead.plate || 'Nao informada'}\n` +
-    `*Status:* ${status}\n` +
-    `*Motivo:* ${reason}\n` +
-    `*Pagamento informado:* ${yesNo(lead.paymentClaimed)}\n` +
-    `*Data do pagamento:* ${lead.paymentDate || 'Nao informada'}\n` +
-    `*Valor informado:* ${lead.paymentAmount || 'Nao informado'}\n` +
-    `*Comprovante enviado:* ${yesNo(lead.receiptReceived)}\n` +
-    `*App bloqueado:* ${yesNo(lead.appBlocked)}\n` +
-    `*Revistoria questionada:* ${yesNo(lead.inspectionDisputed)}\n` +
-    `*Recebeu codigo de revistoria:* ${yesNo(lead.inspectionCodeMentioned)}\n` +
-    `*Enviou video/fotos:* ${yesNo(lead.inspectionMediaSent)}\n` +
-    contact.unresolvedWarning +
-    `\n*Resumo da conversa:*\n${buildFinancialSummary(lead)}\n` +
-    `\n*Acao sugerida:* ${handoff.action}\n` +
-    `\nEncaminhado em: ${now}\n` +
-    `------------------------------\n` +
-    `Link wa.me:\n${contact.waLinkLabel}`;
+  const consultorMsg = [
+    `*${handoff.title}*`,
+    ...buildShortContactLines(lead, contact),
+    `*Cliente quer:* ${buildOperationalWant(event, lead)}`,
+    ...buildOperationalExtraLines(lead, event),
+    `*Acao:* ${handoff.action}`,
+    buildWaLinkLine(contact),
+  ].join('\n');
 
   const consultorTarget = resolveConsultorSendTarget(consultor, 'agent_financial_handoff');
   console.log(`[Handoff] Notifying financial/consultor: ${consultor.name} -> target="${consultorTarget.target}"`);
@@ -289,26 +332,18 @@ export async function executeHandoff(wa, lead, config, options = {}) {
     throw error;
   }
 
-  const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const contact = buildContactCardFields(lead);
   const handoffReason = options.reason || lead.salesHandoffReason || 'Lead comercial pronto para cotacao.';
-  const consultorMsg =
-    `*NOVO LEAD QUALIFICADO - ZapBot Pro*\n` +
-    `------------------------------\n` +
-    `*Cliente:* ${lead.name || 'Nao informado'}\n` +
-    `*Telefone real:* ${contact.phoneLabel}\n` +
-    `*ID interno WhatsApp:* ${contact.internalLabel}\n` +
-    `*Telefone resolvido:* ${contact.phoneResolved ? 'sim' : 'nao'}\n` +
-    `*Veiculo:* ${lead.model || 'Nao informado'}\n` +
-    `*Ano:* ${lead.year || 'Nao informado'}\n` +
-    `*Placa:* ${lead.plate || 'Nao informada'}\n` +
-    `*Motivo:* ${handoffReason}\n` +
-    contact.unresolvedWarning +
-    `\n*Resumo da conversa:*\n${lead.caseSummary || lead.leadSummary?.caseSummary || buildSummary(lead)}\n` +
-    `\n*Acao sugerida:* preparar cotacao real e continuar o atendimento com o cliente.\n` +
-    `\nQualificado em: ${now}\n` +
-    `------------------------------\n` +
-    `Link wa.me:\n${contact.waLinkLabel}`;
+  const consultorMsg = [
+    '*VOCE RECEBEU UMA COTACAO*',
+    ...buildShortContactLines(lead, contact),
+    `*Cliente quer:* cotacao de protecao veicular`,
+    `*Veiculo:* ${lead.model || 'Nao informado'}`,
+    `*Ano:* ${lead.year || 'Nao informado'}`,
+    `*Placa:* ${lead.plate || (lead.plateUnavailable ? 'nao possui placa' : 'Nao informada')}`,
+    `*Acao:* preparar cotacao real e retornar ao cliente`,
+    buildWaLinkLine(contact),
+  ].join('\n');
 
   const consultorTarget = resolveConsultorSendTarget(consultor, 'agent_handoff_consultor');
   console.log(`[Handoff] Notifying consultor: ${consultor.name} -> target="${consultorTarget.target}"`);
