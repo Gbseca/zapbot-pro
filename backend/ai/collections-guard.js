@@ -74,7 +74,7 @@ const CANCEL_REQUEST_REPLY = [
   'Para evitar qualquer orientacao errada, vou pausar meu atendimento automatico por aqui.',
 ].join('\n');
 
-export const OPERATIONAL_STOP_STATUSES = new Set([
+const OPERATIONAL_STOP_STATUSES = new Set([
   'human_requested',
   'awaiting_financial_review',
   'payment_claimed',

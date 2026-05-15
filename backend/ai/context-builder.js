@@ -69,6 +69,48 @@ ${latestUserMessage || '(vazia)'}`;
   return { systemPrompt, history: [], userMessage };
 }
 
+export function buildDecisionContext(lead, latestUserMessage = '') {
+  const recentHistory = (lead.history || [])
+    .slice(-5)
+    .map((entry) => `${entry.role === 'assistant' ? 'ASSISTENTE' : 'CLIENTE'}: ${entry.content}`)
+    .join('\n');
+
+  const systemPrompt = `Voce é um classificador de intencoes e emocoes para um assistente de atendimento de protecao veicular.
+
+Responda APENAS com JSON valido.
+
+Schema obrigatorio:
+{
+  "isOperational": boolean,
+  "intent": string | null,
+  "reason": string
+}
+
+Regras:
+- "isOperational" SÓ é true se o cliente está claramente tratando de um problema financeiro, boleto, divida pendente, recebimento de comprovante, cancelamento ou bloqueio do aplicativo.
+- Se o cliente for novo ou estiver pedindo cotacao, "isOperational" DEVE ser false, mesmo se ele disser frases ambiguas (ex: "quero pagar a proteção", querendo dizer que quer contratar).
+- Categorias validas para "intent" se "isOperational" for true:
+  * "boleto_request" (cliente pediu boleto, segunda via ou código PIX para pagamento)
+  * "regularization_request" (cliente quer pagar uma dívida, está inadimplente ou quer negociar)
+  * "payment_claimed" (cliente diz que já pagou, mas não mandou o comprovante claro)
+  * "receipt_available" ou "receipt_received" (cliente está mandando ou vai mandar um comprovante de pagamento)
+  * "reactivation_request" (cliente quer reativar proteção que estava suspensa)
+  * "cancel_request" (cliente quer cancelar o contrato)
+  * "app_blocked" (cliente está sem acesso ao aplicativo)
+- Se "isOperational" for false, "intent" pode ser null.
+- "reason" deve explicar brevemente o motivo da sua decisao (max 100 caracteres).
+- Nao escreva markdown, comentario ou texto fora do JSON.`;
+
+  const userMessage = `Historico recente:
+${recentHistory || '(sem historico relevante)'}
+
+Ultima mensagem do cliente:
+${latestUserMessage || '(vazia)'}`;
+
+  return { systemPrompt, history: [], userMessage };
+}
+
+
 const PERSONALITY_BLOCKS = {
   human: `Voce e a {name}, do time de atendimento da {company}. Seu estilo e proximo e natural, com girias leves quando couber, sem soar engessado.`,
   balanced: `Voce e a {name}, do time de atendimento da {company}. Simpatica, direta e profissional.`,

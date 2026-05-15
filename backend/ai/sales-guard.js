@@ -18,7 +18,7 @@ const PROTECTION_INFO_REPLY = [
 ].join('\n');
 const MULTI_VEHICLE_REPLY = 'Vamos por partes para eu nao misturar as informacoes: voce quer comecar pelo carro ou pela scooter?';
 
-export const SALES_STOP_STATUSES = new Set([
+const SALES_STOP_STATUSES = new Set([
   'transferred',
   'human_taken_over',
 ]);

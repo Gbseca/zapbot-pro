@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { CONFIG_FILE } from '../storage/paths.js';
 
-export const DEFAULT_AI_MODELS = {
+const DEFAULT_AI_MODELS = {
   groq: 'llama-3.3-70b-versatile',
   gemini: 'gemini-2.5-flash',
 };
@@ -13,7 +13,7 @@ const DEFAULT_GROQ_API_KEY_B64 = [
   'c25JcXpjUHVncjUwRndYY2xKQTk=',
 ].join('');
 
-export const DEFAULT_GROQ_API_KEY = Buffer.from(DEFAULT_GROQ_API_KEY_B64, 'base64').toString('utf-8');
+const DEFAULT_GROQ_API_KEY = Buffer.from(DEFAULT_GROQ_API_KEY_B64, 'base64').toString('utf-8');
 
 export function getDefaultModel(provider = 'groq') {
   return DEFAULT_AI_MODELS[provider] || DEFAULT_AI_MODELS.groq;

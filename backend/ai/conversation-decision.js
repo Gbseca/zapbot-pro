@@ -2,6 +2,8 @@ import {
   applyOperationalEventToLead,
   detectOperationalEvent,
 } from './collections-guard.js';
+import { callAI } from './gemini.js';
+import { buildDecisionContext } from './context-builder.js';
 
 const HIGH_RISK_REPLY = 'Entendi sua reclamacao. Vou encaminhar para um atendente humano verificar seu caso com cuidado.';
 const ANGRY_PAYMENT_REPLY = [
@@ -324,7 +326,8 @@ function buildCaseSummary(lead, decision, content = {}) {
   return facts.join(' ');
 }
 
-export function makeConversationDecision({
+export async function makeConversationDecision({
+  config,
   text = '',
   lead = {},
   collectionsContext = null,
@@ -332,17 +335,46 @@ export function makeConversationDecision({
 } = {}) {
   const contentText = text || incomingContent.text || '';
   const collectionsLike = isCollectionsLike(lead, collectionsContext);
-  const conversationMode = inferConversationMode(contentText, lead, collectionsContext);
+  let conversationMode = inferConversationMode(contentText, lead, collectionsContext);
+  const emotion = detectEmotion(contentText);
+  let operationalEvent = null;
+
+  try {
+    const context = buildDecisionContext(lead, contentText);
+    const resultText = await callAI(config, context, { purpose: 'decision' });
+    const decision = JSON.parse(resultText);
+
+    if (decision.isOperational && decision.intent) {
+      console.log(`[Decision] AI classified operational intent: ${decision.intent} - Reason: ${decision.reason}`);
+      conversationMode = 'collections';
+      operationalEvent = {
+        type: decision.intent,
+        status: 'awaiting_financial_review',
+        stage: 'awaiting_financial_review',
+        reply: '',
+        reason: decision.reason,
+        shouldNotifyHuman: true,
+        shouldStopAutomation: true,
+        lastIntent: decision.intent,
+        conversationMode: 'collections',
+      };
+    }
+  } catch (err) {
+    console.error(`[Decision] AI classification failed: ${err.message}. Falling back to regex.`);
+  }
+
   const detectorContext = collectionsLike || conversationMode === 'collections' || conversationMode === 'inspection' || conversationMode === 'support'
     ? (collectionsContext || { conversationMode: 'collections', campaignSubIntent: lead.campaignSubIntent || 'collections_unknown' })
     : null;
-  const emotion = detectEmotion(contentText);
-  let operationalEvent = detectorContext ? detectOperationalEvent({
-    text: contentText,
-    hasAttachment: incomingContent.hasAttachment,
-    attachmentType: incomingContent.attachmentType,
-    collectionsContext: detectorContext,
-  }) : null;
+
+  if (!operationalEvent) {
+    operationalEvent = detectorContext ? detectOperationalEvent({
+      text: contentText,
+      hasAttachment: incomingContent.hasAttachment,
+      attachmentType: incomingContent.attachmentType,
+      collectionsContext: detectorContext,
+    }) : null;
+  }
   operationalEvent = escalateAngryOperationalEvent(operationalEvent, emotion);
 
   if (!operationalEvent && (emotion === 'angry') && conversationMode !== 'sales') {
@@ -380,7 +412,7 @@ export function makeConversationDecision({
     shouldStopAfterReply: !!operationalEvent?.shouldStopAutomation,
     missingData,
     forbiddenActions,
-    notes: operationalEvent?.reason || 'Decisao feita por regras locais antes da resposta generativa.',
+    notes: operationalEvent?.reason || 'Decisão feita pela IA de classificação.',
     riskLevel,
     operationalEvent,
   };

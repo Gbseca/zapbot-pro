@@ -86,7 +86,12 @@ li { margin-bottom: 4px; }
   gap: 2px;
   padding: 12px 10px;
   flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168,85,247,.3) transparent;
 }
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
 
 .nav-item {
   display: flex;
@@ -2289,3 +2294,156 @@ select.form-input:focus { border-color: var(--purple); box-shadow: 0 0 0 3px var
 .connection-pill{background:rgba(255,255,255,.05)!important;border-color:rgba(255,255,255,.09)!important;}
 .page-title{background:linear-gradient(120deg,#fff 0%,#c4b5fd 55%,#a855f7 100%)!important;-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;background-clip:text!important;}
 .logo-sub{text-transform:uppercase!important;letter-spacing:.6px!important;font-size:9px!important;}
+
+/* Kanban CRM Styles */
+.kanban-wrapper {
+  overflow-x: auto;
+  padding-bottom: 12px;
+  margin-top: 16px;
+}
+.kanban-board {
+  display: flex;
+  gap: 16px;
+  min-width: 1000px;
+}
+.kanban-column {
+  flex: 1;
+  min-width: 280px;
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 200px);
+}
+.kanban-column-header {
+  padding: 14px 16px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.kanban-attention .kanban-column-header { color: #f59e0b; }
+.kanban-success .kanban-column-header { color: var(--green); }
+.kanban-cold .kanban-column-header { color: var(--text-muted); }
+
+.kanban-cards {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100px;
+}
+.kanban-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: grab;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.kanban-card:active {
+  cursor: grabbing;
+}
+.kanban-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.kanban-card.drag-over {
+  opacity: 0.5;
+}
+.kanban-column.drag-over {
+  background: rgba(255,255,255,0.02);
+  border-color: var(--accent);
+}
+
+.kc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.kc-name {
+  font-weight: 600;
+  color: var(--text-1);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kc-phone {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.kc-body {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 8px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kc-intent {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 6px;
+}
+.kc-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* Tags */
+.tag-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+.tag-quente { background: rgba(244, 63, 94, 0.15); color: #f43f5e; }
+.tag-morno { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.tag-frio { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+.tag-boleto { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.tag-suporte { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+
+/* Modal CRM Tools */
+.modal-crm-tools {
+  display: flex;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.crm-tool-group {
+  flex: 1;
+}
+.crm-tool-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.form-input-sm {
+  padding: 6px 10px;
+  font-size: 13px;
+}

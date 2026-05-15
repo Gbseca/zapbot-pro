@@ -1286,25 +1286,29 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
           </div>
         </div>
 
-        <!-- Leads List -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-icon">📋</span>
-            <h2 class="card-title">Todos os Leads</h2>
-            <div class="card-actions">
-              <button class="btn btn-outline btn-sm" onclick="refreshLeads()">🔄 Atualizar</button>
-              <button class="btn btn-outline btn-sm" onclick="exportLeadsCSV()">📤 Exportar CSV</button>
+        <!-- Kanban Board CRM -->
+        <div class="kanban-wrapper">
+          <div class="kanban-board" id="kanban-board">
+            <div class="kanban-column" data-status="new" ondrop="drop(event)" ondragover="allowDrop(event)">
+              <div class="kanban-column-header">Novos</div>
+              <div class="kanban-cards" id="col-new"></div>
             </div>
-          </div>
-          <div class="leads-filter" id="leads-filter">
-            <button class="filter-btn active" data-filter="all" onclick="filterLeads('all', this)">Todos</button>
-            <button class="filter-btn" data-filter="talking" onclick="filterLeads('talking', this)">💬 Em conversa</button>
-            <button class="filter-btn" data-filter="qualified" onclick="filterLeads('qualified', this)">✅ Qualificados</button>
-            <button class="filter-btn" data-filter="transferred" onclick="filterLeads('transferred', this)">🤝 Transferidos</button>
-            <button class="filter-btn" data-filter="cold" onclick="filterLeads('cold', this)">🥶 Frios</button>
-          </div>
-          <div id="leads-list" class="leads-list">
-            <div class="queue-empty">Nenhum lead capturado ainda. Ative o Agente IA para começar.</div>
+            <div class="kanban-column" data-status="talking" ondrop="drop(event)" ondragover="allowDrop(event)">
+              <div class="kanban-column-header">Em Atendimento</div>
+              <div class="kanban-cards" id="col-talking"></div>
+            </div>
+            <div class="kanban-column kanban-attention" data-status="transferred" ondrop="drop(event)" ondragover="allowDrop(event)">
+              <div class="kanban-column-header">Humano / Boleto</div>
+              <div class="kanban-cards" id="col-transferred"></div>
+            </div>
+            <div class="kanban-column kanban-success" data-status="qualified" ondrop="drop(event)" ondragover="allowDrop(event)">
+              <div class="kanban-column-header">Resolvidos / Qualificados</div>
+              <div class="kanban-cards" id="col-qualified"></div>
+            </div>
+            <div class="kanban-column kanban-cold" data-status="cold" ondrop="drop(event)" ondragover="allowDrop(event)">
+              <div class="kanban-column-header">Frios / Perdidos</div>
+              <div class="kanban-cards" id="col-cold"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -1323,6 +1327,29 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
         <button class="modal-close" onclick="closeLeadModal()">✕</button>
       </div>
       <div class="modal-vehicle" id="modal-vehicle"></div>
+      
+      <!-- CRM Tools: Tags & Agenda -->
+      <div class="modal-crm-tools">
+        <div class="crm-tool-group">
+          <label>Cor / Etiqueta</label>
+          <select id="modal-lead-tag" class="form-input form-input-sm" onchange="updateLeadTag()">
+            <option value="">Sem etiqueta</option>
+            <option value="quente">🔥 Quente (Pronto pra fechar)</option>
+            <option value="morno">🟡 Morno (Pensando)</option>
+            <option value="frio">🥶 Frio (Não responde)</option>
+            <option value="boleto">📄 Boleto (Apenas financeiro)</option>
+            <option value="suporte">🛠️ Suporte / Sinistro</option>
+          </select>
+        </div>
+        <div class="crm-tool-group">
+          <label>Agendar Retorno</label>
+          <div style="display:flex;gap:4px;">
+            <input type="datetime-local" id="modal-lead-agenda" class="form-input form-input-sm">
+            <button class="btn btn-primary btn-sm" onclick="saveLeadAgenda()">Salvar</button>
+          </div>
+        </div>
+      </div>
+
       <div class="modal-actions" id="modal-actions"></div>
       <div class="modal-chat" id="modal-chat"></div>
     </div>

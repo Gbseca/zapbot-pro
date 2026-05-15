@@ -313,18 +313,8 @@ function shouldRequirePhoneBeforeOperationalHandoff(event = {}, lead = {}, confi
 }
 
 function shouldRequireNameBeforeOperationalHandoff(event = {}, lead = {}) {
-  const type = getOperationalEventType(event);
-  if (type === 'human_requested' || type === 'cancel_request' || type === 'angry_customer') return false;
-  return [
-    'reactivation_request',
-    'boleto_request',
-    'regularization_request',
-    'system_check_request',
-    'payment_claimed',
-    'receipt_available',
-    'receipt_received',
-    'app_blocked',
-  ].includes(type) && !hasConfirmedOperationalName(lead);
+  // Alteração solicitada: não pedir o nome para handoff operacional, apenas o telefone.
+  return false;
 }
 
 function shouldRequireContactBeforeOperationalHandoff(event = {}, lead = {}, config = {}) {
@@ -1353,7 +1343,8 @@ export async function handleIncomingMessage(wa, rawMsg) {
     buildRecentUserText(existingLead || {}, incomingContent.historyText, 8),
   );
 
-  const decision = makeConversationDecision({
+  const decision = await makeConversationDecision({
+    config,
     text,
     lead: decisionLeadSeed,
     collectionsContext,

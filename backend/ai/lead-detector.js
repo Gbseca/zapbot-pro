@@ -147,31 +147,3 @@ export function detectAndExtract(aiResponse, currentLead = {}) {
   };
 }
 
-/**
- * Tries to extract a phone number from a free-text message (backup capture).
- */
-export function tryExtractPhone(message) {
-  const digits = String(message || '').replace(/\D/g, '');
-  if ((digits.length === 10 || digits.length === 11) && /^[1-9]{2}9?\d{7,8}$/.test(digits)) {
-    return `55${digits}`;
-  }
-  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
-    return digits;
-  }
-  return null;
-}
-
-/**
- * Simple heuristic name extractor (backup — AI handles this mainly).
- */
-export function tryExtractName(message) {
-  const patterns = [
-    /(?:sou|chamo|me chamo|meu nome(?: é)?) ([A-Za-záÁàÀãÃâÂéÉêÊíÍóÓôÔõÕúÚçÇ]+)/i,
-    /(?:aqui é|é o|é a) ([A-Za-záÁàÀãÃâÂéÉêÊíÍóÓôÔõÕúÚçÇ]+)/i,
-  ];
-  for (const pattern of patterns) {
-    const match = String(message || '').match(pattern);
-    if (match && match[1].length > 2) return match[1];
-  }
-  return null;
-}

@@ -2806,6 +2806,25 @@ async function updateAIStats() {
 let allLeads = [];
 let currentFilter = 'all';
 
+let notifiedLeads = new Set();
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+  } catch(e) {}
+}
+
 async function loadLeads() {
   try {
     const r = await fetch('/api/leads');
@@ -2813,7 +2832,20 @@ async function loadLeads() {
     renderLeadsStats();
     renderLeadsList(currentFilter);
     updateLeadBadge();
-  } catch {}
+
+    const needsAttention = allLeads.filter(l => l.status === 'transferred' || l.status === 'human_requested' || l.status === 'awaiting_financial_review');
+    for (const lead of needsAttention) {
+      if (!notifiedLeads.has(lead.number)) {
+        notifiedLeads.add(lead.number);
+        playBeep();
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('ZapBot Pro - Atencao!', {
+            body: 'O lead ' + (lead.name || lead.number) + ' precisa de atendimento humano!'
+          });
+        }
+      }
+    }
+  } catch (err) {}
 }
 
 function renderLeadsStats() {
@@ -2861,44 +2893,96 @@ function getLatestAssistantDelivery(lead) {
 }
 
 function renderLeadsList(filter) {
-  const list = document.getElementById('leads-list');
-  let leads = filter === 'all' ? allLeads : allLeads.filter(l => l.status === filter);
+  const colNew = document.getElementById('col-new');
+  const colTalking = document.getElementById('col-talking');
+  const colTransferred = document.getElementById('col-transferred');
+  const colQualified = document.getElementById('col-qualified');
+  const colCold = document.getElementById('col-cold');
 
-  if (leads.length === 0) {
-    list.innerHTML = '<div class="queue-empty">Nenhum lead encontrado para este filtro.</div>';
-    return;
-  }
+  if (!colNew) return; // Se a aba nao estiver carregada no DOM
 
-  list.innerHTML = leads.map(lead => {
-    const dotClass = `status-dot-${lead.status || 'new'}`;
+  colNew.innerHTML = '';
+  colTalking.innerHTML = '';
+  colTransferred.innerHTML = '';
+  colQualified.innerHTML = '';
+  colCold.innerHTML = '';
+
+  allLeads.forEach(lead => {
     const timeAgo = timeSince(lead.updatedAt || lead.createdAt);
-    const deliveryMeta = getLatestAssistantDelivery(lead);
-    return `
-      <div class="lead-card" onclick="openLeadModal('${lead.number}')">
-        <div class="lead-status-dot ${dotClass}"></div>
-        <div class="lead-info">
-          <div class="lead-name">${lead.name || 'Desconhecido'}</div>
-          <div class="lead-number">${formatLeadPhone(lead)}</div>
-          ${deliveryMeta ? `<div class="lead-delivery-badge ${deliveryMeta.className === 'delivery_timeout' ? 'pending' : deliveryMeta.className}">${deliveryMeta.label}</div>` : ''}
+    const intent = lead.lastIntent || lead.operationalReason || 'Sem intenção';
+    const tagHtml = lead.tag ? `<span class="tag-pill tag-${lead.tag}">${lead.tag}</span>` : '';
+    const name = lead.name || 'Desconhecido';
+    
+    // Resume snippet
+    let summary = lead.leadSummary?.reason || lead.leadSummary?.lastUserMessage || '';
+    if (!summary && lead.history && lead.history.length > 0) {
+      const lastMsg = [...lead.history].reverse().find(m => m.role === 'user');
+      summary = lastMsg ? lastMsg.content : 'Sem mensagens recentes';
+    }
+
+    const card = document.createElement('div');
+    card.className = 'kanban-card';
+    card.draggable = true;
+    card.id = `lead-card-${lead.number}`;
+    card.ondragstart = (e) => {
+      e.dataTransfer.setData('text/plain', lead.number);
+      card.style.opacity = '0.5';
+    };
+    card.ondragend = (e) => {
+      card.style.opacity = '1';
+    };
+    card.onclick = () => openLeadModal(lead.number);
+
+    card.innerHTML = `
+      <div class="kc-head">
+        <div style="flex:1;overflow:hidden;">
+          <div class="kc-name">${name}</div>
+          <div class="kc-phone">${formatLeadPhone(lead)}</div>
         </div>
-        <div class="lead-vehicle">
-          ${lead.model ? `<div class="lead-model">ðŸš— ${lead.model}</div>` : ''}
-          ${lead.plate ? `<span class="lead-plate">${lead.plate}</span>` : ''}
-        </div>
-        <div class="lead-since">${timeAgo}</div>
-        <div class="lead-actions-mini" onclick="event.stopPropagation()">
-          ${lead.status === 'talking' ? `<button class="lead-btn" onclick="blockLead('${lead.number}')">â›”</button>` : ''}
-        </div>
+        ${tagHtml}
+      </div>
+      <div class="kc-body">${summary}</div>
+      <div class="kc-foot">
+        <div><span class="kc-intent">${intent}</span></div>
+        <div class="lead-since" style="font-size:10px;">${timeAgo}</div>
       </div>
     `;
-  }).join('');
+
+    // Map status to column
+    if (lead.status === 'new') colNew.appendChild(card);
+    else if (lead.status === 'talking' || lead.status === 'engaged' || lead.status === 'human_taken_over') colTalking.appendChild(card);
+    else if (lead.status === 'transferred' || lead.status === 'human_requested' || lead.status === 'awaiting_financial_review') colTransferred.appendChild(card);
+    else if (lead.status === 'qualified') colQualified.appendChild(card);
+    else colCold.appendChild(card);
+  });
+}
+
+function allowDrop(ev) {
+  ev.preventDefault();
+  const col = ev.currentTarget;
+  col.classList.add('drag-over');
+}
+
+async function drop(ev) {
+  ev.preventDefault();
+  const col = ev.currentTarget;
+  col.classList.remove('drag-over');
+  
+  const number = ev.dataTransfer.getData('text/plain');
+  const newStatus = col.getAttribute('data-status');
+  
+  // Update Backend
+  await fetch('/api/leads/' + number, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: newStatus }),
+  });
+  await loadLeads();
+  showToast('Lead movido para ' + col.querySelector('.kanban-column-header').textContent, 'success');
 }
 
 function filterLeads(filter, btn) {
-  currentFilter = filter;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  renderLeadsList(filter);
+  // Ignorado pois o Kanban agora mostra todos
 }
 
 async function refreshLeads() {
@@ -2950,20 +3034,30 @@ function updateLeadBadge() {
   updateBadge('leads', talking > 0 ? talking : null);
 }
 
+let currentModalLead = null;
+
 // Lead Modal
 function openLeadModal(number) {
   const lead = allLeads.find(l => l.number === number);
   if (!lead) return;
+  currentModalLead = lead;
 
   document.getElementById('modal-lead-name').textContent = lead.name || 'Desconhecido';
   document.getElementById('modal-lead-number').textContent = `${formatLeadPhone(lead)} Â· ${statusLabel(lead.status)}`;
+
+  // Populate CRM tools
+  const tagSelect = document.getElementById('modal-lead-tag');
+  if (tagSelect) tagSelect.value = lead.tag || '';
+  
+  const agendaInput = document.getElementById('modal-lead-agenda');
+  if (agendaInput) agendaInput.value = ''; // Will pull from reminders API eventually or lead object
 
   const vehicle = document.getElementById('modal-vehicle');
   vehicle.innerHTML = lead.model || lead.plate
     ? `<div class="modal-vehicle-item">ðŸš— <strong>${lead.model || '?'}</strong></div>
        <div class="modal-vehicle-item">ðŸ”‘ <strong>${lead.plate || '?'}</strong></div>
        <div class="modal-vehicle-item" style="margin-left:auto">ðŸ“… ${new Date(lead.createdAt).toLocaleDateString('pt-BR')}</div>`
-    : `<div class="modal-vehicle-item" style="color:var(--text-3)">VeÃ­culo nÃ£o capturado ainda</div>`;
+    : `<div class="modal-vehicle-item" style="color:var(--text-3)">Veiculo nao capturado ainda</div>`;
 
   const risk = getLeadRisk(lead);
   const caseSummary = getLeadCaseSummary(lead);
@@ -3346,3 +3440,45 @@ function closeSidebar() {
     return card;
   };
 })();
+
+// CRM Tools Actions
+async function updateLeadTag() {
+  if (!currentModalLead) return;
+  const tag = document.getElementById('modal-lead-tag').value;
+  await fetch('/api/leads/' + currentModalLead.number, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag })
+  });
+  currentModalLead.tag = tag;
+  await loadLeads();
+  showToast('Etiqueta atualizada.', 'success');
+}
+
+async function saveLeadAgenda() {
+  if (!currentModalLead) return;
+  const dueAt = document.getElementById('modal-lead-agenda').value;
+  if (!dueAt) {
+    showToast('Escolha uma data.', 'error');
+    return;
+  }
+  const isoDate = new Date(dueAt).toISOString();
+  try {
+    const res = await fetch('/api/reminders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lead_key: currentModalLead.number,
+        reminder_text: 'Retorno Agendado (CRM)',
+        due_at: isoDate
+      })
+    });
+    if (res.ok) {
+      showToast('Retorno agendado com sucesso!', 'success');
+    } else {
+      showToast('Erro ao agendar.', 'error');
+    }
+  } catch(e) {
+    showToast('Erro ao agendar: ' + e.message, 'error');
+  }
+}
