@@ -21,6 +21,9 @@ import {
   applyConversationDecisionToLead,
   makeConversationDecision,
 } from './conversation-decision.js';
+import { buildHumanizedReply } from './humanized-reply-builder.js';
+import { getRelevantKnowledge } from './knowledge-retriever.js';
+import { getNextSalesStep } from './sales-playbook.js';
 import {
   applySalesEventToLead,
   applySalesFactsToLead,
@@ -1350,10 +1353,9 @@ export async function handleIncomingMessage(wa, rawMsg) {
     collectionsContext,
     incomingContent,
   });
-  const operationalEvent = decision.operationalEvent;
 
-  if (operationalEvent) {
-    console.log(`[Agent] Operational event ${operationalEvent.type} for ${leadId}: ${operationalEvent.reason}`);
+  if (decision.shouldStopAutomation || decision.shouldHandoff) {
+    console.log(`[Agent] Fast-path trigger for ${leadId}: intent=${decision.intent}, handoff=${decision.shouldHandoff}`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.number = leadId;
     lead.jid = fullJid;
@@ -1364,15 +1366,46 @@ export async function handleIncomingMessage(wa, rawMsg) {
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: incomingContent.historyText, ts: Date.now() });
     lead.lastInteraction = new Date().toISOString();
-    await applyLatestFactsToLead(lead, {
-      fullJid,
-      inboundRoute,
-      source: 'phone_extracted_from_user',
-    });
-    applyCustomerNameFromText(lead, incomingContent.historyText);
+    
     applyConversationDecisionToLead(lead, decision, incomingContent);
 
-    await handleOperationalEventAction(wa, leadId, lead, replyRoute, config, operationalEvent, incomingContent);
+    // Get response and send it
+    const relevantKnowledge = getRelevantKnowledge(decision.intent, incomingContent.historyText, decision.conversationMode);
+    const cleanResponse = await buildHumanizedReply(config, {
+      mode: decision.conversationMode,
+      step: decision.step,
+      intent: decision.intent,
+      lead,
+      latestUserMessage: incomingContent.historyText,
+      requiredAction: decision.nextAction,
+      allowedQuestion: decision.allowedQuestion,
+      relevantKnowledge,
+      tone: decision.conversationMode === 'sales' ? 'comercial_leve' : 'operacional'
+    });
+
+    console.log(`[Agent] Sending fast-path response to ${replyRoute.target}`);
+    let delivery;
+    try {
+      delivery = await sendHumanized(wa, replyRoute.target, cleanResponse, incomingContent.historyText, false, replyRoute.options || {});
+    } catch (err) {
+      delivery = {
+        status: 'failed',
+        messageId: null,
+        targetJid: err.targetResolved || null,
+        error: err.message,
+      };
+    }
+    appendAssistantMessage(lead, cleanResponse, delivery);
+
+    if (decision.shouldHandoff) {
+      if (decision.conversationMode === 'sales') {
+        await executeHandoff(wa, lead, config);
+      } else {
+        await executeFinancialHandoff(wa, lead, config, decision);
+      }
+    } else {
+      saveLead(leadId, lead);
+    }
     return;
   }
 
@@ -1563,7 +1596,8 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     lead.stage = lead.stage || 'engaged';
   }
 
-  const decision = makeConversationDecision({
+  const decision = await makeConversationDecision({
+    config,
     text: combinedText,
     lead,
     collectionsContext: conversationModeContext,
@@ -1571,135 +1605,57 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   });
   applyConversationDecisionToLead(lead, decision, { text: combinedText, historyText: combinedText });
 
-  if (!conversationModeContext) {
-    applySalesFactsToLead(lead, combinedText);
-    const salesEvent = detectSalesEvent({
-      text: combinedText,
-      lead,
-      phase: 'pre',
-    });
-
-    if (salesEvent) {
-      console.log(`[Agent] Sales event ${salesEvent.type} for ${leadId}: ${salesEvent.reason}`);
-      await handleSalesEvent(
-        wa,
-        leadId,
-        lead,
-        route,
-        config,
-        salesEvent,
-        { text: combinedText, historyText: combinedText },
-      );
-      return;
-    }
-  }
-
-  if (decision.operationalEvent) {
-    console.log(`[Agent] Buffered operational event ${decision.operationalEvent.type} for ${leadId}: ${decision.operationalEvent.reason}`);
-    await handleOperationalEventAction(
-      wa,
-      leadId,
-      lead,
-      route,
-      config,
-      decision.operationalEvent,
-      { text: combinedText, historyText: combinedText },
-    );
-    return;
-  }
-
-  const alreadyTransferred = ['transferred', 'transferred_to_financial', 'transferred_to_support'].includes(lead.status);
-  saveLead(leadId, lead);
-
-  const replyContext = await buildContext(
-    config,
-    lead,
-    alreadyTransferred,
-    conversationModeContext || { conversationMode: 'sales' },
-  );
-
-  let cleanResponse = '';
-  let extraction = {
-    qualified: false,
-    plate: lead.plate || null,
-    model: lead.model || null,
-    year: lead.year || null,
-    name: lead.name || null,
-    phone: lead.phone || null,
-    profileCaptured: !!lead.profileCaptured,
-  };
-
-  if (conversationModeContext) {
-    try {
-      cleanResponse = ensureCompleteReply(
-        sanitizeReply(await callAI(config, replyContext, { purpose: 'reply', mode: 'collections' })),
-        { lead, latestUserText: combinedText, mode: 'collections' },
-      );
-    } catch (error) {
-      console.error('[Agent] Collections reply error:', error.message || error);
-      return;
-    }
-  } else {
+  // 1. Data extraction if in sales mode (not handed off yet)
+  let extraction = { qualified: false };
+  if (decision.conversationMode === 'sales' && !decision.shouldHandoff) {
     const qualificationContext = await buildQualificationContext(config, lead, combinedText);
-
-    const [replyResult, qualificationResult] = await Promise.allSettled([
-      callAI(config, replyContext, { purpose: 'reply', mode: 'sales' }),
-      callAI(config, qualificationContext, { purpose: 'qualification', mode: 'sales' }),
-    ]);
-
-    if (replyResult.status !== 'fulfilled') {
-      console.error('[Agent] AI reply error:', replyResult.reason?.message || replyResult.reason);
-      return;
-    }
-
-    cleanResponse = ensureCompleteReply(
-      sanitizeReply(replyResult.value),
-      { lead, latestUserText: combinedText, mode: 'sales' },
-    );
-
-    if (qualificationResult.status === 'fulfilled') {
-      extraction = detectAndExtract(qualificationResult.value, lead);
-    } else {
-      console.warn('[Agent] Qualification extraction failed:', qualificationResult.reason?.message || qualificationResult.reason);
-    }
-
-    if (extraction.plate) lead.plate = extraction.plate;
-    if (extraction.model) lead.model = extraction.model;
-    if (extraction.year) lead.year = extraction.year;
-    if (extraction.name && extraction.name.length > 1) lead.name = extraction.name;
-    if (extraction.profileCaptured) lead.profileCaptured = true;
-    if (extraction.phone) {
-      lead.phone = extraction.phone;
-      lead.displayNumber = extraction.phone;
-      lead.phoneResolved = true;
-      console.log(`[Agent] Phone from extraction: ${extraction.phone}`);
+    try {
+      const qualificationResult = await callAI(config, qualificationContext, { purpose: 'qualification', mode: 'sales' });
+      extraction = detectAndExtract(qualificationResult, lead);
+      
+      if (extraction.plate) lead.plate = extraction.plate;
+      if (extraction.model) lead.model = extraction.model;
+      if (extraction.year) lead.year = extraction.year;
+      if (extraction.name && extraction.name.length > 1) lead.name = extraction.name;
+      if (extraction.profileCaptured) lead.profileCaptured = true;
+      if (extraction.phone) {
+        lead.phone = extraction.phone;
+        lead.displayNumber = extraction.phone;
+        lead.phoneResolved = true;
+      }
+      
+      // Update state machine parameters after data extraction
+      const updatedPlaybook = getNextSalesStep(lead, combinedText);
+      decision.step = updatedPlaybook.step;
+      decision.nextAction = updatedPlaybook.requiredAction;
+      decision.shouldHandoff = updatedPlaybook.shouldHandoff;
+      decision.shouldStopAutomation = updatedPlaybook.shouldStopAutomation;
+      decision.allowedQuestion = updatedPlaybook.allowedQuestion;
+      decision.missingData = updatedPlaybook.missingData;
+      
+      applyConversationDecisionToLead(lead, decision, { text: combinedText, historyText: combinedText });
+    } catch (err) {
+      console.warn('[Agent] Qualification extraction failed:', err.message);
     }
   }
 
-  if (!conversationModeContext) {
-    applySalesFactsToLead(lead, combinedText);
-    const postSalesEvent = detectSalesEvent({
-      text: combinedText,
-      lead,
-      modelReply: cleanResponse,
-      phase: 'post',
-    });
+  // 2. Fetch relevant knowledge
+  const relevantKnowledge = getRelevantKnowledge(decision.intent, combinedText, decision.conversationMode);
 
-    if (postSalesEvent) {
-      console.log(`[Agent] Post-AI sales event ${postSalesEvent.type} for ${leadId}: ${postSalesEvent.reason}`);
-      await handleSalesEvent(
-        wa,
-        leadId,
-        lead,
-        route,
-        config,
-        postSalesEvent,
-        { text: combinedText, historyText: combinedText },
-      );
-      return;
-    }
-  }
+  // 3. Generate humanized reply
+  const cleanResponse = await buildHumanizedReply(config, {
+    mode: decision.conversationMode,
+    step: decision.step,
+    intent: decision.intent,
+    lead,
+    latestUserMessage: combinedText,
+    requiredAction: decision.nextAction,
+    allowedQuestion: decision.allowedQuestion,
+    relevantKnowledge,
+    tone: decision.conversationMode === 'sales' ? 'comercial_leve' : 'operacional'
+  });
 
+  // 4. Send reply
   console.log(`[Agent] Sending to ${route.target} (${displayNum}) via ${route.source}`);
   let delivery;
   try {
@@ -1727,18 +1683,17 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     return;
   }
 
-  if (conversationModeContext) {
-    saveLead(leadId, lead);
-    return;
-  }
-
-  if (extraction.qualified && !alreadyTransferred) {
-    lead.status = 'qualified';
-    lead.stage = 'qualified';
-    lead.qualifiedAt = new Date().toISOString();
-    lead.lastQualifiedSignalAt = lead.qualifiedAt;
-    saveLead(leadId, lead);
-    await executeHandoff(wa, lead, config);
+  // 5. Execute Handoff if needed
+  if (decision.shouldHandoff) {
+    if (decision.conversationMode === 'sales') {
+      lead.status = 'qualified';
+      lead.stage = 'qualified';
+      lead.qualifiedAt = new Date().toISOString();
+      saveLead(leadId, lead);
+      await executeHandoff(wa, lead, config);
+    } else {
+      await executeFinancialHandoff(wa, lead, config, decision);
+    }
     return;
   }
 

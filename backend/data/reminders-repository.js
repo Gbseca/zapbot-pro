@@ -100,3 +100,74 @@ export async function listOpenReminders({ consultantPhone = null, limit = 10 } =
     })
     .slice(0, limit);
 }
+
+export async function getLatestOpenReminderForLead(leadKey) {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('reminders')
+        .select('*')
+        .eq('lead_key', leadKey)
+        .eq('done', false)
+        .order('due_at', { ascending: true })
+        .limit(1);
+      if (error) throw error;
+      if (data && data.length > 0) return normalizeReminder(data[0]);
+    } catch (error) {
+      warnSupabaseFallback('reminders.getLatestOpen', error);
+    }
+  }
+
+  const local = readLocalReminders();
+  const leadReminders = local
+    .filter(item => item.lead_key === leadKey && !item.done)
+    .sort((a, b) => {
+      if (a.due_at && b.due_at) return new Date(a.due_at) - new Date(b.due_at);
+      if (a.due_at) return -1;
+      if (b.due_at) return 1;
+      return 0;
+    });
+  return leadReminders.length > 0 ? leadReminders[0] : null;
+}
+
+export async function completeAllRemindersForLead(leadKey) {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('reminders')
+        .update({ done: true, updated_at: new Date().toISOString() })
+        .eq('lead_key', leadKey)
+        .eq('done', false);
+      if (error) throw error;
+      await recordEvent({
+        leadKey,
+        eventType: 'reminders_completed',
+        payload: { storage: 'supabase' }
+      });
+      return true;
+    } catch (error) {
+      warnSupabaseFallback('reminders.completeAll', error);
+    }
+  }
+
+  const local = readLocalReminders();
+  let updated = false;
+  const newLocal = local.map(item => {
+    if (item.lead_key === leadKey && !item.done) {
+      updated = true;
+      return { ...item, done: true, updated_at: new Date().toISOString() };
+    }
+    return item;
+  });
+  if (updated) {
+    writeLocalReminders(newLocal);
+    await recordEvent({
+      leadKey,
+      eventType: 'reminders_completed',
+      payload: { storage: 'local' }
+    });
+  }
+  return true;
+}

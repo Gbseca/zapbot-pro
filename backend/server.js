@@ -30,7 +30,12 @@ import {
   updateFaqItem,
 } from './data/faq-repository.js';
 import { upsertLidPhoneMapping } from './data/lid-phone-map-repository.js';
-import { createReminder, listOpenReminders } from './data/reminders-repository.js';
+import {
+  createReminder,
+  listOpenReminders,
+  getLatestOpenReminderForLead,
+  completeAllRemindersForLead,
+} from './data/reminders-repository.js';
 import { isLidIdentifier, normalizeLidJid, normalizeRealWhatsAppPhone } from './phone-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -538,6 +543,25 @@ app.post('/api/reminders', async (req, res) => {
     if (!reminder) return res.status(400).json({ error: 'Dados invalidos para agenda.' });
     systemStatus.emitSnapshot();
     res.status(201).json(reminder);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/reminders/:lead_key', async (req, res) => {
+  try {
+    const reminder = await getLatestOpenReminderForLead(req.params.lead_key);
+    res.json(reminder || null);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/reminders/:lead_key/complete', async (req, res) => {
+  try {
+    await completeAllRemindersForLead(req.params.lead_key);
+    systemStatus.emitSnapshot();
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -43,37 +43,32 @@ export async function extractAndSavePDF(buffer, filename) {
   return { text, pages: data.numpages, wordCount: cache[filename].wordCount };
 }
 
-// Max chars injected into the prompt per PDF and total.
-// Keep the docs helpful without estourar o orçamento dos modelos gratuitos.
-const MAX_CHARS_PER_PDF = 3000;
-const MAX_CHARS_TOTAL   = 6000;
-
+// Retorna apenas a lista de arquivos carregados para evitar encher o prompt
 export async function loadExtractedPDFs() {
   const cache = loadCache();
-  const entries = Object.entries(cache);
-  if (entries.length === 0) return '';
+  const filenames = Object.keys(cache);
+  if (filenames.length === 0) return '';
+  return `Documentos PDF Carregados no Sistema: ${filenames.join(', ')}`;
+}
 
-  let totalChars = 0;
-  const sections = [];
+// Busca por palavra-chave nos PDFs extraídos
+export function searchPDFs(query = '') {
+  const cache = loadCache();
+  const normalizedQuery = query.toLowerCase();
+  const matches = [];
 
-  for (const [filename, data] of entries) {
-    if (totalChars >= MAX_CHARS_TOTAL) {
-      sections.push('(demais documentos omitidos por limite de espaço)');
-      break;
+  for (const [filename, data] of Object.entries(cache)) {
+    const text = data.text || '';
+    if (text.toLowerCase().includes(normalizedQuery)) {
+      // Pega um trecho ao redor da ocorrência ou os primeiros 800 caracteres
+      const idx = text.toLowerCase().indexOf(normalizedQuery);
+      const start = Math.max(0, idx - 200);
+      const end = Math.min(text.length, idx + 800);
+      matches.push(`Trecho de [${filename}]: ... ${text.slice(start, end).trim()} ...`);
     }
-    const available = Math.min(MAX_CHARS_PER_PDF, MAX_CHARS_TOTAL - totalChars);
-    let text = data.text || '';
-    let truncated = false;
-    if (text.length > available) {
-      text = text.slice(0, available);
-      truncated = true;
-    }
-    const label = filename.toUpperCase().replace('.PDF', '').replace(/_/g, ' ');
-    sections.push(`=== ${label} ===\n${text}${truncated ? '\n[... conteúdo truncado por limite de tamanho ...]' : ''}`);
-    totalChars += text.length;
   }
 
-  return sections.join('\n\n');
+  return matches.join('\n\n');
 }
 
 export function getUploadedDocs() {

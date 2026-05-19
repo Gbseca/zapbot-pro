@@ -83,6 +83,7 @@ Schema obrigatorio:
 {
   "isOperational": boolean,
   "intent": string | null,
+  "emotion": "neutral" | "angry" | "irritated",
   "reason": string
 }
 
@@ -98,6 +99,7 @@ Regras:
   * "cancel_request" (cliente quer cancelar o contrato)
   * "app_blocked" (cliente está sem acesso ao aplicativo)
 - Se "isOperational" for false, "intent" pode ser null.
+- "emotion" deve identificar se o cliente demonstra irritação (angry), insatisfação contida (irritated) ou se está neutro/tranquilo (neutral).
 - "reason" deve explicar brevemente o motivo da sua decisao (max 100 caracteres).
 - Nao escreva markdown, comentario ou texto fora do JSON.`;
 

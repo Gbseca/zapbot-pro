@@ -3050,7 +3050,20 @@ function openLeadModal(number) {
   if (tagSelect) tagSelect.value = lead.tag || '';
   
   const agendaInput = document.getElementById('modal-lead-agenda');
-  if (agendaInput) agendaInput.value = ''; // Will pull from reminders API eventually or lead object
+  if (agendaInput) {
+    agendaInput.value = '';
+    fetch('/api/reminders/' + number)
+      .then(r => r.json())
+      .then(reminder => {
+        if (reminder && reminder.due_at) {
+          const date = new Date(reminder.due_at);
+          const tzoffset = date.getTimezoneOffset() * 60000;
+          const localISOTime = (new Date(date.getTime() - tzoffset)).toISOString().slice(0, 16);
+          agendaInput.value = localISOTime;
+        }
+      })
+      .catch(() => {});
+  }
 
   const vehicle = document.getElementById('modal-vehicle');
   vehicle.innerHTML = lead.model || lead.plate
@@ -3480,5 +3493,23 @@ async function saveLeadAgenda() {
     }
   } catch(e) {
     showToast('Erro ao agendar: ' + e.message, 'error');
+  }
+}
+
+async function completeLeadAgenda() {
+  if (!currentModalLead) return;
+  try {
+    const res = await fetch(`/api/reminders/${currentModalLead.number}/complete`, {
+      method: 'POST'
+    });
+    if (res.ok) {
+      const agendaInput = document.getElementById('modal-lead-agenda');
+      if (agendaInput) agendaInput.value = '';
+      showToast('Agenda concluída com sucesso!', 'success');
+    } else {
+      showToast('Erro ao concluir agendamento.', 'error');
+    }
+  } catch(e) {
+    showToast('Erro ao concluir: ' + e.message, 'error');
   }
 }
