@@ -19,6 +19,10 @@ export async function buildHumanizedReply(config, {
   relevantKnowledge = '',
   tone = 'comercial_leve'
 } = {}) {
+  if (mode === 'operational' && lead.clientReply) {
+    return lead.clientReply;
+  }
+
   let activeRules = companyRules;
   if (!activeRules || Object.keys(activeRules).length === 0) {
     try {

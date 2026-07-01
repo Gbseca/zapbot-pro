@@ -18,29 +18,62 @@ function matchAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+const OPERATIONAL_PATTERNS = [
+  /\bja paguei\b/, /\bpaguei\b/, /\bfoi pago\b/, /\besta pago\b/, /\bpagamento feito\b/,
+  /\bcomprovante\b/, /\brecibo\b/, /\bboleto\b/, /\bsegunda via\b/, /\bgerar boleto\b/,
+  /\bvencimento\b/, /\bvencid[ao]\b/, /\breativar\b/, /\breativacao\b/, /\bprotecao suspensa\b/,
+  /\bregularizar\b/, /\bnegociar\b/, /\bacordo\b/, /\bpendencia\b/, /\bpendente\b/,
+  /\binadimplencia\b/, /\binadimplente\b/, /\batraso\b/, /\batrasad[ao]\b/,
+  /\bdebito\b/, /\bdivida\b/, /\bcobranca\b/, /\bquitar\b/, /\bfinanceiro\b/,
+  /\bresolver (minha |meu |a |o |uma |um )?(pendencia|inadimplencia|debito|divida|boleto|cobranca)\b/,
+  /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
+  /\baplicativo bloquead[ao]\b/, /\baplicativo .*bloquead[ao]\b/,
+  /\bnao consigo acessar (o )?(app|aplicativo)\b/, /\bcancelar\b/, /\bcancelamento\b/,
+  /\brevistoria\b/, /\bvistoria\b/
+];
+
+const REGULARIZATION_PATTERNS = [
+  /\bregularizar\b/, /\bnegociar\b/, /\bacordo\b/, /\bpendencia\b/, /\bpendente\b/,
+  /\binadimplencia\b/, /\binadimplente\b/, /\batraso\b/, /\batrasad[ao]\b/,
+  /\bdebito\b/, /\bdivida\b/, /\bcobranca\b/, /\bquitar\b/,
+  /\bresolver (minha |meu |a |o |uma |um )?(pendencia|inadimplencia|debito|divida|boleto|cobranca)\b/
+];
+
+const HUMAN_OR_SUPPORT_PATTERNS = [
+  /\bfalar com (um )?(atendente|humano|pessoa|consultor)\b/,
+  /\bquero (um )?(atendente|humano|pessoa|consultor)\b/,
+  /\bme passa(r)? para (um )?(atendente|humano|pessoa|consultor)\b/,
+  /\bnao quero robo\b/,
+  /\bsuporte\b/,
+  /\bpreciso (de )?ajuda\b/,
+  /\btenho (um )?problema\b/,
+  /\bestou com (um )?problema\b/,
+  /\bquero resolver (uma )?(coisa|questao|situacao|problema|caso)\b/,
+  /\bpreciso resolver (uma )?(coisa|questao|situacao|problema|caso)\b/
+];
+
 // Fallback regex checks for isOperational
 function fallbackIsOperational(text) {
   const normalized = normalizeText(text);
-  return matchAny(normalized, [
-    /\bja paguei\b/, /\bpaguei\b/, /\bfoi pago\b/, /\besta pago\b/, /\bpagamento feito\b/,
-    /\bcomprovante\b/, /\brecibo\b/, /\bboleto\b/, /\bsegunda via\b/, /\bgerar boleto\b/,
-    /\bvencimento\b/, /\breativar\b/, /\breativacao\b/, /\bprotecao suspensa\b/,
-    /\bregularizar\b/, /\bnegociar\b/, /\bacordo\b/, /\bpendencia\b/, /\bfinanceiro\b/,
-    /\bapp bloquead[ao]\b/, /\baplicativo bloquead[ao]\b/, /\bcancelar\b/, /\bcancelamento\b/,
-    /\brevistoria\b/, /\bvistoria\b/
-  ]);
+  return matchAny(normalized, OPERATIONAL_PATTERNS) || matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS);
 }
 
 // Fallback regex to infer intent
 function fallbackInferIntent(text, isOperational) {
   const normalized = normalizeText(text);
   if (isOperational) {
+    if (matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS)) return 'human_requested';
     if (matchAny(normalized, [/\bcancelar\b/, /\bcancelamento\b/])) return 'cancel_request';
     if (matchAny(normalized, [/\breativar\b/, /\breativacao\b/])) return 'reactivation_request';
-    if (matchAny(normalized, [/\bapp bloquead[ao]\b/, /\baplicativo bloquead[ao]\b/])) return 'app_blocked';
+    if (matchAny(normalized, [
+      /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
+      /\baplicativo bloquead[ao]\b/, /\baplicativo .*bloquead[ao]\b/,
+      /\bnao consigo acessar (o )?(app|aplicativo)\b/
+    ])) return 'app_blocked';
     if (matchAny(normalized, [/\bcomprovante\b/, /\brecibo\b/])) return 'receipt_received';
     if (matchAny(normalized, [/\bja paguei\b/, /\bpaguei\b/, /\bpagamento feito\b/])) return 'payment_claimed';
     if (matchAny(normalized, [/\bboleto\b/, /\bsegunda via\b/, /\bgerar boleto\b/])) return 'boleto_request';
+    if (matchAny(normalized, REGULARIZATION_PATTERNS)) return 'regularization_request';
     return 'general_question';
   }
   
@@ -80,7 +113,11 @@ export async function makeConversationDecision({
   incomingContent = {},
 } = {}) {
   const contentText = text || incomingContent.text || '';
-  let isOperational = fallbackIsOperational(contentText) || lead.conversationMode === 'collections' || lead.conversationMode === 'operational';
+  const hasOperationalSignal = fallbackIsOperational(contentText)
+    || lead.conversationMode === 'collections'
+    || lead.conversationMode === 'operational'
+    || !!collectionsContext;
+  let isOperational = hasOperationalSignal;
   let detectedIntent = null;
   let emotion = 'neutral';
 
@@ -97,12 +134,12 @@ export async function makeConversationDecision({
     console.log(`[Decision LLM] Classified operational: ${isOperational}, intent: ${detectedIntent}, emotion: ${emotion}`);
   } catch (err) {
     console.warn(`[Decision] LLM classification failed: ${err.message}. Using fallback regex.`);
-    isOperational = fallbackIsOperational(contentText);
+    isOperational = hasOperationalSignal;
     detectedIntent = fallbackInferIntent(contentText, isOperational);
   }
 
   // Double check to make sure if user talks about boleto/inadimplência/atraso, it is classified as operational
-  if (!isOperational && fallbackIsOperational(contentText)) {
+  if (!isOperational && hasOperationalSignal) {
     isOperational = true;
     detectedIntent = fallbackInferIntent(contentText, true);
   }
@@ -116,7 +153,9 @@ export async function makeConversationDecision({
     playbookResult = getNextSalesStep(lead, contentText);
   }
 
-  const intent = detectedIntent || playbookResult.intent || 'general_question';
+  const intent = detectedIntent && detectedIntent !== 'general_question'
+    ? detectedIntent
+    : playbookResult.intent || detectedIntent || 'general_question';
   const riskLevel = determineRiskLevel(intent, emotion);
   const nextAction = playbookResult.requiredAction || 'respond';
 
@@ -162,7 +201,25 @@ export function applyConversationDecisionToLead(lead, decision, content = {}) {
   lead.riskLevel = decision.riskLevel;
   lead.decisionNotes = decision.notes;
   lead.stage = decision.step;
-  lead.status = decision.shouldStopAutomation ? 'human_requested' : lead.status || 'talking';
+  if (decision.conversationMode === 'operational' && decision.shouldAskPhone) {
+    lead.status = 'awaiting_contact_for_handoff';
+    lead.stage = 'awaiting_contact_for_handoff';
+    lead.pendingOperationalHandoff = true;
+    lead.pendingOperationalEvent = {
+      type: decision.intent,
+      status: 'awaiting_financial_review',
+      stage: 'awaiting_financial_review',
+      reply: decision.clientReply || '',
+      reason: decision.notes || 'Cliente aguardando encaminhamento operacional.',
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+      lastIntent: decision.intent,
+      conversationMode: decision.conversationMode,
+    };
+    lead.pendingHandoffReason = decision.notes || lead.pendingHandoffReason || null;
+  } else {
+    lead.status = decision.shouldStopAutomation ? 'human_requested' : lead.status || 'talking';
+  }
   
   // Custom properties for Handoff checks
   if (decision.shouldHandoff) {

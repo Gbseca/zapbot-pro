@@ -51,13 +51,18 @@ const BOLETO_PATTERNS = [
 const REGULARIZATION_PATTERNS = [
   /\bregularizar\b/,
   /\bpendencia\b/,
+  /\bpendente\b/,
   /\bacordo\b/,
   /\bnegociar\b/,
   /\bquitar\b/,
+  /\bresolver (minha |meu |a |o |uma |um )?(pendencia|inadimplencia|debito|divida|boleto|cobranca)\b/,
   /\bdevo\b/,
+  /\bdebito\b/,
   /\bdivida\b/,
+  /\bcobranca\b/,
   /\batraso\b/,
   /\batrasad[ao]\b/,
+  /\binadimplencia\b/,
   /\binadimplente\b/
 ];
 
@@ -88,9 +93,11 @@ const REACTIVATION_PATTERNS = [
 
 const APP_BLOCKED_PATTERNS = [
   /\bapp bloquead[ao]\b/,
+  /\bapp .*bloquead[ao]\b/,
   /\baplicativo bloquead[ao]\b/,
+  /\baplicativo .*bloquead[ao]\b/,
   /\bmeu app nao\b/,
-  /\bnao consigo acessar\b/
+  /\bnao consigo acessar (o )?(app|aplicativo)\b/
 ];
 
 const CANCEL_PATTERNS = [
@@ -104,6 +111,7 @@ const BILLING_DISPUTE_PATTERNS = [
   /\bnao estou atrasad[ao]\b/,
   /\bainda nao venceu\b/,
   /\bnao venceu\b/,
+  /\bvencimento errado\b/,
   /\bcobranca errada\b/,
   /\bisso esta errado\b/
 ];
@@ -114,13 +122,32 @@ const INSPECTION_PATTERNS = [
 ];
 
 const HUMAN_PATTERNS = [
+  /\bfalar com (um )?(atendente|humano|pessoa|consultor)\b/,
+  /\bquero (um )?(atendente|humano|pessoa|consultor)\b/,
+  /\bme passa(r)? para (um )?(atendente|humano|pessoa|consultor)\b/,
   /\bhumano\b/,
   /\batendente\b/,
   /\bconsultor\b/,
   /\batendimento humano\b/,
   /\bquero falar com alguem\b/,
-  /\bnao quero robo\b/
+  /\bnao quero robo\b/,
+  /\bsuporte\b/,
+  /\bpreciso (de )?ajuda\b/,
+  /\btenho (um )?problema\b/,
+  /\bestou com (um )?problema\b/,
+  /\bquero resolver (uma )?(coisa|questao|situacao|problema|caso)\b/,
+  /\bpreciso resolver (uma )?(coisa|questao|situacao|problema|caso)\b/
 ];
+
+function buildResolvedHumanReply(handoffDepartment) {
+  if (handoffDepartment === 'support') {
+    return 'Entendi. Vou encaminhar seu atendimento para o suporte continuar por aqui.';
+  }
+  if (handoffDepartment === 'financial') {
+    return 'Entendi. Vou encaminhar seu atendimento para o financeiro continuar por aqui.';
+  }
+  return 'Entendi. Vou chamar uma pessoa para continuar seu atendimento por aqui.';
+}
 
 export function getNextOperationalStep(lead, text, incomingContent = {}) {
   const normalized = normalizeText(text);
@@ -129,7 +156,7 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
 
   // 1. Detect Specific Operational Intent
   let intent = 'general_question';
-  let handoffDepartment = 'consultant';
+  let handoffDepartment = 'financial';
 
   if (matchAny(normalized, CANCEL_PATTERNS)) {
     intent = 'cancel_request';
@@ -169,20 +196,15 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
   // 2. Check if phone is resolved
   const isPhoneResolved = !!(lead.phone && lead.phone.length >= 10) || !!(lead.displayNumber && lead.displayNumber.length >= 10);
 
-  // 3. Operational Rules logic
-  let requiredAction = 'execute_handoff';
-  let shouldAskPhone = false;
-  let shouldHandoff = true;
-  let shouldStopAutomation = true;
-  let clientReply = '';
+  // 3. Operational rules: operational cases go to human review only.
+  let requiredAction = isPhoneResolved ? 'execute_handoff' : 'ask_phone_ddd';
+  let shouldAskPhone = !isPhoneResolved;
+  let shouldHandoff = isPhoneResolved;
+  let shouldStopAutomation = isPhoneResolved;
+  let clientReply = isPhoneResolved
+    ? buildResolvedHumanReply(handoffDepartment)
+    : 'Entendi. Vou chamar uma pessoa do setor responsavel para continuar. Me confirma seu WhatsApp com DDD?';
   let reason = `Atendimento operacional do tipo ${intent}.`;
-
-  if (!isPhoneResolved) {
-    requiredAction = 'ask_phone_ddd';
-    shouldAskPhone = true;
-    shouldHandoff = false;
-    shouldStopAutomation = false; // keep open to receive phone number
-  }
 
   // Define client replies template / suggestions (will be finalized/humanized by reply builder if needed, or sent directly)
   if (intent === 'boleto_request') {
@@ -224,10 +246,14 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
       : 'Entendi. Pra eu encaminhar pro consultor do setor correto, me confirma seu WhatsApp com DDD?';
   }
 
+  clientReply = isPhoneResolved
+    ? buildResolvedHumanReply(handoffDepartment)
+    : 'Entendi. Vou chamar uma pessoa do setor responsavel para continuar. Me confirma seu WhatsApp com DDD?';
+
   // Irritated client rule: remove emojis (handled in clientReply formatting or reply-builder)
   return {
     mode: 'operational',
-    step: 'operational_issue',
+    step: 'human_handoff',
     intent,
     requiredAction,
     shouldAskPhone,

@@ -83,6 +83,18 @@ const NO_PLATE_PATTERNS = [
   /\bsem emplacamento\b/
 ];
 
+const SALES_CONTINUATION_PATTERNS = [
+  /^(sim|s|ok|okay|certo|isso|pode|pode sim|quero|vamos|bora|manda|prosseguir|continuar)\b/,
+  /\b(modelo|ano|placa|veiculo|carro|moto)\b/,
+  /\b(19|20)\d{2}\b/,
+];
+
+const ACTIVE_SALES_INTENTS = new Set([
+  'sales_quote',
+  'sales_price_request',
+  'sales_consultant_requested',
+]);
+
 // Verify if plate is in standard Brazilian format
 function extractValidPlate(text = '') {
   const tokens = String(text || '').match(/\b[A-Za-z]{3}[-\s]?\d[A-Za-z0-9][-\s]?\d{2}\b/g) || [];
@@ -90,6 +102,12 @@ function extractValidPlate(text = '') {
     if (isValidBrazilPlate(token)) return normalizePlate(token);
   }
   return null;
+}
+
+function shouldContinueFromSalesHistory(lead = {}, normalized = '', rawText = '') {
+  if (!ACTIVE_SALES_INTENTS.has(lead.lastIntent)) return false;
+  if (extractValidPlate(rawText)) return true;
+  return matchAny(normalized, SALES_CONTINUATION_PATTERNS);
 }
 
 export function getNextSalesStep(lead, text) {
@@ -109,8 +127,8 @@ export function getNextSalesStep(lead, text) {
     intent = 'sales_quote';
   } else if (matchAny(normalized, GENERAL_QUESTION_PATTERNS)) {
     intent = 'general_question';
-  } else if (lead.history && lead.history.length > 0) {
-    // If we have history, infer from the flow, but default to general context
+  } else if (lead.history && lead.history.length > 0 && shouldContinueFromSalesHistory(lead, normalized, text)) {
+    // Continue a sales flow only when the latest message looks like an answer to that flow.
     intent = lead.lastIntent || 'general_question';
   }
 
