@@ -4,6 +4,18 @@ import { normalizeRealWhatsAppPhone } from '../phone-utils.js';
 const VEHICLE_STOP_WORDS = new Set([
   'meu',
   'minha',
+  'qual',
+  'quanto',
+  'fica',
+  'ficaria',
+  'custa',
+  'custaria',
+  'valor',
+  'mensalidade',
+  'proteger',
+  'protecao',
+  'pra',
+  'para',
   'carro',
   'moto',
   'veiculo',
@@ -23,6 +35,33 @@ const VEHICLE_STOP_WORDS = new Set([
   'vistoria',
   'consultor',
   'atendente',
+  'ontem',
+  'hoje',
+  'preciso',
+  'ajuda',
+  'faco',
+  'fazer',
+  'problema',
+  'aqui',
+  'voces',
+  'consigo',
+  'acessar',
+  'entrar',
+  'usar',
+  'aplicativo',
+  'app',
+  'bloqueado',
+  'bloqueada',
+  'roubaram',
+  'furtaram',
+  'levaram',
+  'bati',
+  'bateram',
+  'batida',
+  'acidente',
+  'colidi',
+  'colisao',
+  'evento',
   'for',
   'fosse',
   'roubado',
@@ -80,6 +119,12 @@ function titleCaseModel(text = '') {
     .join(' ');
 }
 
+function isModelNoiseWord(word = '') {
+  return VEHICLE_STOP_WORDS.has(word)
+    || /^(19|20)\d{2}$/.test(word)
+    || /^[a-z]{3}\d[a-z0-9]\d{2}$/.test(word);
+}
+
 function isCoverageLikeText(text = '') {
   const normalized = normalizeText(text);
   return [
@@ -111,10 +156,62 @@ function isMultiVehicleText(text = '') {
   ].some((pattern) => pattern.test(normalized));
 }
 
+function isOperationalLikeText(text = '') {
+  const normalized = normalizeText(text);
+  return [
+    /\bboleto\b/,
+    /\bcomprovante\b/,
+    /\bpagamento\b/,
+    /\bpaguei\b/,
+    /\binadimpl/,
+    /\bpendencia\b/,
+    /\bregularizar\b/,
+    /\brevistoria\b/,
+    /\bvistoria\b/,
+    /\bapp\b.*\bbloquead[ao]\b/,
+    /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/,
+    /\broubaram\b/,
+    /\bfurtaram\b/,
+    /\blevaram (meu|minha)\b/,
+    /\b(carro|moto|veiculo) roubad[ao]\b/,
+    /\b(carro|moto|veiculo) furtad[ao]\b/,
+    /\bbati\b/,
+    /\bbateram\b/,
+    /\bbatida\b/,
+    /\bacidente\b/,
+    /\bcolidi\b/,
+    /\bcolisao\b/,
+    /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function hasPlateKeywordBefore(text = '', index = 0) {
+  const before = normalizeText(String(text || '').slice(Math.max(0, index - 28), index));
+  return /\bplaca\b/.test(before);
+}
+
+function looksLikeModelYearToken(rawToken = '', fullText = '', index = 0) {
+  const compact = String(rawToken || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const hasSeparator = /[A-Za-z]{3}[-\s]+\d/.test(rawToken);
+  if (!hasSeparator) return false;
+  if (!/^[A-Z]{3}(19|20)\d{2}$/.test(compact)) return false;
+  return !hasPlateKeywordBefore(fullText, index);
+}
+
 export function extractValidPlateFromText(text = '') {
-  const tokens = String(text || '').match(/\b[A-Za-z]{3}[-\s]?\d[A-Za-z0-9][-\s]?\d{2}\b/g) || [];
-  for (const token of tokens) {
-    if (isValidBrazilPlate(token)) return normalizePlate(token);
+  const raw = String(text || '');
+  const matches = Array.from(raw.matchAll(/\b[A-Za-z]{3}[-\s]?\d[A-Za-z0-9][-\s]?\d{2}\b/g));
+  const candidates = matches
+    .map((match) => ({
+      token: match[0],
+      index: match.index || 0,
+      nearPlateKeyword: hasPlateKeywordBefore(raw, match.index || 0),
+    }))
+    .sort((a, b) => Number(b.nearPlateKeyword) - Number(a.nearPlateKeyword));
+
+  for (const candidate of candidates) {
+    if (looksLikeModelYearToken(candidate.token, raw, candidate.index)) continue;
+    if (isValidBrazilPlate(candidate.token)) return normalizePlate(candidate.token);
   }
   return null;
 }
@@ -159,10 +256,10 @@ export function hasNoPlateStatement(text = '') {
 export function extractVehicleModelFromText(text = '') {
   if (isCoverageLikeText(text)) return null;
   if (isMultiVehicleText(text)) return null;
+  if (isOperationalLikeText(text)) return null;
   const normalized = normalizeText(text);
   const year = extractYearFromText(text);
   const withoutPlate = normalized
-    .replace(/\b[a-z]{3}\s*\d\s*[a-z0-9]\s*\d{2}\b/g, ' ')
     .replace(/\b(?:\+?55\s*)?(?:\(?[1-9]{2}\)?\s*)9?\d{4}\s*\d{4}\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -171,7 +268,7 @@ export function extractVehicleModelFromText(text = '') {
   if (modelMatch) {
     const words = modelMatch[1]
       .split(/\s+/)
-      .filter((word) => word && !VEHICLE_STOP_WORDS.has(word))
+      .filter((word) => word && !isModelNoiseWord(word))
       .slice(0, 3);
     if (words.join('').length >= 3) return titleCaseModel(words.join(' '));
   }
@@ -180,7 +277,7 @@ export function extractVehicleModelFromText(text = '') {
     const beforeYear = withoutPlate.split(year)[0] || '';
     const words = beforeYear
       .split(/\s+/)
-      .filter((word) => word && !VEHICLE_STOP_WORDS.has(word))
+      .filter((word) => word && !isModelNoiseWord(word))
       .slice(-3);
     if (words.join('').length >= 3) return titleCaseModel(words.join(' '));
   }

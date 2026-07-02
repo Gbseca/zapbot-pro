@@ -28,8 +28,13 @@ const OPERATIONAL_PATTERNS = [
   /\bresolver (minha |meu |a |o |uma |um )?(pendencia|inadimplencia|debito|divida|boleto|cobranca)\b/,
   /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
   /\baplicativo bloquead[ao]\b/, /\baplicativo .*bloquead[ao]\b/,
-  /\bnao consigo acessar (o )?(app|aplicativo)\b/, /\bcancelar\b/, /\bcancelamento\b/,
-  /\brevistoria\b/, /\bvistoria\b/
+  /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/,
+  /\bcancelar\b/, /\bcancelamento\b/,
+  /\brevistoria\b/, /\bvistoria\b/,
+  /\broubaram\b/, /\bfurtaram\b/, /\blevaram (meu|minha)\b/,
+  /\b(carro|moto|veiculo) roubad[ao]\b/, /\b(carro|moto|veiculo) furtad[ao]\b/,
+  /\bbati\b/, /\bbateram\b/, /\bbatida\b/, /\bacidente\b/, /\bcolidi\b/, /\bcolisao\b/,
+  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/
 ];
 
 const REGULARIZATION_PATTERNS = [
@@ -52,6 +57,13 @@ const HUMAN_OR_SUPPORT_PATTERNS = [
   /\bpreciso resolver (uma )?(coisa|questao|situacao|problema|caso)\b/
 ];
 
+const EVENT_PATTERNS = [
+  /\broubaram\b/, /\bfurtaram\b/, /\blevaram (meu|minha)\b/,
+  /\b(carro|moto|veiculo) roubad[ao]\b/, /\b(carro|moto|veiculo) furtad[ao]\b/,
+  /\bbati\b/, /\bbateram\b/, /\bbatida\b/, /\bacidente\b/, /\bcolidi\b/, /\bcolisao\b/,
+  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/
+];
+
 // Fallback regex checks for isOperational
 function fallbackIsOperational(text) {
   const normalized = normalizeText(text);
@@ -64,11 +76,12 @@ function fallbackInferIntent(text, isOperational) {
   if (isOperational) {
     if (matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS)) return 'human_requested';
     if (matchAny(normalized, [/\bcancelar\b/, /\bcancelamento\b/])) return 'cancel_request';
+    if (matchAny(normalized, EVENT_PATTERNS)) return 'event_report';
     if (matchAny(normalized, [/\breativar\b/, /\breativacao\b/])) return 'reactivation_request';
     if (matchAny(normalized, [
       /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
       /\baplicativo bloquead[ao]\b/, /\baplicativo .*bloquead[ao]\b/,
-      /\bnao consigo acessar (o )?(app|aplicativo)\b/
+      /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/
     ])) return 'app_blocked';
     if (matchAny(normalized, [/\bcomprovante\b/, /\brecibo\b/])) return 'receipt_received';
     if (matchAny(normalized, [/\bja paguei\b/, /\bpaguei\b/, /\bpagamento feito\b/])) return 'payment_claimed';
@@ -87,7 +100,7 @@ function determineRiskLevel(intent, emotion) {
   if (emotion === 'angry' || ['cancel_request', 'billing_disputed', 'angry_customer'].includes(intent)) {
     return 'alto';
   }
-  if (emotion === 'irritated' || ['payment_claimed', 'app_blocked', 'inspection_disputed'].includes(intent)) {
+  if (emotion === 'irritated' || ['payment_claimed', 'app_blocked', 'inspection_disputed', 'event_report'].includes(intent)) {
     return 'medio';
   }
   return 'baixo';
@@ -153,9 +166,12 @@ export async function makeConversationDecision({
     playbookResult = getNextSalesStep(lead, contentText);
   }
 
-  const intent = detectedIntent && detectedIntent !== 'general_question'
-    ? detectedIntent
-    : playbookResult.intent || detectedIntent || 'general_question';
+  const hasSpecificPlaybookIntent = playbookResult.intent && playbookResult.intent !== 'general_question';
+  const intent = playbookResult.mode === 'operational' && hasSpecificPlaybookIntent
+    ? playbookResult.intent
+    : detectedIntent && detectedIntent !== 'general_question'
+      ? detectedIntent
+      : playbookResult.intent || detectedIntent || 'general_question';
   const riskLevel = determineRiskLevel(intent, emotion);
   const nextAction = playbookResult.requiredAction || 'respond';
 

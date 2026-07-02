@@ -7,6 +7,23 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function buildSalesHandoffReply(lead = {}) {
+  const facts = [];
+  if (lead.model) facts.push(`Veiculo: ${lead.model}`);
+  if (lead.year) facts.push(`Ano: ${lead.year}`);
+  if (lead.plate) facts.push(`Placa: ${lead.plate}`);
+
+  if (facts.length > 0) {
+    return [
+      'Recebi os dados principais. Vou encaminhar para um consultor preparar sua cotacao real e continuar por aqui.',
+      '',
+      ...facts,
+    ].join('\n');
+  }
+
+  return 'Entendi. Vou encaminhar para um consultor continuar seu atendimento por aqui.';
+}
+
 export async function buildHumanizedReply(config, {
   mode = 'sales',
   step = '',
@@ -21,6 +38,14 @@ export async function buildHumanizedReply(config, {
 } = {}) {
   if (mode === 'operational' && lead.clientReply) {
     return lead.clientReply;
+  }
+
+  if (mode === 'sales' && requiredAction === 'execute_handoff') {
+    return buildSalesHandoffReply(lead);
+  }
+
+  if (mode === 'sales' && requiredAction === 'stop_automation') {
+    return 'Tudo bem, sem problema. Nao vou insistir. Se precisar, e so chamar.';
   }
 
   let activeRules = companyRules;
@@ -97,6 +122,12 @@ ${(lead.history || []).slice(-6).map(h => `${h.role === 'assistant' ? 'Assistent
     // Return standard playbook fallback reply on failure
     if (mode === 'operational' && lead.clientReply) {
       return lead.clientReply;
+    }
+    if (mode === 'sales' && requiredAction === 'execute_handoff') {
+      return buildSalesHandoffReply(lead);
+    }
+    if (mode === 'sales' && requiredAction === 'stop_automation') {
+      return 'Tudo bem, sem problema. Nao vou insistir. Se precisar, e so chamar.';
     }
     return allowedQuestion || 'Como posso te ajudar com o veículo hoje?';
   }

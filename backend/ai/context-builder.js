@@ -101,6 +101,7 @@ Regras:
   * "reactivation_request" (cliente quer reativar proteção que estava suspensa)
   * "cancel_request" (cliente quer cancelar o contrato)
   * "app_blocked" (cliente está sem acesso ao aplicativo)
+  * "event_report" (cliente relatou roubo, furto, batida, colisão, acidente ou evento ocorrido)
   * "human_requested" (cliente pediu atendente, suporte, ajuda humana ou quer resolver um problema sem explicar)
 - Se "isOperational" for false e o cliente pedir cotacao/preco/contratacao, use "sales_quote" ou "sales_price_request" em "intent".
 - Se "isOperational" for false e o cliente fizer pergunta geral sobre funcionamento/cobertura, use "general_question" em "intent".
