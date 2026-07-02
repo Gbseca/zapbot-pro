@@ -118,7 +118,17 @@ const EVENT_PATTERNS = [
   /\bacidente\b/,
   /\bcolidi\b/,
   /\bcolisao\b/,
-  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/
+  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/,
+  /\bsinistro\b/,
+  /\bsinistrou\b/
+];
+
+const ASSISTANCE_REQUEST_PATTERNS = [
+  /\bpreciso (de )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(chamar|acionar|solicitar|pedir) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(reboque|guincho|assistencia|chaveiro|socorro) (urgente|agora|pra agora|para agora)\b/,
+  /\b(meu|minha) (carro|moto|veiculo) (quebrou|parou|deu pane|esta parado|esta parada|ficou parado|ficou parada)\b/,
+  /\b(deu pane|pane na estrada|pneu furado|sem bateria)\b/
 ];
 
 const BILLING_DISPUTE_PATTERNS = [
@@ -146,6 +156,7 @@ const HUMAN_PATTERNS = [
   /\batendimento humano\b/,
   /\bquero falar com alguem\b/,
   /\bnao quero robo\b/,
+  /\bnao quero falar com robo\b/,
   /\bsuporte\b/,
   /\bpreciso (de )?ajuda\b/,
   /\btenho (um )?problema\b/,
@@ -178,6 +189,9 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
     handoffDepartment = 'consultant';
   } else if (matchAny(normalized, EVENT_PATTERNS)) {
     intent = 'event_report';
+    handoffDepartment = 'support';
+  } else if (matchAny(normalized, ASSISTANCE_REQUEST_PATTERNS)) {
+    intent = 'assistance_request';
     handoffDepartment = 'support';
   } else if (matchAny(normalized, HUMAN_PATTERNS)) {
     intent = 'human_requested';

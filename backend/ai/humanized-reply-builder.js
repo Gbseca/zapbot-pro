@@ -24,6 +24,53 @@ function buildSalesHandoffReply(lead = {}) {
   return 'Entendi. Vou encaminhar para um consultor continuar seu atendimento por aqui.';
 }
 
+function normalizeText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const FORBIDDEN_REPLY_TERMS = /\b(seguro|seguradora|ap[oó]lice|sinistro|pr[eê]mio)\b/i;
+
+function isLikelyIncompleteReply(reply = '') {
+  const cleaned = String(reply || '').trim().replace(/[“”"']+$/g, '').trim();
+  if (!cleaned) return true;
+  if (/[,:;]$/.test(cleaned)) return true;
+
+  const normalized = normalizeText(cleaned);
+  if (/\b(a|o|as|os|e|de|do|da|dos|das|em|para|pra|por|com|ou|que|onde|se|como)$/i.test(normalized)) {
+    return cleaned.length > 45;
+  }
+
+  return cleaned.length > 80 && !/[.!?)]$/.test(cleaned);
+}
+
+function buildSafeSalesFallback({ latestUserMessage = '', allowedQuestion = null } = {}) {
+  const normalized = normalizeText(latestUserMessage);
+
+  if (/como funciona|mutualismo|rateio|associacao/.test(normalized)) {
+    return 'A Moove trabalha com protecao veicular em modelo de associacao e rateio. Um consultor pode te explicar os detalhes certinho por aqui.';
+  }
+
+  if (/roubo|furto/.test(normalized)) {
+    return 'Sim, a protecao pode incluir roubo e furto conforme as regras do plano. Um consultor confirma os detalhes certinho por aqui.';
+  }
+
+  if (/assistencia|reboque|guincho|chaveiro|24h/.test(normalized)) {
+    return 'Sim, existe assistencia 24h com servicos como reboque, conforme as regras do plano. Se for para acionar agora, encaminho para o suporte.';
+  }
+
+  if (/seguro|seguradora|apolice|sinistro|premio/.test(normalized)) {
+    return 'A Moove trabalha com protecao veicular em modelo de associacao e rateio. Se voce ja e associado e teve um evento, encaminho para o atendimento responsavel.';
+  }
+
+  return allowedQuestion || 'Me conta se voce quer entender a protecao ou fazer uma cotacao.';
+}
+
 export async function buildHumanizedReply(config, {
   mode = 'sales',
   step = '',
@@ -116,7 +163,11 @@ ${(lead.history || []).slice(-6).map(h => `${h.role === 'assistant' ? 'Assistent
 
   try {
     const reply = await callAI(config, context, { purpose: 'reply', mode });
-    return reply.trim().replace(/^"|"$/g, ''); // Clean up any wrapping quotes
+    const cleaned = reply.trim().replace(/^"|"$/g, ''); // Clean up any wrapping quotes
+    if (mode === 'sales' && (FORBIDDEN_REPLY_TERMS.test(cleaned) || isLikelyIncompleteReply(cleaned))) {
+      return buildSafeSalesFallback({ latestUserMessage, allowedQuestion });
+    }
+    return cleaned;
   } catch (err) {
     console.error('[Reply Builder] Error calling AI for humanized reply:', err.message);
     // Return standard playbook fallback reply on failure
@@ -128,6 +179,9 @@ ${(lead.history || []).slice(-6).map(h => `${h.role === 'assistant' ? 'Assistent
     }
     if (mode === 'sales' && requiredAction === 'stop_automation') {
       return 'Tudo bem, sem problema. Nao vou insistir. Se precisar, e so chamar.';
+    }
+    if (mode === 'sales') {
+      return buildSafeSalesFallback({ latestUserMessage, allowedQuestion });
     }
     return allowedQuestion || 'Como posso te ajudar com o veículo hoje?';
   }
