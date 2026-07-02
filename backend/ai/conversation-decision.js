@@ -34,7 +34,13 @@ const OPERATIONAL_PATTERNS = [
   /\broubaram\b/, /\bfurtaram\b/, /\blevaram (meu|minha)\b/,
   /\b(carro|moto|veiculo) roubad[ao]\b/, /\b(carro|moto|veiculo) furtad[ao]\b/,
   /\bbati\b/, /\bbateram\b/, /\bbatida\b/, /\bacidente\b/, /\bcolidi\b/, /\bcolisao\b/,
-  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/
+  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/,
+  /\bsinistro\b/, /\bsinistrou\b/,
+  /\bpreciso (de )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(chamar|acionar|solicitar|pedir) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(reboque|guincho|assistencia|chaveiro|socorro) (urgente|agora|pra agora|para agora)\b/,
+  /\b(meu|minha) (carro|moto|veiculo) (quebrou|parou|deu pane|esta parado|esta parada|ficou parado|ficou parada)\b/,
+  /\b(deu pane|pane na estrada|pneu furado|sem bateria)\b/
 ];
 
 const REGULARIZATION_PATTERNS = [
@@ -49,6 +55,7 @@ const HUMAN_OR_SUPPORT_PATTERNS = [
   /\bquero (um )?(atendente|humano|pessoa|consultor)\b/,
   /\bme passa(r)? para (um )?(atendente|humano|pessoa|consultor)\b/,
   /\bnao quero robo\b/,
+  /\bnao quero falar com robo\b/,
   /\bsuporte\b/,
   /\bpreciso (de )?ajuda\b/,
   /\btenho (um )?problema\b/,
@@ -61,7 +68,16 @@ const EVENT_PATTERNS = [
   /\broubaram\b/, /\bfurtaram\b/, /\blevaram (meu|minha)\b/,
   /\b(carro|moto|veiculo) roubad[ao]\b/, /\b(carro|moto|veiculo) furtad[ao]\b/,
   /\bbati\b/, /\bbateram\b/, /\bbatida\b/, /\bacidente\b/, /\bcolidi\b/, /\bcolisao\b/,
-  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/
+  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/,
+  /\bsinistro\b/, /\bsinistrou\b/
+];
+
+const ASSISTANCE_REQUEST_PATTERNS = [
+  /\bpreciso (de )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(chamar|acionar|solicitar|pedir) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(reboque|guincho|assistencia|chaveiro|socorro) (urgente|agora|pra agora|para agora)\b/,
+  /\b(meu|minha) (carro|moto|veiculo) (quebrou|parou|deu pane|esta parado|esta parada|ficou parado|ficou parada)\b/,
+  /\b(deu pane|pane na estrada|pneu furado|sem bateria)\b/
 ];
 
 // Fallback regex checks for isOperational
@@ -77,6 +93,7 @@ function fallbackInferIntent(text, isOperational) {
     if (matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS)) return 'human_requested';
     if (matchAny(normalized, [/\bcancelar\b/, /\bcancelamento\b/])) return 'cancel_request';
     if (matchAny(normalized, EVENT_PATTERNS)) return 'event_report';
+    if (matchAny(normalized, ASSISTANCE_REQUEST_PATTERNS)) return 'assistance_request';
     if (matchAny(normalized, [/\breativar\b/, /\breativacao\b/])) return 'reactivation_request';
     if (matchAny(normalized, [
       /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
@@ -100,7 +117,7 @@ function determineRiskLevel(intent, emotion) {
   if (emotion === 'angry' || ['cancel_request', 'billing_disputed', 'angry_customer'].includes(intent)) {
     return 'alto';
   }
-  if (emotion === 'irritated' || ['payment_claimed', 'app_blocked', 'inspection_disputed', 'event_report'].includes(intent)) {
+  if (emotion === 'irritated' || ['payment_claimed', 'app_blocked', 'inspection_disputed', 'event_report', 'assistance_request'].includes(intent)) {
     return 'medio';
   }
   return 'baixo';

@@ -88,7 +88,7 @@ Schema obrigatorio:
 }
 
 Regras:
-- "isOperational" SÓ é true se o cliente está claramente tratando de um problema financeiro, boleto, divida pendente, recebimento de comprovante, cancelamento ou bloqueio do aplicativo.
+- "isOperational" SÓ é true se o cliente está claramente tratando de um problema financeiro, boleto, divida pendente, recebimento de comprovante, cancelamento, bloqueio do aplicativo, evento ocorrido ou pedido real de assistência/reboque/guincho.
 - Se o cliente for novo ou estiver pedindo cotacao, "isOperational" DEVE ser false, mesmo se ele disser frases ambiguas (ex: "quero pagar a proteção", querendo dizer que quer contratar).
 - Classifique principalmente pela ULTIMA mensagem do cliente. Use o historico apenas para desempatar respostas curtas como "sim", "ok", modelo, ano ou placa.
 - Se a ultima mensagem trouxer um novo assunto, NAO herde a intencao antiga do historico.
@@ -102,6 +102,7 @@ Regras:
   * "cancel_request" (cliente quer cancelar o contrato)
   * "app_blocked" (cliente está sem acesso ao aplicativo)
   * "event_report" (cliente relatou roubo, furto, batida, colisão, acidente ou evento ocorrido)
+  * "assistance_request" (cliente precisa acionar reboque, guincho, chaveiro, socorro ou ajuda na estrada agora)
   * "human_requested" (cliente pediu atendente, suporte, ajuda humana ou quer resolver um problema sem explicar)
 - Se "isOperational" for false e o cliente pedir cotacao/preco/contratacao, use "sales_quote" ou "sales_price_request" em "intent".
 - Se "isOperational" for false e o cliente fizer pergunta geral sobre funcionamento/cobertura, use "general_question" em "intent".
