@@ -97,13 +97,28 @@ const APP_BLOCKED_PATTERNS = [
   /\baplicativo bloquead[ao]\b/,
   /\baplicativo .*bloquead[ao]\b/,
   /\bmeu app nao\b/,
-  /\bnao consigo acessar (o )?(app|aplicativo)\b/
+  /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/
 ];
 
 const CANCEL_PATTERNS = [
   /\bcancelar\b/,
   /\bcancelamento\b/,
   /\bencerrar contrato\b/
+];
+
+const EVENT_PATTERNS = [
+  /\broubaram\b/,
+  /\bfurtaram\b/,
+  /\blevaram (meu|minha)\b/,
+  /\b(carro|moto|veiculo) roubad[ao]\b/,
+  /\b(carro|moto|veiculo) furtad[ao]\b/,
+  /\bbati\b/,
+  /\bbateram\b/,
+  /\bbatida\b/,
+  /\bacidente\b/,
+  /\bcolidi\b/,
+  /\bcolisao\b/,
+  /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/
 ];
 
 const BILLING_DISPUTE_PATTERNS = [
@@ -161,6 +176,9 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
   if (matchAny(normalized, CANCEL_PATTERNS)) {
     intent = 'cancel_request';
     handoffDepartment = 'consultant';
+  } else if (matchAny(normalized, EVENT_PATTERNS)) {
+    intent = 'event_report';
+    handoffDepartment = 'support';
   } else if (matchAny(normalized, HUMAN_PATTERNS)) {
     intent = 'human_requested';
     handoffDepartment = 'consultant';
