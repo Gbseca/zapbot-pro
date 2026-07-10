@@ -25,9 +25,15 @@ const OPERATIONAL_PATTERNS = [
   /\bregularizar\b/, /\bnegociar\b/, /\bacordo\b/, /\bpendencia\b/, /\bpendente\b/,
   /\binadimplencia\b/, /\binadimplente\b/, /\batraso\b/, /\batrasad[ao]\b/,
   /\bdebito\b/, /\bdivida\b/, /\bcobranca\b/, /\bquitar\b/, /\bfinanceiro\b/,
+  /\b(to|tou|estou|tava|estava) devendo\b/, /\bdevendo (uma |umas |a |as )?mensalidades?\b/,
+  /\bmensalidades? (atrasad[ao]s?|pendentes?|em atraso)\b/,
+  /\b(quero|preciso) acertar (isso|essa pendencia|minha pendencia|as mensalidades?)\b/,
+  /\b(quero|preciso) pagar (a |minha |uma )?mensalidade\b/, /\bcomo pago (a )?mensalidade\b/,
   /\bresolver (minha |meu |a |o |uma |um )?(pendencia|inadimplencia|debito|divida|boleto|cobranca)\b/,
   /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
   /\baplicativo bloquead[ao]\b/, /\baplicativo .*bloquead[ao]\b/,
+  /\b(app|aplicativo) (bloqueou|travou|nao abre|nao entra)\b/,
+  /\bmeu (app|aplicativo) (bloqueou|travou|nao abre|nao entra)\b/,
   /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/,
   /\bcancelar\b/, /\bcancelamento\b/,
   /\brevistoria\b/, /\bvistoria\b/,
@@ -38,6 +44,7 @@ const OPERATIONAL_PATTERNS = [
   /\bsinistro\b/, /\bsinistrou\b/,
   /\bpreciso (de )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
   /\b(chamar|acionar|solicitar|pedir) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(manda|mande|mandar) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
   /\b(reboque|guincho|assistencia|chaveiro|socorro) (urgente|agora|pra agora|para agora)\b/,
   /\b(meu|minha) (carro|moto|veiculo) (quebrou|parou|deu pane|esta parado|esta parada|ficou parado|ficou parada)\b/,
   /\b(deu pane|pane na estrada|pneu furado|sem bateria)\b/
@@ -47,6 +54,10 @@ const REGULARIZATION_PATTERNS = [
   /\bregularizar\b/, /\bnegociar\b/, /\bacordo\b/, /\bpendencia\b/, /\bpendente\b/,
   /\binadimplencia\b/, /\binadimplente\b/, /\batraso\b/, /\batrasad[ao]\b/,
   /\bdebito\b/, /\bdivida\b/, /\bcobranca\b/, /\bquitar\b/,
+  /\b(to|tou|estou|tava|estava) devendo\b/, /\bdevendo (uma |umas |a |as )?mensalidades?\b/,
+  /\bmensalidades? (atrasad[ao]s?|pendentes?|em atraso)\b/,
+  /\b(quero|preciso) acertar (isso|essa pendencia|minha pendencia|as mensalidades?)\b/,
+  /\b(quero|preciso) pagar (a |minha |uma )?mensalidade\b/, /\bcomo pago (a )?mensalidade\b/,
   /\bresolver (minha |meu |a |o |uma |um )?(pendencia|inadimplencia|debito|divida|boleto|cobranca)\b/
 ];
 
@@ -60,8 +71,43 @@ const HUMAN_OR_SUPPORT_PATTERNS = [
   /\bpreciso (de )?ajuda\b/,
   /\btenho (um )?problema\b/,
   /\bestou com (um )?problema\b/,
-  /\bquero resolver (uma )?(coisa|questao|situacao|problema|caso)\b/,
-  /\bpreciso resolver (uma )?(coisa|questao|situacao|problema|caso)\b/
+  /\bquero resolver ((um|uma) )?(coisa|questao|situacao|problema|caso)\b/,
+  /\bpreciso resolver ((um|uma) )?(coisa|questao|situacao|problema|caso)\b/
+];
+
+const APP_BLOCKED_PATTERNS = [
+  /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
+  /\baplicativo bloquead[ao]\b/, /\baplicativo .*bloquead[ao]\b/,
+  /\b(app|aplicativo) (bloqueou|travou|nao abre|nao entra)\b/,
+  /\bmeu (app|aplicativo) (bloqueou|travou|nao abre|nao entra)\b/,
+  /\b(nao|n) consigo (acessar|entrar|usar|entra) (o |no )?(app|aplicativo)\b/
+];
+
+const BILLING_DISPUTE_PATTERNS = [
+  /\bnao devo\b/,
+  /\bnao tenho (debito|divida|pendencia)\b/,
+  /\bnao estou (atrasad[ao]|inadimplente)\b/,
+  /\b(cobranca|vencimento|valor) errad[ao]\b/,
+  /\bparem? de cobrar\b/
+];
+
+const SALES_PRICE_PATTERNS = [
+  /\b(quanto|qnt|qt) (fica|custa|seria|e)\b/,
+  /\bqual (o )?valor\b/,
+  /\bvalor mensal\b/,
+  /\bmensalidade\b/,
+  /\bpreco\b/,
+  /\bcusta quanto\b/
+];
+
+const SALES_QUOTE_PATTERNS = [
+  /\b(cotacao|orcamento|simulacao)\b/,
+  /\b(qro|quero|queria|gostaria de) (cotar|cota|ver (uma )?protecao|fazer (uma )?cotacao)\b/,
+  /\bcotar (meu|minha|um|uma|o|a)?\s*(carro|moto|veiculo)?\b/,
+  /\b(quero|queria) (protecao|contratar|aderir)\b/,
+  /\bproteger meu\b/,
+  /\bfaz protecao (pra|para)\b/,
+  /\bainda nao sou (cliente|associado).{0,35}\bquero pagar a protecao\b/
 ];
 
 const EVENT_PATTERNS = [
@@ -75,6 +121,7 @@ const EVENT_PATTERNS = [
 const ASSISTANCE_REQUEST_PATTERNS = [
   /\bpreciso (de )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
   /\b(chamar|acionar|solicitar|pedir) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(manda|mande|mandar) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
   /\b(reboque|guincho|assistencia|chaveiro|socorro) (urgente|agora|pra agora|para agora)\b/,
   /\b(meu|minha) (carro|moto|veiculo) (quebrou|parou|deu pane|esta parado|esta parada|ficou parado|ficou parada)\b/,
   /\b(deu pane|pane na estrada|pneu furado|sem bateria)\b/
@@ -83,33 +130,42 @@ const ASSISTANCE_REQUEST_PATTERNS = [
 // Fallback regex checks for isOperational
 function fallbackIsOperational(text) {
   const normalized = normalizeText(text);
-  return matchAny(normalized, OPERATIONAL_PATTERNS) || matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS);
+  return matchAny(normalized, OPERATIONAL_PATTERNS)
+    || matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS)
+    || matchAny(normalized, BILLING_DISPUTE_PATTERNS);
+}
+
+function isDeterministicSalesGeneral(text = '') {
+  const normalized = normalizeText(text);
+  return /^(oi|ola|opa|bom dia|boa tarde|boa noite)( tudo bem| tudo bom| tudo joia| td bem| td joia| beleza)?$/.test(normalized)
+    || /^(obg|obrigado|obrigada|valeu|vlw)( viu| mesmo| ta)?$/.test(normalized)
+    || /\b(como funciona|mutualismo|rateio|associacao)\b/.test(normalized)
+    || /\b(cobre|cobertura|roubo|furto)\b/.test(normalized)
+    || /\b(assistencia|reboque|guincho|chaveiro|24h)\b/.test(normalized)
+    || /\b(seguro|seguradora|apolice|sinistro|premio)\b/.test(normalized);
 }
 
 // Fallback regex to infer intent
 function fallbackInferIntent(text, isOperational) {
   const normalized = normalizeText(text);
   if (isOperational) {
-    if (matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS)) return 'human_requested';
     if (matchAny(normalized, [/\bcancelar\b/, /\bcancelamento\b/])) return 'cancel_request';
     if (matchAny(normalized, EVENT_PATTERNS)) return 'event_report';
     if (matchAny(normalized, ASSISTANCE_REQUEST_PATTERNS)) return 'assistance_request';
     if (matchAny(normalized, [/\breativar\b/, /\breativacao\b/])) return 'reactivation_request';
-    if (matchAny(normalized, [
-      /\bapp bloquead[ao]\b/, /\bapp .*bloquead[ao]\b/,
-      /\baplicativo bloquead[ao]\b/, /\baplicativo .*bloquead[ao]\b/,
-      /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/
-    ])) return 'app_blocked';
+    if (matchAny(normalized, APP_BLOCKED_PATTERNS)) return 'app_blocked';
+    if (matchAny(normalized, BILLING_DISPUTE_PATTERNS)) return 'billing_disputed';
     if (matchAny(normalized, [/\bcomprovante\b/, /\brecibo\b/])) return 'receipt_received';
     if (matchAny(normalized, [/\bja paguei\b/, /\bpaguei\b/, /\bpagamento feito\b/])) return 'payment_claimed';
     if (matchAny(normalized, [/\bboleto\b/, /\bsegunda via\b/, /\bgerar boleto\b/])) return 'boleto_request';
     if (matchAny(normalized, REGULARIZATION_PATTERNS)) return 'regularization_request';
+    if (matchAny(normalized, HUMAN_OR_SUPPORT_PATTERNS)) return 'human_requested';
     return 'general_question';
   }
   
   if (matchAny(normalized, [/\bconsultor\b/, /\bvendedor\b/, /\batendente\b/, /\bhumano\b/])) return 'sales_consultant_requested';
-  if (matchAny(normalized, [/\bquanto (fica|custa|seria)\b/, /\bqual (o )?valor\b/, /\bmensalidade\b/, /\bpreco\b/])) return 'sales_price_request';
-  if (matchAny(normalized, [/\bcotacao\b/, /\borcamento\b/, /\bsimulacao\b/])) return 'sales_quote';
+  if (matchAny(normalized, SALES_PRICE_PATTERNS)) return 'sales_price_request';
+  if (matchAny(normalized, SALES_QUOTE_PATTERNS)) return 'sales_quote';
   return 'general_question';
 }
 
@@ -141,31 +197,43 @@ export async function makeConversationDecision({
   lead = {},
   collectionsContext = null,
   incomingContent = {},
+  skipAI = false,
 } = {}) {
   const contentText = text || incomingContent.text || '';
-  const hasOperationalSignal = fallbackIsOperational(contentText)
+  const latestOperationalSignal = fallbackIsOperational(contentText);
+  const hasOperationalSignal = latestOperationalSignal
     || lead.conversationMode === 'collections'
     || lead.conversationMode === 'operational'
     || !!collectionsContext;
   let isOperational = hasOperationalSignal;
-  let detectedIntent = null;
+  const fallbackIntent = fallbackInferIntent(contentText, hasOperationalSignal);
+  const salesPreview = hasOperationalSignal ? null : getNextSalesStep(lead, contentText);
+  const hasSpecificDeterministicIntent = latestOperationalSignal
+    || (salesPreview?.intent && salesPreview.intent !== 'general_question')
+    || (!hasOperationalSignal && isDeterministicSalesGeneral(contentText));
+  let detectedIntent = hasOperationalSignal
+    ? fallbackIntent
+    : salesPreview?.intent || fallbackIntent;
   let emotion = 'neutral';
 
-  // 1. Call LLM for Classification (Intent and Emotion)
-  try {
-    const context = buildDecisionContext(lead, contentText);
-    const resultText = await callAI(config, context, { purpose: 'decision' });
-    const decision = JSON.parse(resultText);
-    
-    isOperational = !!decision.isOperational;
-    detectedIntent = decision.intent;
-    emotion = decision.emotion || 'neutral';
-    
-    console.log(`[Decision LLM] Classified operational: ${isOperational}, intent: ${detectedIntent}, emotion: ${emotion}`);
-  } catch (err) {
-    console.warn(`[Decision] LLM classification failed: ${err.message}. Using fallback regex.`);
-    isOperational = hasOperationalSignal;
-    detectedIntent = fallbackInferIntent(contentText, isOperational);
+  // Explicit operational and commercial phrases are safer and cheaper to route deterministically.
+  // The LLM remains available for genuinely ambiguous messages.
+  if (!skipAI && !hasSpecificDeterministicIntent) {
+    try {
+      const context = buildDecisionContext(lead, contentText);
+      const resultText = await callAI(config, context, { purpose: 'decision' });
+      const decision = JSON.parse(resultText);
+
+      isOperational = !!decision.isOperational;
+      detectedIntent = decision.intent;
+      emotion = decision.emotion || 'neutral';
+
+      console.log(`[Decision LLM] Classified operational: ${isOperational}, intent: ${detectedIntent}, emotion: ${emotion}`);
+    } catch (err) {
+      console.warn(`[Decision] LLM classification failed: ${err.message}. Using fallback regex.`);
+      isOperational = hasOperationalSignal;
+      detectedIntent = fallbackInferIntent(contentText, isOperational);
+    }
   }
 
   // Double check to make sure if user talks about boleto/inadimplência/atraso, it is classified as operational
@@ -178,7 +246,10 @@ export async function makeConversationDecision({
   let playbookResult = {};
   
   if (isOperational) {
-    playbookResult = getNextOperationalStep(lead, contentText, incomingContent);
+    playbookResult = getNextOperationalStep(lead, contentText, {
+      ...incomingContent,
+      collectionsContext,
+    });
   } else {
     playbookResult = getNextSalesStep(lead, contentText);
   }

@@ -31,7 +31,8 @@ function detectEmotion(text = '') {
     /\bsegunda vez\b/,
     /\bvoces ficam\b/,
     /\bparar de mandar\b/,
-    /\bpara de mandar\b/
+    /\bpara de mandar\b/,
+    /\b(porra|caralho|merda|cacete)\b/
   ]);
 
   if (angry || exclamationCount >= 3) return 'angry';
@@ -56,6 +57,12 @@ const REGULARIZATION_PATTERNS = [
   /\bnegociar\b/,
   /\bquitar\b/,
   /\bresolver (minha |meu |a |o |uma |um )?(pendencia|inadimplencia|debito|divida|boleto|cobranca)\b/,
+  /\b(to|tou|estou|tava|estava) devendo\b/,
+  /\bdevendo (uma |umas |a |as )?mensalidades?\b/,
+  /\bmensalidades? (atrasad[ao]s?|pendentes?|em atraso)\b/,
+  /\b(quero|preciso) acertar (isso|essa pendencia|minha pendencia|as mensalidades?)\b/,
+  /\b(quero|preciso) pagar (a |minha |uma )?mensalidade\b/,
+  /\bcomo pago (a )?mensalidade\b/,
   /\bdevo\b/,
   /\bdebito\b/,
   /\bdivida\b/,
@@ -97,7 +104,9 @@ const APP_BLOCKED_PATTERNS = [
   /\baplicativo bloquead[ao]\b/,
   /\baplicativo .*bloquead[ao]\b/,
   /\bmeu app nao\b/,
-  /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/
+  /\b(app|aplicativo) (bloqueou|travou|nao abre|nao entra)\b/,
+  /\bmeu (app|aplicativo) (bloqueou|travou|nao abre|nao entra)\b/,
+  /\b(nao|n) consigo (acessar|entrar|usar|entra) (o |no )?(app|aplicativo)\b/
 ];
 
 const CANCEL_PATTERNS = [
@@ -126,6 +135,7 @@ const EVENT_PATTERNS = [
 const ASSISTANCE_REQUEST_PATTERNS = [
   /\bpreciso (de )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
   /\b(chamar|acionar|solicitar|pedir) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+  /\b(manda|mande|mandar) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
   /\b(reboque|guincho|assistencia|chaveiro|socorro) (urgente|agora|pra agora|para agora)\b/,
   /\b(meu|minha) (carro|moto|veiculo) (quebrou|parou|deu pane|esta parado|esta parada|ficou parado|ficou parada)\b/,
   /\b(deu pane|pane na estrada|pneu furado|sem bateria)\b/
@@ -138,7 +148,10 @@ const BILLING_DISPUTE_PATTERNS = [
   /\bnao venceu\b/,
   /\bvencimento errado\b/,
   /\bcobranca errada\b/,
-  /\bisso esta errado\b/
+  /\bisso esta errado\b/,
+  /\bnao devo\b/,
+  /\bnao tenho (debito|divida|pendencia)\b/,
+  /\bparem? de cobrar\b/
 ];
 
 const INSPECTION_PATTERNS = [
@@ -161,8 +174,8 @@ const HUMAN_PATTERNS = [
   /\bpreciso (de )?ajuda\b/,
   /\btenho (um )?problema\b/,
   /\bestou com (um )?problema\b/,
-  /\bquero resolver (uma )?(coisa|questao|situacao|problema|caso)\b/,
-  /\bpreciso resolver (uma )?(coisa|questao|situacao|problema|caso)\b/
+  /\bquero resolver ((um|uma) )?(coisa|questao|situacao|problema|caso)\b/,
+  /\bpreciso resolver ((um|uma) )?(coisa|questao|situacao|problema|caso)\b/
 ];
 
 function buildResolvedHumanReply(handoffDepartment) {
@@ -179,6 +192,7 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
   const normalized = normalizeText(text);
   const emotion = detectEmotion(text);
   const hasAttachment = !!incomingContent.hasAttachment;
+  const collectionsContext = incomingContent.collectionsContext || null;
 
   // 1. Detect Specific Operational Intent
   let intent = 'general_question';
@@ -193,12 +207,6 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
   } else if (matchAny(normalized, ASSISTANCE_REQUEST_PATTERNS)) {
     intent = 'assistance_request';
     handoffDepartment = 'support';
-  } else if (matchAny(normalized, HUMAN_PATTERNS)) {
-    intent = 'human_requested';
-    handoffDepartment = 'consultant';
-  } else if (emotion === 'angry') {
-    intent = 'angry_customer';
-    handoffDepartment = 'consultant';
   } else if (hasAttachment || matchAny(normalized, RECEIPT_PATTERNS)) {
     intent = 'receipt_received';
     handoffDepartment = 'financial';
@@ -223,6 +231,12 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
   } else if (matchAny(normalized, REACTIVATION_PATTERNS)) {
     intent = 'reactivation_request';
     handoffDepartment = 'financial';
+  } else if (matchAny(normalized, HUMAN_PATTERNS)) {
+    intent = 'human_requested';
+    handoffDepartment = 'consultant';
+  } else if (emotion === 'angry') {
+    intent = 'angry_customer';
+    handoffDepartment = 'consultant';
   }
 
   // 2. Check if phone is resolved
@@ -281,6 +295,12 @@ export function getNextOperationalStep(lead, text, incomingContent = {}) {
   clientReply = isPhoneResolved
     ? buildResolvedHumanReply(handoffDepartment)
     : 'Entendi. Vou chamar uma pessoa do setor responsavel para continuar. Me confirma seu WhatsApp com DDD?';
+
+  if (intent === 'general_question' && collectionsContext) {
+    clientReply = isPhoneResolved
+      ? 'Oi! Voce esta falando com a equipe da Moove Protecao Veicular. Vou encaminhar sua conversa para o financeiro continuar por aqui.'
+      : 'Oi! Voce esta falando com a equipe da Moove Protecao Veicular. Para encaminhar ao financeiro, me confirma seu WhatsApp com DDD?';
+  }
 
   // Irritated client rule: remove emojis (handled in clientReply formatting or reply-builder)
   return {

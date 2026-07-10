@@ -46,6 +46,19 @@ const messageBuffers = new Map();
 const sessionTimers = new Map();
 const ANTIFLOOD_MS = 3500;
 
+function shouldRunSalesQualification(decision, text = '', facts = {}) {
+  if (decision?.conversationMode !== 'sales' || decision.shouldHandoff) return false;
+  if (decision.nextAction !== 'ask_model_year') return false;
+  if (facts.model || facts.year || facts.plate || facts.phone) return false;
+
+  const normalized = normalizeText(text);
+  if (!normalized || normalized.split(/\s+/).length > 5) return false;
+  if (/^(sim|nao|ok|certo|blz|beleza|obg|valeu)$/.test(normalized)) return false;
+  if (/\b(cotacao|cotar|cota|orcamento|simulacao|preco|valor|protecao|contratar)\b/.test(normalized)) return false;
+  if (/^(oi|ola|opa|bom dia|boa tarde|boa noite)\b/.test(normalized)) return false;
+  return /[a-z]/.test(normalized);
+}
+
 const STRONG_REFUSAL_PATTERNS = [
   /^n(a|ao)?o?$/,
   /^nao\s*(quero|preciso|obrigad)/,
@@ -1352,6 +1365,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     lead: decisionLeadSeed,
     collectionsContext,
     incomingContent,
+    skipAI: true,
   });
 
   if (decision.shouldStopAutomation || decision.shouldHandoff) {
@@ -1548,7 +1562,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   lead.followUp1Sent = false;
   lead.followUp2Sent = false;
 
-  await applyLatestFactsToLead(lead, {
+  const latestFacts = await applyLatestFactsToLead(lead, {
     fullJid,
     inboundRoute: route.options?.inboundRoute || null,
     source: 'phone_extracted_from_user',
@@ -1607,7 +1621,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
 
   // 1. Data extraction if in sales mode (not handed off yet)
   let extraction = { qualified: false };
-  if (decision.conversationMode === 'sales' && !decision.shouldHandoff) {
+  if (shouldRunSalesQualification(decision, combinedText, latestFacts)) {
     const qualificationContext = await buildQualificationContext(config, lead, combinedText);
     try {
       const qualificationResult = await callAI(config, qualificationContext, { purpose: 'qualification', mode: 'sales' });

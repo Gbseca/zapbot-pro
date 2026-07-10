@@ -23,6 +23,11 @@ const VEHICLE_STOP_WORDS = new Set([
   'ano',
   'placa',
   'quero',
+  'queria',
+  'gostaria',
+  'qro',
+  'cota',
+  'cotar',
   'cotacao',
   'orcamento',
   'simulacao',
@@ -42,6 +47,29 @@ const VEHICLE_STOP_WORDS = new Set([
   'faco',
   'fazer',
   'problema',
+  'opa',
+  'qnt',
+  'qt',
+  'cm',
+  'faz',
+  'ver',
+  'pro',
+  'tenho',
+  'possuo',
+  'tipo',
+  'duvida',
+  'duvidas',
+  'questao',
+  'situacao',
+  'coisa',
+  'pessoa',
+  'resolve',
+  'resolver',
+  'como',
+  'falar',
+  'robo',
+  'cancelar',
+  'cancelamento',
   'aqui',
   'voces',
   'estrada',
@@ -137,7 +165,11 @@ function titleCaseModel(text = '') {
   return text
     .split(/\s+/)
     .filter(Boolean)
-    .map((part) => part.length <= 3 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1).toLowerCase())
+    .map((part) => (
+      part.length <= 3 || /\d/.test(part)
+        ? part.toUpperCase()
+        : part[0].toUpperCase() + part.slice(1).toLowerCase()
+    ))
     .join(' ');
 }
 
@@ -188,12 +220,16 @@ function isOperationalLikeText(text = '') {
     /\binadimpl/,
     /\bpendencia\b/,
     /\bregularizar\b/,
+    /\b(to|tou|estou|tava|estava) devendo\b/,
+    /\bdevendo (uma |umas |a |as )?mensalidades?\b/,
     /\brevistoria\b/,
     /\bvistoria\b/,
     /\bapp\b.*\bbloquead[ao]\b/,
+    /\b(app|aplicativo) (bloqueou|travou|nao abre|nao entra)\b/,
     /\b(nao|n) consigo (acessar|entrar|usar) (o |no )?(app|aplicativo)\b/,
     /\bpreciso (de )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
     /\b(chamar|acionar|solicitar|pedir) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
+    /\b(manda|mande|mandar) (um |uma )?(reboque|guincho|assistencia|chaveiro|socorro)\b/,
     /\b(reboque|guincho|assistencia|chaveiro|socorro) (urgente|agora|pra agora|para agora)\b/,
     /\b(meu|minha) (carro|moto|veiculo) (quebrou|parou|deu pane|esta parado|esta parada|ficou parado|ficou parada)\b/,
     /\b(deu pane|pane na estrada|pneu furado|sem bateria)\b/,
@@ -211,6 +247,12 @@ function isOperationalLikeText(text = '') {
     /\b(tive|sofri|aconteceu|abrir|abri|acionar|acionei) (um |uma )?evento\b/,
     /\bsinistro\b/,
     /\bsinistrou\b/,
+    /\bcancelar\b/,
+    /\bcancelamento\b/,
+    /\bnao quero (falar com )?(robo|atendente)\b/,
+    /\b(falar|chamar|passar) (com |para )?(um |uma )?(atendente|humano|pessoa|consultor)\b/,
+    /\b(quero|preciso) resolver ((um|uma) )?(problema|questao|situacao|caso)\b/,
+    /\bsuporte\b/,
   ].some((pattern) => pattern.test(normalized));
 }
 
@@ -236,7 +278,10 @@ export function extractValidPlateFromText(text = '') {
       index: match.index || 0,
       nearPlateKeyword: hasPlateKeywordBefore(raw, match.index || 0),
     }))
-    .sort((a, b) => Number(b.nearPlateKeyword) - Number(a.nearPlateKeyword));
+    .sort((a, b) => (
+      Number(b.nearPlateKeyword) - Number(a.nearPlateKeyword)
+      || b.index - a.index
+    ));
 
   for (const candidate of candidates) {
     if (looksLikeModelYearToken(candidate.token, raw, candidate.index)) continue;
@@ -258,8 +303,8 @@ export function extractPhoneFromText(text = '') {
 }
 
 export function extractYearFromText(text = '') {
-  const match = String(text || '').match(/\b(19[8-9]\d|20[0-3]\d)\b/);
-  return match ? match[1] : null;
+  const matches = Array.from(String(text || '').matchAll(/\b(19[8-9]\d|20[0-3]\d)\b/g));
+  return matches.length > 0 ? matches[matches.length - 1][1] : null;
 }
 
 export function extractVehicleTypeFromText(text = '') {
@@ -282,33 +327,65 @@ export function hasNoPlateStatement(text = '') {
   return NO_PLATE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
-export function extractVehicleModelFromText(text = '') {
-  if (isCoverageLikeText(text)) return null;
-  if (isMultiVehicleText(text)) return null;
-  if (isOperationalLikeText(text)) return null;
-  const normalized = normalizeText(text);
-  const year = extractYearFromText(text);
-  const withoutPlate = normalized
-    .replace(/\b(?:\+?55\s*)?(?:\(?[1-9]{2}\)?\s*)9?\d{4}\s*\d{4}\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function cleanModelCandidate(value = '') {
+  const words = normalizeText(value)
+    .split(/\s+/)
+    .filter((word) => word && !isModelNoiseWord(word))
+    .slice(0, 5);
+  const candidate = words.join(' ');
+  if (candidate.replace(/\s+/g, '').length < 2) return null;
+  if (!/[a-z]/i.test(candidate)) return null;
+  return titleCaseModel(candidate);
+}
 
-  const modelMatch = withoutPlate.match(/\b(?:modelo|veiculo|carro|moto)\s+(?:e|eh|um|uma)?\s*([a-z0-9][a-z0-9\s]{2,35})/);
-  if (modelMatch) {
-    const words = modelMatch[1]
-      .split(/\s+/)
-      .filter((word) => word && !isModelNoiseWord(word))
-      .slice(0, 3);
-    if (words.join('').length >= 3) return titleCaseModel(words.join(' '));
+function extractModelFromLine(line = '') {
+  if (!line || isCoverageLikeText(line) || isMultiVehicleText(line) || isOperationalLikeText(line)) {
+    return null;
   }
 
+  const normalized = normalizeText(line)
+    .replace(/\b(?:\+?55\s*)?(?:\(?[1-9]{2}\)?\s*)9?\d{4}\s*\d{4}\b/g, ' ')
+    .replace(/\b[a-z]{3}\d[a-z0-9]\d{2}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return null;
+
+  const year = extractYearFromText(normalized);
+  const beforeYear = year ? normalized.slice(0, normalized.lastIndexOf(year)).trim() : normalized;
+  const explicitPatterns = [
+    /\b(?:modelo|veiculo)\s+(?:e|eh)?\s*(?:um|uma)?\s*([a-z0-9][a-z0-9\s]{1,45})$/,
+    /\b(?:meu|minha)\s+(?:carro|moto|veiculo)\s+(?:e|eh)\s+([a-z0-9][a-z0-9\s]{1,45})$/,
+    /\b(?:pro|pra|para o|para a)\s+(?:meu|minha)\s+((?!(?:carro|moto|veiculo|protecao|duvida|pendencia|mensalidade|pessoa|situacao|questao|coisa|problema)\b)[a-z0-9][a-z0-9\s]{1,45})$/,
+    /\b(?:meu|minha)\s+((?!(?:carro|moto|veiculo|protecao|duvida|pendencia|mensalidade|pessoa|situacao|questao|coisa|problema)\b)[a-z0-9][a-z0-9\s]{1,45})$/,
+  ];
+
   if (year) {
-    const beforeYear = withoutPlate.split(year)[0] || '';
-    const words = beforeYear
-      .split(/\s+/)
-      .filter((word) => word && !isModelNoiseWord(word))
-      .slice(-3);
-    if (words.join('').length >= 3) return titleCaseModel(words.join(' '));
+    explicitPatterns.push(
+      /\b(?:tenho|possuo|e|eh)\s+(?:um|uma)\s+([a-z0-9][a-z0-9\s]{1,45})$/,
+      /\b(?:um|uma)\s+((?!(?:carro|moto|veiculo|problema)\b)[a-z0-9][a-z0-9\s]{1,45})$/,
+    );
+  }
+
+  for (const pattern of explicitPatterns) {
+    const match = beforeYear.match(pattern);
+    const candidate = cleanModelCandidate(match?.[1] || '');
+    if (candidate) return candidate;
+  }
+
+  if (!year) return null;
+  return cleanModelCandidate(beforeYear.split(/\s+/).slice(-5).join(' '));
+}
+
+export function extractVehicleModelFromText(text = '') {
+  const lines = String(text || '')
+    .split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .reverse();
+
+  for (const line of lines) {
+    const model = extractModelFromLine(line);
+    if (model) return model;
   }
 
   return null;
@@ -341,6 +418,7 @@ export function applyDeterministicFactsToLead(lead, text = '', options = {}) {
   const facts = extractDeterministicFacts(text);
 
   if (facts.plate) lead.plate = facts.plate;
+  if (facts.plate) lead.plateUnavailable = false;
   if (facts.phone) {
     lead.phone = facts.phone;
     lead.displayNumber = facts.phone;

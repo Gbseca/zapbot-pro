@@ -24,7 +24,7 @@ const CONSULTANT_PATTERNS = [
 ];
 
 const PRICE_PATTERNS = [
-  /\bquanto (fica|custa|seria|e)\b/,
+  /\b(quanto|qnt|qt) (fica|custa|seria|e)\b/,
   /\bqual (o )?valor\b/,
   /\bvalor mensal\b/,
   /\bmensalidade\b/,
@@ -36,10 +36,15 @@ const QUOTE_PATTERNS = [
   /\bcotacao\b/,
   /\borcamento\b/,
   /\bsimulacao\b/,
+  /\b(qro|quero|queria|gostaria de) (cotar|cota|ver (uma )?protecao|fazer (uma )?cotacao)\b/,
+  /\bcotar (meu|minha|um|uma|o|a)?\s*(carro|moto|veiculo)?\b/,
   /\bquero protecao\b/,
   /\bquero contratar\b/,
   /\bquero aderir\b/,
-  /\bproteger meu\b/
+  /\bproteger meu\b/,
+  /\bfaz protecao (pra|para)\b/,
+  /\bprotecao (pro|pra|para o|para a) (meu|minha)\b/,
+  /\bainda nao sou (cliente|associado).{0,35}\bquero pagar a protecao\b/
 ];
 
 const NO_INTEREST_PATTERNS = [
@@ -107,7 +112,21 @@ function extractValidPlate(text = '') {
 function shouldContinueFromSalesHistory(lead = {}, normalized = '', rawText = '') {
   if (!ACTIVE_SALES_INTENTS.has(lead.lastIntent)) return false;
   if (extractValidPlate(rawText)) return true;
+  if (lead.stage === 'ask_model_year') {
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const isBareVehicleAnswer = words.length >= 1
+      && words.length <= 5
+      && /[a-z]/.test(normalized)
+      && !/\b(cotacao|cotar|cota|orcamento|simulacao|preco|valor|protecao|obg|valeu)\b/.test(normalized);
+    if (isBareVehicleAnswer) return true;
+  }
   return matchAny(normalized, SALES_CONTINUATION_PATTERNS);
+}
+
+function getModelYearQuestion(hasModel, hasYear) {
+  if (!hasModel && !hasYear) return 'Qual o modelo e o ano do veiculo?';
+  if (!hasModel) return 'Qual o modelo do veiculo?';
+  return 'Qual o ano do veiculo?';
 }
 
 export function getNextSalesStep(lead, text) {
@@ -200,7 +219,7 @@ export function getNextSalesStep(lead, text) {
       // Need data to get price
       if (!hasModel || !hasYear) {
         requiredAction = 'ask_model_year';
-        allowedQuestion = 'Qual o modelo e o ano do veículo?';
+        allowedQuestion = getModelYearQuestion(hasModel, hasYear);
         reason = 'Cliente pediu preço. Solicitando modelo e ano.';
       } else {
         requiredAction = 'ask_plate';
@@ -223,7 +242,7 @@ export function getNextSalesStep(lead, text) {
       if (!hasModel || !hasYear) {
         step = 'ask_model_year';
         requiredAction = 'ask_model_year';
-        allowedQuestion = 'Qual o modelo e o ano do veículo?';
+        allowedQuestion = getModelYearQuestion(hasModel, hasYear);
         reason = 'Aguardando modelo e ano do veículo para cotação.';
       } else {
         step = 'ask_plate';

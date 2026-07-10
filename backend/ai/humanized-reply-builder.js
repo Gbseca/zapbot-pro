@@ -49,8 +49,44 @@ function isLikelyIncompleteReply(reply = '') {
   return cleaned.length > 80 && !/[.!?)]$/.test(cleaned);
 }
 
+function hasTooManyQuestions(reply = '') {
+  return (String(reply || '').match(/\?/g) || []).length > 1;
+}
+
+function isShortGreeting(normalized = '') {
+  return /^(oi|ola|opa|bom dia|boa tarde|boa noite)( tudo bem| tudo bom| tudo joia| td bem| td joia| beleza)?$/.test(normalized);
+}
+
+function isShortThanks(normalized = '') {
+  return /^(obg|obrigado|obrigada|valeu|vlw)( viu| mesmo| ta| tá)?$/.test(normalized);
+}
+
+function hasDeterministicSafeTopic(normalized = '') {
+  return isShortGreeting(normalized)
+    || isShortThanks(normalized)
+    || /como funciona|mutualismo|rateio|associacao/.test(normalized)
+    || /roubo|furto/.test(normalized)
+    || /assistencia|reboque|guincho|chaveiro|24h/.test(normalized)
+    || /seguro|seguradora|apolice|sinistro|premio/.test(normalized);
+}
+
 function buildSafeSalesFallback({ latestUserMessage = '', allowedQuestion = null } = {}) {
   const normalized = normalizeText(latestUserMessage);
+
+  if (isShortThanks(normalized)) {
+    return 'Por nada! Se precisar, e so chamar.';
+  }
+
+  if (isShortGreeting(normalized)) {
+    const greeting = normalized.startsWith('bom dia')
+      ? 'Bom dia!'
+      : normalized.startsWith('boa tarde')
+        ? 'Boa tarde!'
+        : normalized.startsWith('boa noite')
+          ? 'Boa noite!'
+          : 'Oi!';
+    return `${greeting} Tudo bem por aqui. Como posso te ajudar?`;
+  }
 
   if (/como funciona|mutualismo|rateio|associacao/.test(normalized)) {
     return 'A Moove trabalha com protecao veicular em modelo de associacao e rateio. Um consultor pode te explicar os detalhes certinho por aqui.';
@@ -93,6 +129,22 @@ export async function buildHumanizedReply(config, {
 
   if (mode === 'sales' && requiredAction === 'stop_automation') {
     return 'Tudo bem, sem problema. Nao vou insistir. Se precisar, e so chamar.';
+  }
+
+  if (
+    mode === 'sales'
+    && allowedQuestion
+    && ['ask_model_year', 'ask_plate', 'ask_ddd_phone'].includes(requiredAction)
+  ) {
+    return allowedQuestion;
+  }
+
+  if (
+    mode === 'sales'
+    && requiredAction === 'respond'
+    && hasDeterministicSafeTopic(normalizeText(latestUserMessage))
+  ) {
+    return buildSafeSalesFallback({ latestUserMessage, allowedQuestion });
   }
 
   let activeRules = companyRules;
@@ -164,7 +216,10 @@ ${(lead.history || []).slice(-6).map(h => `${h.role === 'assistant' ? 'Assistent
   try {
     const reply = await callAI(config, context, { purpose: 'reply', mode });
     const cleaned = reply.trim().replace(/^"|"$/g, ''); // Clean up any wrapping quotes
-    if (mode === 'sales' && (FORBIDDEN_REPLY_TERMS.test(cleaned) || isLikelyIncompleteReply(cleaned))) {
+    if (
+      mode === 'sales'
+      && (FORBIDDEN_REPLY_TERMS.test(cleaned) || isLikelyIncompleteReply(cleaned) || hasTooManyQuestions(cleaned))
+    ) {
       return buildSafeSalesFallback({ latestUserMessage, allowedQuestion });
     }
     return cleaned;
