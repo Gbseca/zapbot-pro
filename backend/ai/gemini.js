@@ -5,6 +5,17 @@
 
 import { getDefaultModel, resolveEffectiveAIConfig } from '../data/config-manager.js';
 
+const GEMINI_RATE_LIMIT_COOLDOWN_MS = 65_000;
+let geminiCooldownUntil = 0;
+
+function shortProviderError(error) {
+  return String(error?.message || error || 'erro desconhecido').split('\n')[0].slice(0, 320);
+}
+
+function isRateLimitError(error) {
+  return /\b429\b|too many requests|quota|resource_exhausted|rate.?limit/i.test(String(error?.message || error || ''));
+}
+
 function resolveModel(config, purpose = 'reply') {
   const effective = resolveEffectiveAIConfig(config);
   const provider = effective.effectiveProvider || 'groq';
@@ -178,7 +189,33 @@ export async function callAI(config, context, options = {}) {
   const model = options.model || resolveModel(effective, purpose);
 
   if (provider === 'gemini') {
-    return callGemini(effective.effectiveGeminiKey, context, { ...options, model, purpose });
+    const groqFallbackOptions = {
+      ...options,
+      model: getDefaultModel('groq'),
+      purpose,
+    };
+
+    if (effective.effectiveGroqKey && Date.now() < geminiCooldownUntil) {
+      return callGroq(effective.effectiveGroqKey, context, groqFallbackOptions);
+    }
+
+    try {
+      return await callGemini(effective.effectiveGeminiKey, context, { ...options, model, purpose });
+    } catch (error) {
+      if (!effective.effectiveGroqKey) throw error;
+
+      if (isRateLimitError(error)) {
+        geminiCooldownUntil = Date.now() + GEMINI_RATE_LIMIT_COOLDOWN_MS;
+      }
+      console.warn(`[AI] Gemini failed for ${purpose}; using Groq fallback: ${shortProviderError(error)}`);
+      try {
+        return await callGroq(effective.effectiveGroqKey, context, groqFallbackOptions);
+      } catch (fallbackError) {
+        throw new Error(
+          `Gemini failed: ${shortProviderError(error)}; Groq fallback failed: ${shortProviderError(fallbackError)}`,
+        );
+      }
+    }
   }
 
   try {
