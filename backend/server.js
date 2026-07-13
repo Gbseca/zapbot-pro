@@ -15,6 +15,7 @@ import { getAllLeads, getLead, updateLead, deleteLead, clearAllLeads, exportLead
 import { extractAndSavePDF, getUploadedDocs, removePDF } from './knowledge/pdf-loader.js';
 import { testAPIKey } from './ai/gemini.js';
 import { createAdResearchService } from './ad-research/service.js';
+import { createAdResearchAccessGuard } from './ad-research/access-guard.js';
 import { createSystemStatusService } from './system-status.js';
 import {
   createConsultant,
@@ -140,6 +141,7 @@ function assertDebugToken(req) {
 const wa = new WhatsAppManager(wss);
 const queue = new MessageQueue(wa, wss, { loadConfig });
 const adResearch = createAdResearchService({ loadConfig, broadcast });
+const adResearchAccess = createAdResearchAccessGuard();
 const systemStatus = createSystemStatusService({ wa, queue, adResearch, loadConfig, broadcast });
 
 wa.onMessage = handleIncomingMessage;
@@ -265,7 +267,11 @@ app.post('/api/debug/send-test', async (req, res) => {
   }
 });
 
-app.post('/api/system/status/refresh', async (req, res) => {
+app.post('/api/system/status/refresh', (req, res, next) => {
+  const checks = Array.isArray(req.body?.checks) ? req.body.checks : [];
+  if (checks.includes('ads')) return adResearchAccess.mutation(req, res, next);
+  return next();
+}, async (req, res) => {
   try {
     const snapshot = await systemStatus.refresh({ checks: req.body?.checks || [] });
     res.json(snapshot);
@@ -437,23 +443,168 @@ app.patch('/api/faq/:id/active', async (req, res) => {
   }
 });
 
-app.post('/api/ad-research/search', (req, res) => {
+app.get('/api/ad-research/session', (req, res) => {
+  const session = adResearchAccess.issue(req);
+  if (!session) return res.status(403).json({ error: 'Origem da requisicao nao permitida.' });
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  res.cookie('zapbot_ad_session', session.token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: req.secure || forwardedProto === 'https',
+    path: '/api/ad-research',
+    maxAge: session.maxAgeMs,
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(session);
+});
+
+app.get('/api/ad-research/status', adResearchAccess.read, (req, res) => {
+  res.json(adResearch.getStats());
+});
+
+app.get('/api/ad-research/history', adResearchAccess.read, (req, res) => {
+  const limit = Math.min(40, Math.max(1, Number(req.query.limit) || 20));
+  res.json(adResearch.listRecentJobs(limit));
+});
+
+app.get('/api/ad-research/watchlists', adResearchAccess.read, (req, res) => {
+  res.json(adResearch.listWatchlists());
+});
+
+app.post('/api/ad-research/watchlists', adResearchAccess.mutation, (req, res) => {
   try {
-    const query = String(req.body?.query || '').trim();
-    const region = String(req.body?.region || '').trim();
-    const sort = String(req.body?.sort || 'popular').trim();
-
-    if (!query) return res.status(400).json({ error: 'Informe o nicho ou objetivo da busca.' });
-
-    const job = adResearch.startSearch({ query, region, sort });
-    systemStatus.emitSnapshot();
-    res.status(202).json({ jobId: job.jobId });
+    const watchlist = adResearch.createWatchlist(req.body || {});
+    if (!watchlist) return res.status(400).json({ error: 'Nao foi possivel criar o monitoramento.' });
+    res.status(201).json(watchlist);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(400).json({ error: error.message });
   }
 });
 
-app.get('/api/ad-research/:jobId', (req, res) => {
+app.put('/api/ad-research/watchlists/:id', adResearchAccess.mutation, (req, res) => {
+  try {
+    const watchlist = adResearch.updateWatchlist(req.params.id, req.body || {});
+    if (!watchlist) return res.status(404).json({ error: 'Monitoramento nao encontrado.' });
+    res.json(watchlist);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/ad-research/watchlists/:id', adResearchAccess.mutation, (req, res) => {
+  const deleted = adResearch.deleteWatchlist(req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Monitoramento nao encontrado.' });
+  res.json({ success: true });
+});
+
+app.post('/api/ad-research/watchlists/:id/run', adResearchAccess.search, (req, res) => {
+  const job = adResearch.runWatchlist(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Monitoramento nao encontrado.' });
+  res.status(202).json({ jobId: job.jobId, job });
+});
+
+app.get('/api/ad-research/snapshots', adResearchAccess.read, (req, res) => {
+  res.json(adResearch.listSnapshots({
+    watchlistId: req.query.watchlistId || null,
+    limit: Math.min(80, Math.max(1, Number(req.query.limit) || 30)),
+  }));
+});
+
+app.get('/api/ad-research/alerts', adResearchAccess.read, (req, res) => {
+  res.json(adResearch.listAlerts({
+    unreadOnly: String(req.query.unreadOnly || 'false') === 'true',
+    limit: Math.min(120, Math.max(1, Number(req.query.limit) || 80)),
+  }));
+});
+
+app.patch('/api/ad-research/alerts/read', adResearchAccess.mutation, (req, res) => {
+  res.json(adResearch.markAlertsRead(Array.isArray(req.body?.ids) ? req.body.ids : []));
+});
+
+app.get('/api/ad-research/favorites', adResearchAccess.read, (req, res) => {
+  res.json(adResearch.listFavorites());
+});
+
+app.post('/api/ad-research/favorites', adResearchAccess.mutation, (req, res) => {
+  const favorite = adResearch.saveFavorite(req.body || {});
+  if (!favorite) return res.status(404).json({ error: 'Anuncio nao encontrado para favoritar.' });
+  res.status(201).json(favorite);
+});
+
+app.delete('/api/ad-research/favorites/:adId', adResearchAccess.mutation, (req, res) => {
+  const deleted = adResearch.deleteFavorite(req.params.adId);
+  if (!deleted) return res.status(404).json({ error: 'Favorito nao encontrado.' });
+  res.json({ success: true });
+});
+
+app.post('/api/ad-research/compare', adResearchAccess.mutation, (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length < 2) return res.status(400).json({ error: 'Selecione pelo menos dois anuncios.' });
+  res.json(adResearch.compareAds(items));
+});
+
+app.get('/api/ad-research/insights/:jobId', adResearchAccess.read, (req, res) => {
+  const insights = adResearch.getInsights(req.params.jobId);
+  if (!insights) return res.status(404).json({ error: 'Busca nao encontrada.' });
+  res.json(insights);
+});
+
+app.post('/api/ad-research/toolkit/:jobId/:adId', adResearchAccess.mutation, (req, res) => {
+  const toolkit = adResearch.getToolkit(req.params.jobId, req.params.adId, req.body?.objective || 'gerar conversas');
+  if (!toolkit) return res.status(404).json({ error: 'Anuncio nao encontrado.' });
+  res.json(toolkit);
+});
+
+app.post('/api/ad-research/audit/:jobId/:adId', adResearchAccess.mutation, async (req, res) => {
+  try {
+    const audit = await adResearch.auditAdLanding(req.params.jobId, req.params.adId);
+    res.json(audit);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get('/api/ad-research/export/:jobId.csv', adResearchAccess.read, (req, res) => {
+  const csv = adResearch.exportCsv(req.params.jobId);
+  if (csv === null) return res.status(404).json({ error: 'Busca nao encontrada.' });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="pesquisa_ads_${Date.now()}.csv"`);
+  res.send(`\uFEFF${csv}`);
+});
+
+app.post('/api/ad-research/utm', adResearchAccess.mutation, (req, res) => {
+  const url = adResearch.buildUtm(req.body?.url, req.body || {});
+  if (!url) return res.status(400).json({ error: 'Informe uma URL valida.' });
+  res.json({ url });
+});
+
+app.get('/api/ad-research/feedback', adResearchAccess.read, (req, res) => {
+  res.json(adResearch.listFeedback({ adId: req.query.adId || null, limit: 100 }));
+});
+
+app.post('/api/ad-research/feedback', adResearchAccess.mutation, (req, res) => {
+  const feedback = adResearch.saveFeedback(req.body || {});
+  if (!feedback) return res.status(400).json({ error: 'Informe o anuncio avaliado.' });
+  res.status(201).json(feedback);
+});
+
+app.post('/api/ad-research/search', adResearchAccess.search, (req, res) => {
+  try {
+    const job = adResearch.startSearch(req.body || {});
+    systemStatus.emitSnapshot();
+    res.status(202).json({ jobId: job.jobId, job });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/ad-research/:jobId/cancel', adResearchAccess.mutation, (req, res) => {
+  const job = adResearch.cancelSearch(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Busca nao encontrada.' });
+  res.json(job);
+});
+
+app.get('/api/ad-research/:jobId', adResearchAccess.read, (req, res) => {
   const job = adResearch.getJob(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Busca nao encontrada.' });
   res.json(job);
@@ -616,3 +767,17 @@ server.listen(PORT, () => {
   console.log('Aguardando conexao WhatsApp...');
   console.log('Modulo IA: pronto\n');
 });
+
+let shuttingDown = false;
+function shutdownServer(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Server] ${signal} recebido. Encerrando pesquisas e servidor HTTP...`);
+  adResearch.shutdown();
+  server.close(() => process.exit(0));
+  const forcedExit = setTimeout(() => process.exit(0), 8_000);
+  forcedExit.unref?.();
+}
+
+process.once('SIGINT', () => shutdownServer('SIGINT'));
+process.once('SIGTERM', () => shutdownServer('SIGTERM'));

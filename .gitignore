@@ -5,6 +5,7 @@ backend/node_modules/
 backend/auth_info/
 backend/data/*.json
 backend/data/*.jsonl
+backend/data/ad-research-diagnostics/
 backend/knowledge/docs/
 *.log
 .env

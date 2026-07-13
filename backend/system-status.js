@@ -66,6 +66,7 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
     lastAdCollectorCheck: {
       status: 'idle',
       collectorReady: null,
+      code: 'not_checked',
       message: 'Ainda nao revalidado.',
       checkedAt: null,
     },
@@ -132,6 +133,7 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
 
   function adResearchSnapshot() {
     const latestJob = adResearch.listRecentJobs(1)[0] || null;
+    const researchStats = typeof adResearch.getStats === 'function' ? adResearch.getStats() : null;
     const collectorReady = state.lastAdCollectorCheck.collectorReady ?? latestJob?.diagnostics?.collectorReady ?? null;
     let severity = 'healthy';
     if (collectorReady === false) severity = 'error';
@@ -143,6 +145,13 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
       severity,
       collectorReady,
       lastCollectorCheck: state.lastAdCollectorCheck,
+      queue: researchStats ? {
+        activeJobId: researchStats.activeJobId,
+        queuedJobs: researchStats.queuedJobs,
+        running: researchStats.running,
+      } : null,
+      runtime: researchStats?.runtime || null,
+      storage: researchStats?.storage || null,
       latestJob: latestJob
         ? {
             jobId: latestJob.jobId,
@@ -254,7 +263,10 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
       state.lastAdCollectorCheck = {
         status: result.collectorReady ? 'ok' : 'error',
         collectorReady: !!result.collectorReady,
+        code: result.code || (result.collectorReady ? 'ok' : 'collector_error'),
         message: result.message,
+        runtime: result.runtime || null,
+        diagnostic: result.diagnostic || null,
         checkedAt: new Date().toISOString(),
       };
       pushEvent(result.collectorReady ? 'healthy' : 'error', 'Pesquisa Ads', result.message);
@@ -302,6 +314,34 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
       emitSnapshotDebounced();
     });
   }
+
+  const startupAdsCheck = setTimeout(async () => {
+    try {
+      const result = await preflightMetaCollector();
+      state.lastAdCollectorCheck = {
+        status: result.collectorReady ? 'ok' : 'error',
+        collectorReady: !!result.collectorReady,
+        code: result.code || (result.collectorReady ? 'ok' : 'collector_error'),
+        message: result.message,
+        runtime: result.runtime || null,
+        diagnostic: result.diagnostic || null,
+        checkedAt: new Date().toISOString(),
+      };
+      pushEvent(result.collectorReady ? 'healthy' : 'error', 'Pesquisa Ads', result.message);
+      emitSnapshot();
+    } catch (error) {
+      state.lastAdCollectorCheck = {
+        status: 'error',
+        collectorReady: false,
+        code: 'startup_check_failed',
+        message: error.message,
+        checkedAt: new Date().toISOString(),
+      };
+      pushEvent('error', 'Pesquisa Ads', error.message);
+      emitSnapshot();
+    }
+  }, 15_000);
+  startupAdsCheck.unref?.();
 
   return {
     buildSnapshot,
