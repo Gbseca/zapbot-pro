@@ -12,6 +12,9 @@ Sistema de atendimento e CRM para WhatsApp, criado para qualificar leads, organi
 - Painel CRM em kanban para acompanhar leads.
 - Etiquetas, lembretes e historico operacional.
 - Pesquisa e coleta de anuncios para apoio comercial.
+- Historico, monitoramentos recorrentes e alertas de mudancas em anuncios.
+- Comparacao de criativos, biblioteca de referencias e matriz de testes A/B.
+- Auditoria basica de paginas de destino, exportacao CSV e gerador de UTM.
 - Persistencia com Supabase e arquivos locais conforme configuracao.
 
 ## Stack
@@ -38,6 +41,27 @@ O painel fica disponivel em:
 ```text
 http://localhost:3001
 ```
+
+## Pesquisa Ads
+
+A Pesquisa Ads usa dados publicos da Biblioteca de Anuncios da Meta. O coletor precisa do Chromium do Playwright no mesmo usuario que executa o Node.js.
+
+Em Linux, a instalacao completa e repetivel fica em:
+
+```bash
+bash scripts/install-ad-research-browser.sh
+```
+
+Para validar o coletor e, opcionalmente, executar uma pesquisa real:
+
+```bash
+npm run verify:ad-research -- http://127.0.0.1:3001
+npm run verify:ad-research -- http://127.0.0.1:3001 --search
+```
+
+O modulo mantem fila com uma coleta por vez, cache local, cancelamento, diagnosticos e persistencia em `APP_STORAGE_DIR`. Os indicadores de forca e relevancia sao estimativas explicaveis baseadas em sinais publicos; eles nao representam impressoes, vendas ou resultados informados pela Meta.
+
+Se o Chromium for administrado pelo sistema, defina `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` com o caminho absoluto. O coletor tambem detecta automaticamente instalacoes comuns do Chrome e Chromium no Linux.
 
 ## Variaveis E Configuracao
 

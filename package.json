@@ -6,16 +6,20 @@
   "type": "module",
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "node backend/server.js"
+    "dev": "node backend/server.js",
+    "test": "npm run test:ad-research && npm --prefix backend test",
+    "test:ad-research": "node --test backend/ad-research/ad-research.test.js backend/ad-research/ad-research.integration.test.js",
+    "verify:ad-research": "node scripts/verify-ad-research.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@supabase/supabase-js": "^2.105.3",
-    "@whiskeysockets/baileys": "6.17.16",
+    "@supabase/supabase-js": "2.109.0",
+    "@whiskeysockets/baileys": "6.7.23",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.2.0",
     "node-cron": "^3.0.3",
+    "pdf-parse": "^1.1.4",
     "pino": "^9.3.2",
     "playwright": "^1.59.1",
     "qrcode": "^1.5.3",
@@ -24,7 +28,9 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "devDependencies": {
-    "pdf-parse": "^1.1.1"
+  "overrides": {
+    "node-cron": {
+      "uuid": "^11.1.1"
+    }
   }
 }

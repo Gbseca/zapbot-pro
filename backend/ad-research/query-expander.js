@@ -2,145 +2,133 @@ import { callAI } from '../ai/gemini.js';
 import { resolveEffectiveAIConfig } from '../data/config-manager.js';
 import { normalizeText, tokenizeText, uniqueStrings } from './utils.js';
 
+const SEARCH_MODES = new Set(['broad', 'exact', 'advertiser']);
+
 const NICHE_PACKS = [
   {
-    matches: ['protecao veicular', 'associacao veicular', 'seguro auto popular'],
+    matches: ['protecao veicular', 'associacao veicular', 'assistencia veicular'],
     terms: [
       'protecao veicular',
-      'associacao veicular',
-      'seguro para carro',
-      'seguro auto',
-      'seguranca veicular',
+      'associacao de protecao veicular',
       'assistencia 24 horas veicular',
       'cotacao protecao veicular',
       'rastreador veicular',
+      'beneficios para veiculos',
     ],
+    semantic: ['tranquilidade', 'reboque', 'guincho', 'colisao', 'roubo e furto', 'atendimento 24 horas'],
   },
   {
-    matches: ['energia solar', 'placa solar'],
-    terms: [
-      'energia solar',
-      'placa solar',
-      'painel solar',
-      'economia de energia',
-      'kit solar residencial',
-      'instalacao energia solar',
-    ],
+    matches: ['energia solar', 'placa solar', 'painel solar'],
+    terms: ['energia solar', 'painel solar residencial', 'economia de energia', 'instalacao solar', 'kit solar'],
+    semantic: ['conta de luz', 'economia mensal', 'geracao propria', 'energia renovavel'],
   },
   {
-    matches: ['consorcio', 'consorcio auto', 'consorcio imobiliario'],
-    terms: [
-      'consorcio',
-      'carta de credito',
-      'consorcio auto',
-      'consorcio imobiliario',
-      'parcelas sem juros',
-      'contemplacao',
-    ],
+    matches: ['consorcio', 'carta de credito'],
+    terms: ['consorcio', 'consorcio de veiculos', 'carta de credito', 'consorcio imobiliario', 'contemplacao'],
+    semantic: ['parcelas', 'planejamento', 'compra programada', 'lance'],
+  },
+  {
+    matches: ['rastreador', 'rastreamento veicular'],
+    terms: ['rastreador veicular', 'rastreamento de veiculos', 'localizador veicular', 'monitoramento veicular'],
+    semantic: ['aplicativo de rastreamento', 'localizacao em tempo real', 'antifurto'],
   },
 ];
 
-function hasResearchAI(config = {}) {
-  const effective = resolveEffectiveAIConfig(config);
-  return !!effective.hasEffectiveKey;
+function safeMode(value) {
+  return SEARCH_MODES.has(value) ? value : 'broad';
 }
 
-function getPackTerms(query) {
-  const normalizedQuery = normalizeText(query);
-  return NICHE_PACKS.flatMap((pack) => (
-    pack.matches.some((match) => normalizedQuery.includes(match)) ? pack.terms : []
-  ));
+function getMatchingPacks(query) {
+  const normalized = normalizeText(query);
+  return NICHE_PACKS.filter((pack) => pack.matches.some((match) => normalized.includes(match)));
 }
 
-function buildGenericTerms(query, region = '') {
-  const tokens = tokenizeText(query);
-  const mainPhrase = String(query || '').trim();
-  const regionText = String(region || '').trim();
-  const core = tokens.slice(0, 4).join(' ');
-  const regionParts = regionText
-    ? uniqueStrings([
-        regionText,
-        regionText.split(',')[0]?.trim(),
-        regionText.split('-')[0]?.trim(),
-      ], 2)
-    : [];
+function buildFallbackTerms(query, region, mode) {
+  const main = String(query || '').trim();
+  if (mode === 'exact') return [main];
+  if (mode === 'advertiser') {
+    return uniqueStrings([main, `${main} oficial`, `${main} brasil`], 3);
+  }
+
+  const packs = getMatchingPacks(query);
+  const tokens = tokenizeText(query).filter((token) => token.length >= 3);
+  const core = tokens.slice(0, 5).join(' ');
+  const location = String(region || '').split(',')[0]?.trim();
 
   return uniqueStrings([
-    mainPhrase,
+    main,
+    ...packs.flatMap((pack) => pack.terms),
     core && `empresa de ${core}`,
-    core && `${core} brasil`,
-    core && `${core} online`,
-    core && `${core} promocao`,
-    core && `${core} especialista`,
     core && `cotacao ${core}`,
-    core && `solucao ${core}`,
-    ...regionParts.flatMap((regionValue) => [
-      `${mainPhrase} ${regionValue}`,
-      core && `${core} ${regionValue}`,
-    ]),
-  ], 8);
+    location && `${main} ${location}`,
+  ].filter(Boolean), 6);
 }
 
-function buildSemanticTerms(query) {
-  const tokens = tokenizeText(query);
+function buildFallbackSemantic(query) {
+  const packs = getMatchingPacks(query);
+  const tokens = tokenizeText(query).filter((token) => token.length >= 3);
   return uniqueStrings([
     query,
     ...tokens,
-    ...tokens.map((token) => `${token} premium`),
-    ...tokens.map((token) => `${token} desconto`),
-    ...tokens.map((token) => `${token} confiavel`),
+    ...packs.flatMap((pack) => pack.semantic),
+    ...packs.flatMap((pack) => pack.terms),
   ], 24);
 }
 
-async function expandWithAI({ query, region, config }) {
+function parseJsonObject(value = '') {
+  const text = String(value || '').trim();
+  const unfenced = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const start = unfenced.indexOf('{');
+  const end = unfenced.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('A IA nao devolveu um objeto JSON valido.');
+  return JSON.parse(unfenced.slice(start, end + 1));
+}
+
+async function expandWithAI({ query, region, objective, config }) {
   const systemPrompt = [
-    'Voce planeja pesquisas para a Biblioteca de Anuncios da Meta.',
-    'Recebera um nicho ou objetivo comercial e deve devolver JSON puro.',
-    'Pense em sinônimos comerciais, promessas, dores, nomes alternativos e termos usados por concorrentes.',
-    'Nao repita termos, nao explique nada fora do JSON e foque em termos em portugues do Brasil.',
-    'Responda com este formato:',
-    '{"intentSummary":"", "searchTerms":[""], "semanticTerms":[""], "angles":[""]}',
+    'Voce planeja pesquisas na Biblioteca de Anuncios da Meta para inteligencia competitiva.',
+    'Devolva apenas JSON valido, sem markdown.',
+    'Crie termos realmente usados por anunciantes brasileiros, evitando palavras genericas como online, premium ou promocao quando nao agregarem intencao.',
+    'Nao repita termos e nao invente nomes de empresas.',
+    'Formato: {"intentSummary":"", "searchTerms":[""], "semanticTerms":[""], "angles":[""]}.',
   ].join(' ');
 
   const userMessage = [
-    `Busca principal: ${query}`,
-    region ? `Regiao opcional: ${region}` : 'Regiao opcional: sem filtro',
-    'Monte no maximo 8 searchTerms e no maximo 16 semanticTerms.',
-    'Priorize termos que ajudem a encontrar anuncios mesmo quando a palavra principal nao aparece literal.',
-  ].join('\n');
+    `Nicho ou busca: ${query}`,
+    region ? `Regiao de interesse: ${region}` : 'Regiao: Brasil sem cidade obrigatoria',
+    objective ? `Objetivo de campanha: ${objective}` : '',
+    'Use no maximo 5 termos de pesquisa, 16 termos semanticos e 8 angulos.',
+  ].filter(Boolean).join('\n');
 
   const response = await callAI(
     config,
     { systemPrompt, history: [], userMessage },
     { purpose: 'qualification' },
   );
-
-  const parsed = JSON.parse(response || '{}');
+  const parsed = parseJsonObject(response);
   return {
     intentSummary: String(parsed.intentSummary || '').trim(),
-    searchTerms: uniqueStrings(parsed.searchTerms || [], 8),
+    searchTerms: uniqueStrings(parsed.searchTerms || [], 5),
     semanticTerms: uniqueStrings(parsed.semanticTerms || [], 16),
     angles: uniqueStrings(parsed.angles || [], 8),
   };
 }
 
-export async function expandSearchQuery({ query, region = '', config = {} }) {
+export async function expandSearchQuery({
+  query,
+  region = '',
+  mode = 'broad',
+  objective = '',
+  config = {},
+} = {}) {
+  const safeSearchMode = safeMode(mode);
   const effectiveConfig = resolveEffectiveAIConfig(config);
-  const fallbackSearchTerms = uniqueStrings([
-    query,
-    ...getPackTerms(query),
-    ...buildGenericTerms(query, region),
-  ], 8);
-
-  const fallbackSemanticTerms = uniqueStrings([
-    query,
-    ...getPackTerms(query),
-    ...buildSemanticTerms(query),
-  ], 24);
-
+  const fallbackSearchTerms = buildFallbackTerms(query, region, safeSearchMode);
+  const fallbackSemanticTerms = buildFallbackSemantic(query);
   const expansion = {
-    provider: effectiveConfig.effectiveProvider || 'groq',
+    provider: effectiveConfig.effectiveProvider || 'local',
     usedAI: false,
+    mode: safeSearchMode,
     intentSummary: '',
     angles: [],
     searchTerms: fallbackSearchTerms,
@@ -148,27 +136,36 @@ export async function expandSearchQuery({ query, region = '', config = {} }) {
     warnings: [],
   };
 
-  if (!hasResearchAI(effectiveConfig)) {
-    expansion.warnings.push('Busca sem IA: usando expansao heuristica local.');
+  if (safeSearchMode !== 'broad') return expansion;
+  if (!effectiveConfig.hasEffectiveKey) {
+    expansion.warnings.push('Expansao local usada porque nao ha uma chave de IA disponivel.');
     return expansion;
   }
 
   try {
-    const aiExpansion = await expandWithAI({ query, region, config: effectiveConfig });
+    const aiExpansion = await expandWithAI({
+      query,
+      region,
+      objective,
+      config: effectiveConfig,
+    });
     expansion.usedAI = true;
     expansion.intentSummary = aiExpansion.intentSummary;
     expansion.angles = aiExpansion.angles;
     expansion.searchTerms = uniqueStrings([
+      query,
       ...aiExpansion.searchTerms,
       ...fallbackSearchTerms,
-    ], 8);
+    ], 6);
     expansion.semanticTerms = uniqueStrings([
       ...aiExpansion.semanticTerms,
       ...fallbackSemanticTerms,
     ], 24);
-    return expansion;
   } catch (error) {
-    expansion.warnings.push(`Falha na expansao por IA: ${error.message}`);
-    return expansion;
+    expansion.warnings.push(`A expansao por IA falhou e a busca local foi mantida: ${error.message}`);
   }
+
+  return expansion;
 }
+
+export { SEARCH_MODES };

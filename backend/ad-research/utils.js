@@ -54,7 +54,9 @@ const EN_MONTHS = {
   december: 11,
 };
 
-export const SORT_MODES = new Set(['popular', 'relevant', 'recent']);
+export const SORT_MODES = new Set(['strength', 'popular', 'relevant', 'recent', 'oldest', 'advertiser']);
+export const SEARCH_MODES = new Set(['broad', 'exact', 'advertiser']);
+export const MEDIA_TYPES = new Set(['all', 'image', 'video']);
 
 export function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -102,23 +104,48 @@ export function hashText(value = '') {
   return crypto.createHash('sha1').update(String(value || '')).digest('hex').slice(0, 16);
 }
 
-export function buildMetaSearchUrl({ query, country = 'BR' }) {
+export function buildMetaSearchUrl({ query, country = 'BR', mode = 'broad', mediaType = 'all' }) {
+  const safeMode = SEARCH_MODES.has(mode) ? mode : 'broad';
+  const safeMediaType = MEDIA_TYPES.has(mediaType) ? mediaType : 'all';
   const params = new URLSearchParams({
     active_status: 'active',
     ad_type: 'all',
-    country,
+    country: String(country || 'BR').toUpperCase().slice(0, 2),
     is_targeted_country: 'false',
-    media_type: 'all',
+    media_type: safeMediaType,
     q: query,
-    search_type: 'keyword_unordered',
-    'sort_data[mode]': 'total_impressions',
-    'sort_data[direction]': 'desc',
+    search_type: safeMode === 'exact' ? 'keyword_exact_phrase' : 'keyword_unordered',
   });
   return `https://www.facebook.com/ads/library/?${params.toString()}`;
 }
 
 export function buildMetaAdUrl(libraryId, country = 'BR') {
-  return buildMetaSearchUrl({ query: String(libraryId || '').trim(), country });
+  return buildMetaSearchUrl({ query: String(libraryId || '').trim(), country, mode: 'exact' });
+}
+
+export function containsWholeTerm(text = '', term = '') {
+  const normalizedText = normalizeText(text);
+  const normalizedTerm = normalizeText(term);
+  if (!normalizedText || !normalizedTerm) return false;
+  const escaped = normalizedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(normalizedText);
+}
+
+export function jaccardSimilarity(left = '', right = '') {
+  const leftTokens = new Set(tokenizeText(left).filter((token) => token.length >= 3));
+  const rightTokens = new Set(tokenizeText(right).filter((token) => token.length >= 3));
+  if (!leftTokens.size || !rightTokens.size) return 0;
+  let intersection = 0;
+  leftTokens.forEach((token) => {
+    if (rightTokens.has(token)) intersection += 1;
+  });
+  const union = new Set([...leftTokens, ...rightTokens]).size || 1;
+  return intersection / union;
+}
+
+export function csvCell(value) {
+  const text = Array.isArray(value) ? value.join(' | ') : String(value ?? '');
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 export function decodeTrackingUrl(url) {
