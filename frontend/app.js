@@ -2521,7 +2521,7 @@ function renderInternalConsultants() {
       </div>
       <div class="internal-checks compact">
         <label><input type="checkbox" data-field="receive_sales" ${c.receive_sales !== false ? 'checked' : ''}> Vendas</label>
-        <label><input type="checkbox" data-field="receive_support" ${c.receive_support !== false ? 'checked' : ''}> Suporte</label>
+        <label><input type="checkbox" data-field="receive_support" ${c.receive_support !== false ? 'checked' : ''}> Atendimentos</label>
         <label><input type="checkbox" data-field="active" ${c.active !== false ? 'checked' : ''}> Ativo</label>
       </div>
       <div class="internal-meta">
@@ -2833,7 +2833,16 @@ async function loadLeads() {
     renderLeadsList(currentFilter);
     updateLeadBadge();
 
-    const needsAttention = allLeads.filter(l => l.status === 'transferred' || l.status === 'human_requested' || l.status === 'awaiting_financial_review');
+    const attentionStatuses = new Set([
+      'transferred',
+      'human_requested',
+      'awaiting_financial_review',
+      'transferred_to_financial',
+      'transferred_to_support',
+      'handoff_client_confirmation_failed',
+      'handoff_failed',
+    ]);
+    const needsAttention = allLeads.filter(l => attentionStatuses.has(l.status));
     for (const lead of needsAttention) {
       if (!notifiedLeads.has(lead.number)) {
         notifiedLeads.add(lead.number);
@@ -2951,7 +2960,15 @@ function renderLeadsList(filter) {
     // Map status to column
     if (lead.status === 'new') colNew.appendChild(card);
     else if (lead.status === 'talking' || lead.status === 'engaged' || lead.status === 'human_taken_over') colTalking.appendChild(card);
-    else if (lead.status === 'transferred' || lead.status === 'human_requested' || lead.status === 'awaiting_financial_review') colTransferred.appendChild(card);
+    else if ([
+      'transferred',
+      'human_requested',
+      'awaiting_financial_review',
+      'transferred_to_financial',
+      'transferred_to_support',
+      'handoff_client_confirmation_failed',
+      'handoff_failed',
+    ].includes(lead.status)) colTransferred.appendChild(card);
     else if (lead.status === 'qualified') colQualified.appendChild(card);
     else colCold.appendChild(card);
   });
@@ -3087,7 +3104,7 @@ function openLeadModal(number) {
   const waTarget = getLeadWhatsAppTarget(lead);
   actions.innerHTML = `
     ${lead.status !== 'human_taken_over' ? `<button class="btn btn-outline btn-sm" onclick="takeOverLead('${number}')">Assumir atendimento</button>` : ''}
-    ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','awaiting_operational_data','awaiting_phone_for_handoff','handoff_client_confirmation_failed','handoff_failed','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
+    ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','awaiting_operational_data','awaiting_phone_for_handoff','awaiting_contact_for_handoff','handoff_client_confirmation_failed','handoff_failed','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
     ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm">ðŸ’¬ Abrir no WhatsApp</a>` : `<span class="btn btn-outline btn-sm disabled">WhatsApp nao resolvido</span>`}
     ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">â›” Pausar bot</button>` : ''}
     <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">ðŸ—‘ï¸ Excluir lead</button>
@@ -3223,7 +3240,7 @@ function getLeadRisk(lead) {
     'handoff_failed',
     'human_taken_over',
   ]);
-  const mediumStatuses = new Set(['payment_claimed', 'inspection_pending', 'app_blocked', 'awaiting_operational_data', 'awaiting_phone_for_handoff']);
+  const mediumStatuses = new Set(['payment_claimed', 'inspection_pending', 'app_blocked', 'awaiting_operational_data', 'awaiting_phone_for_handoff', 'awaiting_contact_for_handoff']);
   if (highStatuses.has(lead?.status)) return { level: 'alto', label: 'alto' };
   if (mediumStatuses.has(lead?.status)) return { level: 'medio', label: 'medio' };
   return { level: 'baixo', label: 'baixo' };
@@ -3239,17 +3256,18 @@ function statusLabel(status) {
     blocked: 'Bloqueado',
     no_interest: 'Sem interesse', // FIX [4b]
     human_requested: 'Aguardando humano',
-    awaiting_financial_review: 'Conferencia financeira',
+    awaiting_financial_review: 'Aguardando consultor',
     payment_claimed: 'Pagamento informado',
     receipt_received: 'Comprovante recebido',
     inspection_pending: 'Revistoria pendente',
     inspection_disputed: 'Revistoria contestada',
     app_blocked: 'App bloqueado',
     billing_disputed: 'Cobranca contestada',
-    transferred_to_financial: 'Transferido financeiro',
-    transferred_to_support: 'Transferido suporte',
+    transferred_to_financial: 'Encaminhado ao consultor',
+    transferred_to_support: 'Encaminhado ao consultor',
     awaiting_operational_data: 'Aguardando dados',
     awaiting_phone_for_handoff: 'Aguardando telefone',
+    awaiting_contact_for_handoff: 'Aguardando telefone',
     handoff_client_confirmation_failed: 'Falha na confirmacao',
     handoff_failed: 'Falha no encaminhamento',
     human_taken_over: 'Humano assumiu',
@@ -3366,9 +3384,10 @@ function closeSidebar() {
     new: 'Novo', talking: 'Em conversa', qualified: 'Qualificado',
     transferred: 'Transferido', cold: 'Frio', no_interest: 'Sem interesse',
     blocked: 'Bloqueado', awaiting_phone_for_handoff: 'Aguard. telefone',
+    awaiting_contact_for_handoff: 'Aguard. telefone',
     handoff_client_confirmation_failed: 'Erro handoff',
     awaiting_operational_data: 'Aguard. dados', payment_claimed: 'Pag. reclamado',
-    transferred_to_financial: 'Transf. financeiro', transferred_to_support: 'Transf. suporte',
+    transferred_to_financial: 'No consultor', transferred_to_support: 'No consultor',
     human_taken_over: 'Humano assumiu', human_requested: 'Humano solicitado',
   };
 
@@ -3419,7 +3438,7 @@ function closeSidebar() {
     if (c.active !== false) tags.push('<span class="internal-cons-tag green">Ativo</span>');
     else tags.push('<span class="internal-cons-tag inactive">Inativo</span>');
     if (c.receivesSales) tags.push('<span class="internal-cons-tag">Vendas</span>');
-    if (c.receivesSupport) tags.push('<span class="internal-cons-tag">Suporte</span>');
+    if (c.receivesSupport) tags.push('<span class="internal-cons-tag">Atendimentos</span>');
 
     const card = document.createElement('div');
     card.className = 'internal-consultant-card';

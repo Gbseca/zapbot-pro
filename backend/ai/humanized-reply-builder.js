@@ -97,7 +97,7 @@ function buildSafeSalesFallback({ latestUserMessage = '', allowedQuestion = null
   }
 
   if (/assistencia|reboque|guincho|chaveiro|24h/.test(normalized)) {
-    return 'Sim, existe assistencia 24h com servicos como reboque, conforme as regras do plano. Se for para acionar agora, encaminho para o suporte.';
+    return 'Sim, existe assistencia 24h com servicos como reboque, conforme as regras do plano. Se precisar acionar agora, encaminho para um consultor.';
   }
 
   if (/seguro|seguradora|apolice|sinistro|premio/.test(normalized)) {

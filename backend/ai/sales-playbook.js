@@ -129,12 +129,21 @@ function getModelYearQuestion(hasModel, hasYear) {
   return 'Qual o ano do veiculo?';
 }
 
-export function getNextSalesStep(lead, text) {
+export function getNextSalesStep(lead, text, options = {}) {
   const normalized = normalizeText(text);
   
   // 1. Detect Intent
-  let intent = 'general_question';
-  if (matchAny(normalized, CONSULTANT_PATTERNS)) {
+  const preferredIntent = [
+    'general_question',
+    'no_interest',
+    'sales_consultant_requested',
+    'sales_price_request',
+    'sales_quote',
+  ].includes(options.preferredIntent) ? options.preferredIntent : null;
+  let intent = preferredIntent || 'general_question';
+  if (preferredIntent) {
+    intent = preferredIntent;
+  } else if (matchAny(normalized, CONSULTANT_PATTERNS)) {
     intent = 'sales_consultant_requested';
   } else if (matchAny(normalized, NO_INTEREST_PATTERNS)) {
     intent = 'no_interest';

@@ -1,35 +1,35 @@
 import { isValidBrazilPlate, normalizePlate } from './lead-detector.js';
 
 const HUMAN_REPLY = [
-  'Entendi. Vou encaminhar seu caso para um atendente humano verificar com cuidado.',
+  'Entendi. Vou encaminhar seu caso para um consultor verificar com cuidado.',
   '',
   'Para evitar informacao errada, vou pausar meu atendimento automatico por aqui.',
 ].join('\n');
 
 const PAYMENT_CLAIMED_REPLY = [
-  'Entendi. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro.',
+  'Entendi. Se o pagamento ja foi feito, um consultor precisa conferir a informacao.',
   '',
   'Vou encaminhar para um consultor verificar e orientar o proximo passo.',
 ].join('\n');
 
 const RECEIPT_RECEIVED_REPLY = [
-  'Recebi o comprovante. Vou encaminhar para conferencia do financeiro.',
+  'Entendi que voce informou o envio do comprovante. Vou encaminhar para um consultor conferir.',
   '',
   'Nao vou te pedir novo pagamento nem revistoria sem validacao interna.',
 ].join('\n');
 
-const RECEIPT_AVAILABLE_REPLY = 'Perfeito. Pode me enviar o comprovante por aqui?';
+const RECEIPT_AVAILABLE_REPLY = 'Entendi. Vou encaminhar para um consultor orientar sobre o comprovante.';
 
 const WEEKEND_DUE_REPLY = [
   'Voce tem razao em questionar.',
   '',
-  'Quando o vencimento cai em fim de semana ou feriado, pode haver ajuste para o proximo dia util. Vou encaminhar para conferencia do financeiro antes de qualquer orientacao sobre pendencia ou revistoria.',
+  'Vou encaminhar para um consultor conferir o vencimento antes de qualquer orientacao sobre pendencia ou revistoria.',
 ].join('\n');
 
 const APP_BLOCKED_REPLY = [
   'Entendi. Se voce pagou e o app continua bloqueado, pode ser uma atualizacao pendente no sistema.',
   '',
-  'Vou encaminhar para o setor responsavel conferir a baixa e a liberacao.',
+  'Vou encaminhar para um consultor conferir o caso.',
 ].join('\n');
 
 const INSPECTION_DISPUTED_REPLY = [
@@ -40,20 +40,18 @@ const INSPECTION_DISPUTED_REPLY = [
 
 const INSPECTION_PENDING_REPLY = [
   'Entendi. Para a revistoria, o ideal e um consultor acompanhar seu caso e confirmar o procedimento correto.',
-  '',
-  'Pode me passar a placa do veiculo para eu encaminhar certinho?',
 ].join('\n');
 
 const BOLETO_REQUEST_REPLY = [
-  'Entendi. Como boleto e regularizacao dependem de consulta do financeiro, vou encaminhar para um consultor verificar seu caso.',
+  'Entendi. Vou encaminhar para um consultor verificar seu pedido de boleto.',
   '',
   'Para anexar seu contato certinho no encaminhamento, me confirma seu WhatsApp com DDD?',
 ].join('\n');
 
 const REACTIVATION_REPLY = [
-  'Entendi, vou encaminhar para o setor responsavel verificar sua reativacao.',
+  'Entendi, vou encaminhar para um consultor verificar sua reativacao.',
   '',
-  'Me confirma seu nome completo e WhatsApp com DDD?',
+  'Me confirma seu WhatsApp com DDD?',
 ].join('\n');
 
 const REGULARIZATION_REPLY = [
@@ -63,7 +61,7 @@ const REGULARIZATION_REPLY = [
 ].join('\n');
 
 const SYSTEM_CHECK_REPLY = [
-  'Entendi. Isso depende de consulta interna do cadastro/financeiro.',
+  'Entendi. Isso depende de consulta interna do cadastro.',
   '',
   'Vou encaminhar para um consultor verificar e dar continuidade por aqui.',
 ].join('\n');
@@ -85,6 +83,7 @@ const OPERATIONAL_STOP_STATUSES = new Set([
   'inspection_disputed',
   'transferred_to_financial',
   'transferred_to_support',
+  'handoff_failed',
   'human_taken_over',
 ]);
 
@@ -407,32 +406,26 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
 
   if (!collectionsContext && !hasStandaloneOperationalIntent(normalized)) return null;
 
-  if (mentionsInspection && (hasAttachment || matchAny(normalized, INSPECTION_PROGRESS_HINTS))) {
+  if (mentionsInspection && matchAny(normalized, INSPECTION_PROGRESS_HINTS)) {
     return makeEvent('inspection_pending', {
       status: 'inspection_pending',
       stage: 'inspection_pending',
-      reply: hasAttachment
-        ? 'Recebi. Vou encaminhar para um consultor acompanhar sua revistoria e dar continuidade por aqui.'
-        : INSPECTION_PENDING_REPLY,
-      reason: hasAttachment
-        ? `Cliente enviou midia/anexo em conversa de revistoria (${attachmentType || 'midia'}).`
-        : 'Cliente pediu orientacao ou acompanhamento de revistoria.',
+      reply: INSPECTION_PENDING_REPLY,
+      reason: 'Cliente pediu orientacao ou acompanhamento de revistoria.',
       shouldNotifyHuman: true,
       shouldStopAutomation: true,
       inspectionPending: true,
-      inspectionMediaSent: hasAttachment || matchAny(normalized, [/\bvideo\b/, /\bfoto\b/]),
+      inspectionMediaSent: false,
       inspectionCodeMentioned: matchAny(normalized, [/\bcodigo\b/]),
     });
   }
 
-  const hasReceiptEvidence = hasAttachment || hasClearReceiptData(text);
+  const hasReceiptEvidence = hasClearReceiptData(text);
   if (hasReceiptEvidence) {
     return makeEvent('receipt_received', {
       status: 'receipt_received',
       reply: RECEIPT_RECEIVED_REPLY,
-      reason: hasAttachment
-        ? `Cliente enviou anexo em modo cobranca (${attachmentType || 'midia'}).`
-        : 'Cliente enviou dados claros de comprovante.',
+      reason: 'Cliente informou dados claros de comprovante na mensagem.',
       paymentClaimed: true,
       receiptReceived: true,
     });
@@ -523,7 +516,7 @@ export function detectOperationalEvent({ text = '', hasAttachment = false, attac
       status: 'awaiting_financial_review',
       stage: 'awaiting_financial_review',
       reply: SYSTEM_CHECK_REPLY,
-      reason: 'Cliente pediu verificacao que depende de cadastro, financeiro ou sistema interno.',
+      reason: 'Cliente pediu verificacao que depende de cadastro ou sistema interno.',
       shouldNotifyHuman: true,
       shouldStopAutomation: true,
       lastIntent: 'system_check_request',
