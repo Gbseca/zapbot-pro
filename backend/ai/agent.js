@@ -37,8 +37,11 @@ import {
 import {
   applyDeterministicFactsToLead,
   buildRecentUserText,
-  hasKnownPlate,
 } from './deterministic-facts.js';
+import {
+  classifyDeterministicIntent,
+  normalizeCustomerText,
+} from './deterministic-intent.js';
 import { recordEvent } from '../data/events-repository.js';
 import { resolvePhoneByLid, upsertLidPhoneMapping } from '../data/lid-phone-map-repository.js';
 
@@ -126,7 +129,8 @@ const CLARIFICATION_RESPONSES = [
 const ASK_PHONE_FOR_HANDOFF_REPLY = 'Para anexar seu contato certinho no encaminhamento ao consultor, me confirma seu WhatsApp com DDD?';
 const ASK_PHONE_FOR_HANDOFF_FORMAT_REPLY = 'Para eu encaminhar corretamente para o consultor, preciso do WhatsApp com DDD. Pode me enviar nesse formato? Exemplo: 21999999999.';
 const HANDOFF_RECOVERY_REPLY = 'Recebi seus dados, mas tive uma falha ao confirmar o encaminhamento por aqui. Para anexar seu contato certinho, me confirma seu WhatsApp com DDD?';
-const OPERATIONAL_CONTACT_RECEIVED_REPLY = 'Perfeito, vou encaminhar para um consultor verificar sua reativacao e continuar por aqui.';
+const OPERATIONAL_CONTACT_RECEIVED_REPLY = 'Perfeito, recebi seu contato. Encaminhei seu atendimento para um consultor continuar por aqui.';
+const OPERATIONAL_HANDOFF_FAILED_REPLY = 'Entendi seu pedido, mas nao consegui avisar o consultor agora. Seu atendimento ficou registrado para acompanhamento manual.';
 const OPERATIONAL_PENDING_DATA_STATUS = 'awaiting_operational_data';
 const OPERATIONAL_PENDING_CONTACT_STATUS = 'awaiting_contact_for_handoff';
 
@@ -306,25 +310,13 @@ async function applyLatestFactsToLead(lead, {
 }
 
 function getOperationalEventType(event = {}) {
-  return event.type || event.lastIntent || '';
-}
-
-function shouldRequirePlateBeforeOperationalHandoff(event = {}, lead = {}, text = '') {
-  if (hasKnownPlate(lead, text) || lead.receiptReceived || event.receiptReceived || event.billingDisputed || event.inspectionDisputed) {
-    return false;
-  }
-
-  return [
-    'inspection_pending',
-  ].includes(getOperationalEventType(event));
+  return event.type || event.intent || event.lastIntent || '';
 }
 
 function shouldRequirePhoneBeforeOperationalHandoff(event = {}, lead = {}, config = {}) {
   if (getLeadRealPhone(lead)) return false;
   if (config.allowHandoffWithoutPhone === true || process.env.WA_ALLOW_HANDOFF_WITHOUT_PHONE === 'true') return false;
 
-  const type = getOperationalEventType(event);
-  if (type === 'human_requested' || type === 'cancel_request' || type === 'angry_customer') return false;
   return true;
 }
 
@@ -342,10 +334,11 @@ function rememberPendingOperationalHandoff(lead, event = {}) {
   lead.pendingOperationalHandoff = true;
   lead.pendingOperationalEvent = {
     ...event,
+    type: event.type || event.intent || event.lastIntent || lead.lastIntent,
     reply: event.reply || '',
-    reason: event.reason || '',
+    reason: event.reason || event.notes || '',
   };
-  lead.pendingHandoffReason = event.reason || lead.pendingHandoffReason || null;
+  lead.pendingHandoffReason = event.reason || event.notes || lead.pendingHandoffReason || null;
   lead.conversationMode = event.conversationMode || lead.conversationMode || 'collections';
   return lead;
 }
@@ -361,82 +354,31 @@ function buildOperationalPhoneRequest(lead = {}, event = {}) {
   const type = getOperationalEventType(event);
   const prefix = lead.plate ? `Recebi a placa ${lead.plate}. ` : '';
   if (type === 'receipt_received') {
-    return `${prefix}Recebi o arquivo. Para anexar seu contato certinho no encaminhamento ao consultor, me confirma seu WhatsApp com DDD?`;
+    return `${prefix}Entendi que voce informou o envio do comprovante. Para encaminhar ao consultor, me confirma seu WhatsApp com DDD?`;
   }
   return `${prefix}${ASK_PHONE_FOR_HANDOFF_REPLY}`;
 }
 
 function buildOperationalContactRequest(lead = {}, event = {}, config = {}) {
   const needsPhone = shouldRequirePhoneBeforeOperationalHandoff(event, lead, config);
-  const needsName = shouldRequireNameBeforeOperationalHandoff(event, lead);
-  const type = getOperationalEventType(event);
-  const subject = type === 'reactivation_request' ? 'sua reativacao' : 'seu atendimento';
-
-  if (needsName && needsPhone) {
-    return `Entendi, vou encaminhar para o setor responsavel verificar ${subject}. Me confirma seu nome completo e WhatsApp com DDD?`;
-  }
-
-  if (needsName) {
-    return 'Entendi, vou encaminhar para o setor responsavel. Me fala seu nome completo pra eu encaminhar certinho?';
-  }
-
-  return buildOperationalPhoneRequest(lead, event);
-}
-
-function buildOperationalPlateRequest(event = {}) {
-  const type = getOperationalEventType(event);
-  if (type === 'inspection_pending') {
-    return 'Entendi. Para encaminhar sua revistoria certinho, pode me passar a placa do veiculo?';
-  }
-  if (type === 'payment_claimed') {
-    return 'Entendi. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro. Para localizar mais rapido, pode me passar a placa do veiculo?';
-  }
-  return event.reply || 'Entendi. Para localizar mais rapido, pode me passar a placa do veiculo?';
+  return needsPhone ? buildOperationalPhoneRequest(lead, event) : '';
 }
 
 function buildOperationalReply(event = {}, lead = {}) {
   const type = getOperationalEventType(event);
-  if (type === 'reactivation_request') {
-    return 'Perfeito, vou encaminhar para um consultor verificar sua reativacao e continuar por aqui.';
-  }
-
-  if (type === 'receipt_available') {
-    return 'Perfeito. Vou encaminhar para um consultor orientar o envio do comprovante e continuar seu atendimento.';
-  }
-
-  if (type === 'receipt_received') {
-    return 'Recebi o comprovante. Vou encaminhar para conferencia de um consultor.';
-  }
-
-  if (type === 'boleto_request' || type === 'regularization_request' || type === 'system_check_request') {
-    return lead.plate
-      ? `Recebi a placa ${lead.plate}. Vou encaminhar para um consultor verificar a melhor forma de regularizar seu caso.`
-      : 'Entendi. Vou encaminhar para um consultor verificar a melhor forma de regularizar seu caso.';
-  }
-
-  if (type === 'payment_claimed') {
-    return lead.plate
-      ? `Recebi a placa ${lead.plate}. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro. Vou encaminhar seu caso para continuidade.`
-      : 'Entendi. Se o pagamento ja foi feito, o consultor precisa conferir a baixa pelo financeiro. Vou encaminhar seu caso para continuidade.';
-  }
-
-  if (type === 'inspection_pending') {
-    return lead.plate
-      ? `Recebi a placa ${lead.plate}. Vou encaminhar para um consultor acompanhar sua revistoria e dar continuidade por aqui.`
-      : (event.reply || '');
-  }
-
-  if (!lead.plate) return event.reply || '';
-
-  return event.reply || '';
+  if (type === 'assistance_request') return 'Entendi o pedido de reboque ou assistencia. Encaminhei seu atendimento para um consultor continuar por aqui.';
+  if (type === 'event_report') return 'Entendi o que aconteceu com o veiculo. Encaminhei seu atendimento para um consultor continuar por aqui.';
+  return event.clientReply || event.reply || 'Entendi. Encaminhei seu atendimento para um consultor continuar por aqui.';
 }
 
 function buildOperationalContactReceivedReply(event = {}) {
   const type = getOperationalEventType(event);
+  if (type === 'assistance_request') return 'Perfeito, recebi seu contato. Encaminhei o pedido de reboque ou assistencia para um consultor continuar por aqui.';
+  if (type === 'event_report') return 'Perfeito, recebi seu contato. Encaminhei o atendimento sobre o veiculo para um consultor continuar por aqui.';
   if (type === 'reactivation_request') return OPERATIONAL_CONTACT_RECEIVED_REPLY;
-  if (type === 'boleto_request') return 'Perfeito, vou encaminhar para um consultor verificar seu boleto e continuar por aqui.';
-  if (type === 'regularization_request') return 'Perfeito, vou encaminhar para um consultor verificar sua regularizacao e continuar por aqui.';
-  return 'Perfeito, vou encaminhar para um consultor verificar e continuar por aqui.';
+  if (type === 'boleto_request') return 'Perfeito, recebi seu contato. Encaminhei o pedido de boleto para um consultor continuar por aqui.';
+  if (type === 'regularization_request') return 'Perfeito, recebi seu contato. Encaminhei seu pedido de regularizacao para um consultor continuar por aqui.';
+  return OPERATIONAL_CONTACT_RECEIVED_REPLY;
 }
 
 function refreshOperationalCaseSummary(lead, event = {}, content = {}) {
@@ -448,7 +390,7 @@ function refreshOperationalCaseSummary(lead, event = {}, content = {}) {
     .map((entry) => entry.content)
     .join(' | ');
   const facts = [
-    'Atendimento operacional/regularizacao.',
+    `Atendimento operacional. Intencao: ${getOperationalEventType(event) || 'nao identificada'}.`,
     event.reason || lead.operationalReason || '',
     lead.plate ? `Placa informada: ${lead.plate}.` : '',
     getLeadRealPhone(lead) ? `Telefone real resolvido: ${getLeadRealPhone(lead)}.` : 'Telefone real ainda nao resolvido.',
@@ -485,8 +427,8 @@ function buildSalesVehicleConfirmation(lead = {}) {
 
 function buildSalesHandoffClientMessage(lead = {}, { phoneJustProvided = false } = {}) {
   const intro = phoneJustProvided
-    ? 'Perfeito, recebi seus dados. Vou encaminhar agora para um consultor preparar sua cotacao real e continuar seu atendimento por aqui.'
-    : 'Recebi os dados principais. Vou encaminhar agora para um consultor preparar sua cotacao real e continuar seu atendimento por aqui.';
+    ? 'Perfeito, recebi seus dados. Encaminhei para um consultor preparar sua cotacao real e continuar seu atendimento por aqui.'
+    : 'Recebi os dados principais. Encaminhei para um consultor preparar sua cotacao real e continuar seu atendimento por aqui.';
   const facts = buildSalesVehicleConfirmation(lead);
   return facts ? `${intro}\n\n${facts}` : intro;
 }
@@ -746,7 +688,7 @@ function buildIncompleteReplyFallback(lead = {}, latestUserText = '', mode = 'sa
   }
 
   if (mode === 'collections') {
-    return 'Vou reformular para nao te passar informacao incompleta. Esse caso precisa de conferencia do setor responsavel, entao vou encaminhar para um consultor dar continuidade.';
+    return 'Vou reformular para nao te passar informacao incompleta. Esse caso precisa de conferencia, entao vou encaminhar para um consultor dar continuidade.';
   }
 
   if (lead?.model || lead?.year || lead?.plate || lead?.plateUnavailable) {
@@ -840,18 +782,21 @@ function createNewLead(leadId, displayNum, pushName, fallbackPhone = null) {
 }
 
 async function persistSimpleReply(wa, leadId, lead, target, reply, extraUpdates = () => ({}), sendOptions = {}) {
+  let delivery;
   try {
-    const delivery = await sendSingleReplyTracked(wa, target, reply, sendOptions);
+    delivery = await sendSingleReplyTracked(wa, target, reply, sendOptions);
     appendAssistantMessage(lead, reply, delivery);
     Object.assign(lead, extraUpdates(delivery));
   } catch (err) {
-    appendAssistantMessage(lead, reply, {
+    delivery = {
       status: 'failed',
       targetJid: err.targetResolved || null,
       error: err.message,
-    });
+    };
+    appendAssistantMessage(lead, reply, delivery);
   }
   saveLead(leadId, lead);
+  return delivery;
 }
 
 function touchLeadForIncoming(lead, {
@@ -876,6 +821,51 @@ function touchLeadForIncoming(lead, {
   return lead;
 }
 
+function applyPendingIntentCorrection(lead, text = '') {
+  if (!lead?.pendingOperationalHandoff && !lead?.pendingOperationalEvent) return null;
+
+  const classification = classifyDeterministicIntent(text);
+  const normalized = normalizeCustomerText(text);
+  const commercialCorrection = classification.mode === 'sales'
+    && classification.explicit
+    && (
+      ['sales_quote', 'sales_price_request', 'sales_consultant_requested'].includes(classification.intent)
+      || (/\b(?:cotacao|orcamento|simulacao|proposta)\b/.test(normalized) && classification.intent === 'no_interest')
+    );
+
+  if (commercialCorrection) {
+    clearPendingOperationalHandoff(lead);
+    lead.conversationMode = 'sales';
+    lead.status = 'talking';
+    lead.stage = 'engaged';
+    lead.operationalStatus = null;
+    lead.shouldHandoff = false;
+    lead.lastIntent = classification.intent;
+    lead.lastDetectedIntent = classification.intent;
+    delete lead.clientReply;
+    return 'sales';
+  }
+
+  if (classification.mode === 'operational' && classification.explicit) {
+    lead.pendingOperationalHandoff = true;
+    lead.pendingOperationalEvent = {
+      ...(lead.pendingOperationalEvent || {}),
+      type: classification.intent,
+      intent: classification.intent,
+      lastIntent: classification.intent,
+      reason: classification.reason,
+      reply: '',
+      shouldNotifyHuman: true,
+      shouldStopAutomation: true,
+    };
+    lead.lastIntent = classification.intent;
+    lead.lastDetectedIntent = classification.intent;
+    return 'operational';
+  }
+
+  return null;
+}
+
 async function handleAwaitingPhonePriority(wa, {
   leadId,
   lead,
@@ -889,6 +879,12 @@ async function handleAwaitingPhonePriority(wa, {
   incomingContent = {},
 } = {}) {
   const text = incomingContent.historyText || incomingContent.text || '';
+  const correction = applyPendingIntentCorrection(lead, text);
+  if (correction === 'sales') {
+    saveLead(leadId, lead);
+    return false;
+  }
+
   touchLeadForIncoming(lead, {
     leadId,
     fullJid,
@@ -899,12 +895,6 @@ async function handleAwaitingPhonePriority(wa, {
     pushName,
     text,
   });
-
-  if (incomingContent.hasAttachment) {
-    lead.receiptReceived = true;
-    lead.receiptAvailable = false;
-    lead.receiptAttachmentType = incomingContent.attachmentType || 'attachment';
-  }
 
   await applyLatestFactsToLead(lead, {
     currentText: text,
@@ -1137,9 +1127,10 @@ async function handlePendingCommercialHandoff(wa, leadId, lead, route, config, o
 
 async function handleOperationalEventAction(wa, leadId, lead, route, config, event, content = {}) {
   if (!event) return false;
-  const text = content.historyText || content.text || '';
+  const shouldNotifyHuman = event.shouldNotifyHuman
+    ?? !!(event.shouldHandoff || event.shouldAskPhone || event.conversationMode === 'operational');
 
-  if (!event.shouldNotifyHuman) {
+  if (!shouldNotifyHuman) {
     await persistSimpleReply(
       wa,
       leadId,
@@ -1153,23 +1144,6 @@ async function handleOperationalEventAction(wa, leadId, lead, route, config, eve
   }
 
   rememberPendingOperationalHandoff(lead, event);
-
-  if (shouldRequirePlateBeforeOperationalHandoff(event, lead, text)) {
-    lead.status = OPERATIONAL_PENDING_DATA_STATUS;
-    lead.stage = OPERATIONAL_PENDING_DATA_STATUS;
-    lead.operationalStatus = 'awaiting_plate_for_handoff';
-    saveLead(leadId, lead);
-    await persistSimpleReply(
-      wa,
-      leadId,
-      lead,
-      route.target,
-      buildOperationalPlateRequest(event),
-      () => ({}),
-      route.options,
-    );
-    return true;
-  }
 
   if (shouldRequireContactBeforeOperationalHandoff(event, lead, config)) {
     lead.status = OPERATIONAL_PENDING_CONTACT_STATUS;
@@ -1193,9 +1167,14 @@ async function handleOperationalEventAction(wa, leadId, lead, route, config, eve
   lead.stage = event.stage || lead.stage || lead.status;
   lead.operationalStatus = 'handoff_ready';
   refreshOperationalCaseSummary(lead, event, content);
+  saveLead(leadId, lead);
 
-  const reply = content.clientConfirmationReply || buildOperationalReply(event, lead) || event.reply;
-  await persistSimpleReply(
+  const handoffResult = await executeFinancialHandoff(wa, lead, config, event);
+  clearPendingOperationalHandoff(lead);
+  const reply = handoffResult.ok
+    ? content.clientConfirmationReply || buildOperationalReply(event, lead) || event.reply
+    : OPERATIONAL_HANDOFF_FAILED_REPLY;
+  const delivery = await persistSimpleReply(
     wa,
     leadId,
     lead,
@@ -1204,11 +1183,11 @@ async function handleOperationalEventAction(wa, leadId, lead, route, config, eve
     () => ({}),
     route.options,
   );
-
-  await executeFinancialHandoff(wa, lead, config, event);
-  const storedLead = getLead(leadId) || lead;
-  clearPendingOperationalHandoff(storedLead);
-  saveLead(leadId, storedLead);
+  lead.handoffClientConfirmed = handoffResult.ok && delivery?.status !== 'failed';
+  if (!lead.handoffClientConfirmed && handoffResult.ok) {
+    lead.handoffClientError = delivery?.error || 'Falha ao confirmar o encaminhamento para o cliente.';
+  }
+  saveLead(leadId, lead);
   return true;
 }
 
@@ -1251,6 +1230,11 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
+  if (!incomingContent.text) {
+    console.log(`[Agent] Ignoring message without text from ${displayNum} (jid: ${fullJid})`);
+    return;
+  }
+
   console.log(`[Agent] Incoming from ${displayNum} (jid: ${fullJid}${fullJidAlt ? ` alt: ${fullJidAlt}` : ''}): "${incomingContent.historyText.slice(0, 60)}"`);
   console.log(`[Agent] Reply route for ${displayNum}: ${replyRoute.target} (${replyRoute.source}) candidates=${inboundRoute?.phoneCandidates?.join(',') || '-'} mapped=${inboundRoute?.mappedPhone || '-'}`);
 
@@ -1286,8 +1270,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const provider = config.effectiveProvider || 'groq';
   const hasKey = !!config.hasEffectiveKey;
   if (!hasKey) {
-    console.warn(`[Agent] No API key for "${provider}"`);
-    return;
+    console.warn(`[Agent] No API key for "${provider}"; deterministic routing remains active.`);
   }
 
   void recordEvent({
@@ -1302,11 +1285,10 @@ export async function handleIncomingMessage(wa, rawMsg) {
   });
 
   const existingLead = leadFromStore;
-  const collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
-  if (!incomingContent.historyText) return;
+  let collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
 
   if (existingLead?.status === 'awaiting_phone_for_handoff' || existingLead?.status === OPERATIONAL_PENDING_CONTACT_STATUS) {
-    await handleAwaitingPhonePriority(wa, {
+    const handled = await handleAwaitingPhonePriority(wa, {
       leadId,
       lead: existingLead,
       route: replyRoute,
@@ -1318,7 +1300,8 @@ export async function handleIncomingMessage(wa, rawMsg) {
       pushName,
       incomingContent,
     });
-    return;
+    if (handled) return;
+    collectionsContext = resolveConversationModeContext(config, existingLead, conversationPhone, jidId);
   }
 
   if (existingLead && (isOperationalStopStatus(existingLead.status) || shouldPauseSalesLead(existingLead))) {
@@ -1368,7 +1351,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     skipAI: true,
   });
 
-  if (decision.shouldStopAutomation || decision.shouldHandoff) {
+  if (decision.shouldStopAutomation || decision.shouldHandoff || decision.shouldAskPhone) {
     console.log(`[Agent] Fast-path trigger for ${leadId}: intent=${decision.intent}, handoff=${decision.shouldHandoff}`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.number = leadId;
@@ -1380,10 +1363,45 @@ export async function handleIncomingMessage(wa, rawMsg) {
     lead.history = lead.history || [];
     lead.history.push({ role: 'user', content: incomingContent.historyText, ts: Date.now() });
     lead.lastInteraction = new Date().toISOString();
-    
+    applyDeterministicFactsToLead(lead, buildRecentUserText(lead, incomingContent.historyText, 8));
     applyConversationDecisionToLead(lead, decision, incomingContent);
+    saveLead(leadId, lead);
 
-    // Get response and send it
+    if (decision.conversationMode === 'operational') {
+      await handleOperationalEventAction(
+        wa,
+        leadId,
+        lead,
+        replyRoute,
+        config,
+        decision,
+        incomingContent,
+      );
+      return;
+    }
+
+    if (decision.shouldHandoff) {
+      try {
+        await executeHandoff(wa, lead, config, {
+          reason: decision.notes,
+          clientMessage: buildSalesHandoffClientMessage(lead),
+          clientSendOptions: replyRoute.options,
+        });
+      } catch (error) {
+        markSalesHandoffFailure(lead, error);
+        await persistSimpleReply(
+          wa,
+          leadId,
+          lead,
+          replyRoute.target,
+          getSalesHandoffFailedReply(),
+          () => ({ handoffError: error.message }),
+          replyRoute.options,
+        );
+      }
+      return;
+    }
+
     const relevantKnowledge = getRelevantKnowledge(decision.intent, incomingContent.historyText, decision.conversationMode);
     const cleanResponse = await buildHumanizedReply(config, {
       mode: decision.conversationMode,
@@ -1410,16 +1428,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
       };
     }
     appendAssistantMessage(lead, cleanResponse, delivery);
-
-    if (decision.shouldHandoff) {
-      if (decision.conversationMode === 'sales') {
-        await executeHandoff(wa, lead, config);
-      } else {
-        await executeFinancialHandoff(wa, lead, config, decision);
-      }
-    } else {
-      saveLead(leadId, lead);
-    }
+    saveLead(leadId, lead);
     return;
   }
 
@@ -1653,6 +1662,49 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     }
   }
 
+  if (
+    decision.conversationMode === 'operational'
+    && (decision.shouldHandoff || decision.shouldAskPhone || decision.shouldStopAutomation)
+  ) {
+    saveLead(leadId, lead);
+    await handleOperationalEventAction(
+      wa,
+      leadId,
+      lead,
+      route,
+      config,
+      decision,
+      { text: combinedText, historyText: combinedText },
+    );
+    return;
+  }
+
+  if (decision.conversationMode === 'sales' && decision.shouldHandoff) {
+    lead.status = 'qualified';
+    lead.stage = 'qualified';
+    lead.qualifiedAt = new Date().toISOString();
+    saveLead(leadId, lead);
+    try {
+      await executeHandoff(wa, lead, config, {
+        reason: decision.notes,
+        clientMessage: buildSalesHandoffClientMessage(lead),
+        clientSendOptions: route.options,
+      });
+    } catch (error) {
+      markSalesHandoffFailure(lead, error);
+      await persistSimpleReply(
+        wa,
+        leadId,
+        lead,
+        route.target,
+        getSalesHandoffFailedReply(),
+        () => ({ handoffError: error.message }),
+        route.options,
+      );
+    }
+    return;
+  }
+
   // 2. Fetch relevant knowledge
   const relevantKnowledge = getRelevantKnowledge(decision.intent, combinedText, decision.conversationMode);
 
@@ -1694,20 +1746,6 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   if (delivery.status === 'accepted_unconfirmed' || delivery.status === 'delivery_timeout') {
     saveLead(leadId, lead);
     console.warn(`[Agent] Delivery unconfirmed for ${leadId}: ${delivery.error || delivery.status}`);
-    return;
-  }
-
-  // 5. Execute Handoff if needed
-  if (decision.shouldHandoff) {
-    if (decision.conversationMode === 'sales') {
-      lead.status = 'qualified';
-      lead.stage = 'qualified';
-      lead.qualifiedAt = new Date().toISOString();
-      saveLead(leadId, lead);
-      await executeHandoff(wa, lead, config);
-    } else {
-      await executeFinancialHandoff(wa, lead, config, decision);
-    }
     return;
   }
 

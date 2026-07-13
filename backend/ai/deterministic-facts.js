@@ -292,14 +292,59 @@ export function extractValidPlateFromText(text = '') {
 
 export function extractPhoneFromText(text = '') {
   const raw = String(text || '');
-  const matches = raw.match(/(?:\+?55[\s.-]?)?(?:\(?[1-9]{2}\)?[\s.-]?)9?\d{4}[\s.-]?\d{4}\b/g) || [];
+  const lines = raw.split(/[\r\n]+/).map((line) => line.trim()).filter(Boolean).reverse();
 
-  for (const match of matches) {
-    const phone = normalizeRealWhatsAppPhone(match);
-    if (phone) return phone;
+  for (const line of lines) {
+    const normalizedLine = normalizeText(line);
+    const hasDocumentLabel = /\b(?:cpf|cnpj|documento)\b/.test(normalizedLine);
+    const lineDigits = line.replace(/\D/g, '');
+    if (hasDocumentLabel || isCpfDigits(lineDigits) || isCnpjDigits(lineDigits)) continue;
+    const matches = Array.from(line.matchAll(/(?:\+?55[ .-]?)?(?:\(?[1-9]{2}\)?[ .-]?)9?\d{4}[ .-]?\d{4}\b/g)).reverse();
+
+    for (const match of matches) {
+      const digits = String(match[0] || '').replace(/\D/g, '');
+      if (hasDocumentLabel || isCpfDigits(digits) || isCnpjDigits(digits)) continue;
+
+      const phone = normalizeRealWhatsAppPhone(match[0]);
+      if (!phone) continue;
+      const local = phone.slice(2);
+      if (/^(\d)\1+$/.test(local)) continue;
+      return phone;
+    }
   }
 
-  return normalizeRealWhatsAppPhone(raw);
+  return null;
+}
+
+function isCpfDigits(value = '') {
+  const rawDigits = String(value || '').replace(/\D/g, '');
+  const digits = rawDigits.length === 13 && rawDigits.startsWith('55') ? rawDigits.slice(2) : rawDigits;
+  if (!/^\d{11}$/.test(digits) || /^(\d)\1{10}$/.test(digits)) return false;
+
+  const calculate = (length) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) {
+      sum += Number(digits[index]) * (length + 1 - index);
+    }
+    const remainder = (sum * 10) % 11;
+    return remainder === 10 ? 0 : remainder;
+  };
+
+  return calculate(9) === Number(digits[9]) && calculate(10) === Number(digits[10]);
+}
+
+function isCnpjDigits(value = '') {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!/^\d{14}$/.test(digits) || /^(\d)\1{13}$/.test(digits)) return false;
+  const calculate = (baseLength) => {
+    const weights = baseLength === 12
+      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const sum = weights.reduce((total, weight, index) => total + Number(digits[index]) * weight, 0);
+    const remainder = sum % 11;
+    return remainder < 2 ? 0 : 11 - remainder;
+  };
+  return calculate(12) === Number(digits[12]) && calculate(13) === Number(digits[13]);
 }
 
 export function extractYearFromText(text = '') {
@@ -397,7 +442,8 @@ export function buildRecentUserText(lead = {}, currentText = '', limit = 8) {
     .slice(-limit)
     .map((entry) => entry.content);
 
-  if (currentText) recent.push(currentText);
+  const current = String(currentText || '').trim();
+  if (current && String(recent[recent.length - 1] || '').trim() !== current) recent.push(current);
   return recent.join('\n');
 }
 

@@ -1,5 +1,8 @@
-import { updateLead } from '../data/leads-manager.js';
-import { listHandoffConsultants } from '../data/consultants-repository.js';
+import { saveLead } from '../data/leads-manager.js';
+import {
+  listConsultants,
+  listHandoffConsultants,
+} from '../data/consultants-repository.js';
 import { recordEvent } from '../data/events-repository.js';
 import {
   buildClientSendOptions,
@@ -10,34 +13,36 @@ import {
   normalizeRealWhatsAppPhone,
 } from '../phone-utils.js';
 
-let _consultorIndex = 0;
+let consultantIndex = 0;
 
-/**
- * Selects the next consultor based on distribution config.
- */
-async function selectConsultor(config, type = 'sales') {
-  const consultors = await listHandoffConsultants({ type, config });
-  if (consultors.length === 0) return null;
+async function listOrderedConsultants(config, type = 'sales') {
+  const consultants = type === 'operational'
+    ? await listConsultants({ config, includeInactive: false })
+    : await listHandoffConsultants({ type, config });
+  if (consultants.length <= 1) return consultants;
 
-  if (config.consultorDistribution === 'first') return consultors[0];
-  if (config.consultorDistribution === 'second') return consultors[1] || consultors[0];
+  if (config.consultorDistribution === 'first') return consultants;
+  if (config.consultorDistribution === 'second') {
+    return [consultants[1] || consultants[0], ...consultants.filter((_, index) => index !== 1)];
+  }
 
-  // Alternated (default)
-  const consultor = consultors[_consultorIndex % consultors.length];
-  _consultorIndex++;
-  return consultor;
+  const start = consultantIndex % consultants.length;
+  consultantIndex += 1;
+  return [...consultants.slice(start), ...consultants.slice(0, start)];
 }
 
-function formatNumber(raw) {
-  return formatRealWhatsAppPhone(raw);
-}
-
-function getEventLeadKey(lead = {}) {
+function getLeadKey(lead = {}) {
   return lead.number || getLeadRealPhone(lead) || getLeadInternalWhatsAppId(lead) || null;
 }
 
-function resolveConsultorSendTarget(consultor = {}, routeLabel) {
-  const phone = normalizeRealWhatsAppPhone(consultor.phone || consultor.number);
+function persistLead(lead = {}) {
+  const key = getLeadKey(lead);
+  if (key) saveLead(key, lead);
+  return key;
+}
+
+function resolveConsultantTarget(consultant = {}, routeLabel = 'agent_consultant_handoff') {
+  const phone = normalizeRealWhatsAppPhone(consultant.phone || consultant.number);
   if (phone) {
     return {
       target: phone,
@@ -45,498 +50,332 @@ function resolveConsultorSendTarget(consultor = {}, routeLabel) {
         forcePhoneJid: true,
         routeLabel,
         context: 'ai',
-        noInternalRetry: true,
       },
     };
   }
 
-  if (consultor.lid_jid) {
+  if (consultant.lid_jid) {
     return {
-      target: consultor.lid_jid,
+      target: consultant.lid_jid,
       options: {
         allowRawLid: true,
         forcePhoneJid: false,
         routeLabel,
         context: 'ai',
-        noInternalRetry: true,
       },
     };
   }
 
-  throw new Error(`Consultor ${consultor.name || 'sem nome'} nao tem telefone nem LID para envio.`);
+  throw new Error(`Consultor ${consultant.name || 'sem nome'} nao tem contato valido.`);
 }
 
-function buildSummary(lead) {
-  if (!lead.history || lead.history.length === 0) return 'Sem histórico disponível.';
-  return lead.history
-    .filter(h => h.role === 'user')
-    .slice(0, 4)
-    .map(h => h.content)
+function sanitizeCustomerText(value = '') {
+  return String(value || '')
+    .replace(/\bseguradoras?\b/gi, 'associacao')
+    .replace(/\bseguros?\b/gi, 'protecao veicular')
+    .replace(/\bap[oó]lices?\b/gi, 'termo de adesao')
+    .replace(/\bsinistros?\b/gi, 'evento')
+    .replace(/\bpr[eê]mios?\b/gi, 'mensalidade')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getLatestUserMessage(lead = {}) {
+  const historyMessage = [...(lead.history || [])]
+    .reverse()
+    .find((entry) => entry?.role === 'user' && entry.content)?.content;
+  return sanitizeCustomerText(
+    lead.leadSummary?.lastUserMessage
+    || historyMessage
+    || lead.operationalReason
+    || '',
+  ).slice(0, 240);
+}
+
+function buildRecentUserSummary(lead = {}) {
+  return (lead.history || [])
+    .filter((entry) => entry?.role === 'user' && entry.content)
+    .slice(-3)
+    .map((entry) => sanitizeCustomerText(entry.content))
+    .filter(Boolean)
     .join(' | ')
-    .substring(0, 350);
+    .slice(0, 360);
 }
 
-function yesNo(value) {
-  return value ? 'Sim' : 'Nao';
-}
-
-function buildFinancialSummary(lead) {
-  const structured = typeof lead.leadSummary === 'object' && lead.leadSummary ? lead.leadSummary : {};
-  return lead.caseSummary
-    || structured.caseSummary
-    || structured.lastUserMessage
-    || buildSummary(lead)
-    || 'Sem resumo disponivel.';
-}
-
-function buildContactCardFields(lead) {
-  const realPhone = getLeadRealPhone(lead);
+function buildContact(lead = {}) {
+  const phone = getLeadRealPhone(lead);
   const internalId = getLeadInternalWhatsAppId(lead);
-  const waLinkNumber = realPhone ? buildWaLinkNumber(realPhone) : null;
-  const unresolvedWarning = realPhone
-    ? ''
-    : '\n*ATENCAO:* o cliente entrou por LID e o numero real ainda nao foi resolvido. Nao use wa.me com o ID interno; assuma pelo painel/conversa interna ou aguarde o cliente informar o telefone.\n';
-
+  const waLink = phone ? buildWaLinkNumber(phone) : null;
   return {
-    realPhone,
+    phone,
+    phoneLabel: phone ? formatRealWhatsAppPhone(phone) : 'Nao resolvido',
     internalId,
-    waLinkNumber,
-    phoneResolved: !!realPhone,
-    phoneLabel: realPhone ? formatNumber(realPhone) : 'Nao resolvido',
-    internalLabel: internalId || 'Nao informado',
-    waLinkLabel: waLinkNumber ? `https://wa.me/${waLinkNumber}` : 'Indisponivel',
-    unresolvedWarning,
+    waLink,
   };
 }
 
-function buildShortContactLines(lead = {}, contact = {}) {
-  const lines = [
-    `*Cliente:* ${lead.name || 'Nao informado'}`,
-    `*WhatsApp:* ${contact.phoneLabel}`,
-  ];
-
-  if (!contact.phoneResolved) {
-    lines.push(`*ID interno:* ${contact.internalLabel}`);
-  }
-
-  return lines;
+function getEventType(event = {}, lead = {}) {
+  return event.type || event.intent || event.lastIntent || lead.lastDetectedIntent || lead.lastIntent || 'human_requested';
 }
 
-function buildWaLinkLine(contact = {}) {
-  return contact.waLinkNumber
-    ? `*Abrir conversa:* ${contact.waLinkLabel}`
-    : '*Abrir conversa:* indisponivel';
-}
-
-function buildOperationalWant(event = {}, lead = {}) {
-  const eventType = event.type || lead.lastDetectedIntent || lead.lastIntent || '';
-  const map = {
-    reactivation_request: 'reativar protecao',
-    boleto_request: 'boleto / segunda via',
-    regularization_request: 'regularizar pendencia',
-    payment_claimed: 'informou pagamento',
-    receipt_available: 'tem comprovante para enviar',
-    receipt_received: 'enviou comprovante',
-    system_check_request: 'verificar cadastro/pendencia',
-    app_blocked: 'app bloqueado',
-    billing_disputed: 'contestou cobranca',
-    inspection_pending: 'revistoria',
-    inspection_disputed: 'contestou revistoria',
-    human_requested: 'falar com atendente',
+function buildOperationalIntentLabel(event = {}, lead = {}) {
+  const labels = {
+    angry_customer: 'cliente irritado pediu atendimento',
+    app_blocked: 'problema de acesso ao aplicativo',
+    assistance_request: 'pedido de reboque ou assistencia',
+    billing_disputed: 'contestacao de cobranca',
+    boleto_request: 'boleto ou forma de pagamento',
     cancel_request: 'cancelamento',
+    event_report: 'evento ocorrido com o veiculo',
+    human_requested: 'atendimento humano',
+    inspection_pending: 'vistoria ou revistoria',
+    payment_claimed: 'pagamento informado',
+    reactivation_request: 'reativacao',
+    receipt_available: 'comprovante mencionado',
+    receipt_received: 'comprovante informado como enviado',
+    regularization_request: 'regularizacao de pendencia',
+    system_check_request: 'consulta de cadastro',
   };
-  return map[eventType] || lead.operationalReason || 'atendimento operacional';
+  return labels[getEventType(event, lead)] || 'atendimento solicitado';
 }
 
-function buildOperationalExtraLines(lead = {}, event = {}) {
+function buildOperationalExtraLines(lead = {}) {
   const lines = [];
   if (lead.plate) lines.push(`*Placa:* ${lead.plate}`);
-  if (lead.paymentDate) lines.push(`*Pagamento:* ${lead.paymentDate}${lead.paymentAmount ? ` | ${lead.paymentAmount}` : ''}`);
-  if (lead.receiptReceived) lines.push('*Comprovante:* enviado');
-  if (lead.receiptAvailable && !lead.receiptReceived) lines.push('*Comprovante:* cliente disse que tem');
-  if (lead.appBlocked) lines.push('*App:* bloqueado');
-  if (lead.inspectionDisputed) lines.push('*Revistoria:* questionada');
-  if (lead.inspectionPending && !lead.inspectionDisputed) lines.push('*Revistoria:* pendente');
-  if (event.reason && !['reactivation_request', 'boleto_request', 'regularization_request'].includes(event.type)) {
-    lines.push(`*Motivo:* ${event.reason}`);
-  }
+  if (lead.paymentDate) lines.push(`*Pagamento informado:* ${lead.paymentDate}${lead.paymentAmount ? ` | ${lead.paymentAmount}` : ''}`);
+  if (lead.receiptReceived) lines.push('*Comprovante:* cliente informou que enviou');
+  if (lead.appBlocked) lines.push('*Aplicativo:* problema de acesso');
+  if (lead.inspectionPending || lead.inspectionDisputed) lines.push('*Revistoria:* precisa de acompanhamento');
   return lines;
 }
 
 function resolveOperationalHandoff(event = {}, lead = {}) {
-  const eventType = event.type || lead.lastDetectedIntent || lead.lastIntent || '';
-  if (eventType === 'reactivation_request') {
-    return {
-      title: 'ATENDIMENTO DE REATIVACAO',
-      status: 'transferred_to_financial',
-      action: 'Verificar reativacao/pendencia e retornar ao cliente.',
-    };
-  }
-
-  if (eventType === 'payment_claimed') {
-    return {
-      title: 'ATENDIMENTO FINANCEIRO / PAGAMENTO INFORMADO',
-      status: 'transferred_to_financial',
-      action: 'Conferir baixa do pagamento, localizar boleto e orientar o cliente.',
-    };
-  }
-
-  if (eventType === 'receipt_received') {
-    return {
-      title: 'ATENDIMENTO FINANCEIRO / COMPROVANTE RECEBIDO',
-      status: 'transferred_to_financial',
-      action: 'Validar comprovante e conferir baixa do pagamento antes de nova orientacao.',
-    };
-  }
-
-  if (eventType === 'boleto_request') {
-    return {
-      title: 'ATENDIMENTO FINANCEIRO / BOLETO',
-      status: 'transferred_to_financial',
-      action: 'Verificar cadastro/pendencia e enviar a orientacao correta sobre boleto.',
-    };
-  }
-
-  if (eventType === 'regularization_request') {
-    return {
-      title: 'ATENDIMENTO FINANCEIRO / REGULARIZACAO',
-      status: 'transferred_to_financial',
-      action: 'Verificar pendencia e orientar regularizacao conforme o caso real do cliente.',
-    };
-  }
-
-  if (eventType === 'system_check_request') {
-    return {
-      title: 'ATENDIMENTO OPERACIONAL / CONSULTA INTERNA',
-      status: 'transferred_to_financial',
-      action: 'Consultar cadastro/pendencia no sistema e orientar o cliente sem promessas automaticas.',
-    };
-  }
-
-  if (eventType === 'app_blocked') {
-    return {
-      title: 'ATENDIMENTO SUPORTE / APP BLOQUEADO',
-      status: 'transferred_to_support',
-      action: 'Verificar baixa/liberacao do app e orientar o cliente.',
-    };
-  }
-
-  if (eventType === 'billing_disputed') {
-    return {
-      title: 'ATENDIMENTO FINANCEIRO / COBRANCA CONTESTADA',
-      status: 'transferred_to_financial',
-      action: 'Conferir vencimento, pendencia e regra aplicada antes de responder o cliente.',
-    };
-  }
-
-  if (eventType === 'inspection_disputed' || eventType === 'inspection_pending') {
-    return {
-      title: eventType === 'inspection_disputed' ? 'ATENDIMENTO DE REVISTORIA / CONTESTACAO' : 'ATENDIMENTO DE REVISTORIA',
-      status: 'transferred_to_support',
-      action: 'Acompanhar revistoria do cliente e confirmar proximos passos conforme o caso real.',
-    };
-  }
-
-  if (eventType === 'human_requested' || lead.status === 'human_requested') {
-    return {
-      title: 'ATENDIMENTO HUMANO SOLICITADO',
-      status: 'human_requested',
-      action: 'Assumir a conversa e pausar o atendimento automatico.',
-    };
-  }
-
-  return {
-    title: 'ATENDIMENTO FINANCEIRO / REGULARIZACAO',
-    status: 'transferred_to_financial',
-    action: 'Conferir baixa do pagamento e pendencias antes de orientar o cliente.',
+  const type = getEventType(event, lead);
+  const map = {
+    angry_customer: ['ATENDIMENTO HUMANO PRIORITARIO', 'human_requested', 'Assumir a conversa e acolher o cliente.'],
+    app_blocked: ['ATENDIMENTO / APLICATIVO', 'transferred_to_support', 'Verificar o acesso ao aplicativo e orientar o cliente.'],
+    assistance_request: ['ATENDIMENTO / REBOQUE OU ASSISTENCIA', 'transferred_to_support', 'Assumir imediatamente e confirmar com o cliente o procedimento aplicavel.'],
+    billing_disputed: ['ATENDIMENTO / COBRANCA CONTESTADA', 'transferred_to_financial', 'Conferir a cobranca antes de orientar o cliente.'],
+    boleto_request: ['ATENDIMENTO / BOLETO', 'transferred_to_financial', 'Verificar o cadastro e orientar a forma correta de pagamento.'],
+    cancel_request: ['ATENDIMENTO / CANCELAMENTO', 'human_requested', 'Assumir a conversa e tratar o pedido de cancelamento.'],
+    event_report: ['ATENDIMENTO / EVENTO COM VEICULO', 'transferred_to_support', 'Assumir imediatamente e orientar os proximos passos do evento.'],
+    human_requested: ['ATENDIMENTO HUMANO SOLICITADO', 'human_requested', 'Assumir a conversa e manter a automacao pausada.'],
+    inspection_pending: ['ATENDIMENTO / REVISTORIA', 'transferred_to_support', 'Acompanhar a revistoria e confirmar os proximos passos.'],
+    payment_claimed: ['ATENDIMENTO / PAGAMENTO INFORMADO', 'transferred_to_financial', 'Conferir o pagamento informado antes de responder.'],
+    reactivation_request: ['ATENDIMENTO / REATIVACAO', 'transferred_to_financial', 'Verificar a reativacao e retornar ao cliente.'],
+    receipt_available: ['ATENDIMENTO / COMPROVANTE', 'transferred_to_financial', 'Orientar ou conferir o comprovante mencionado pelo cliente.'],
+    receipt_received: ['ATENDIMENTO / COMPROVANTE', 'transferred_to_financial', 'Conferir o comprovante informado pelo cliente.'],
+    regularization_request: ['ATENDIMENTO / REGULARIZACAO', 'transferred_to_financial', 'Verificar a pendencia e orientar a regularizacao.'],
+    system_check_request: ['ATENDIMENTO / CONSULTA DE CADASTRO', 'transferred_to_financial', 'Consultar o cadastro antes de orientar o cliente.'],
   };
+  const [title, status, action] = map[type]
+    || ['ATENDIMENTO HUMANO SOLICITADO', 'human_requested', 'Assumir a conversa e entender o pedido do cliente.'];
+  return { title, status, action, type };
+}
+
+function buildOperationalConsultantMessage(lead, event, handoff) {
+  const contact = buildContact(lead);
+  const latestMessage = getLatestUserMessage(lead) || 'Nao informada';
+  const recentSummary = buildRecentUserSummary(lead);
+  const lines = [
+    `*${handoff.title}*`,
+    `*Cliente:* ${lead.name || 'Nao informado'}`,
+    `*WhatsApp:* ${contact.phoneLabel}`,
+    `*Intencao:* ${buildOperationalIntentLabel(event, lead)}`,
+    `*Ultima mensagem:* ${latestMessage}`,
+  ];
+
+  if (!contact.phone && contact.internalId) lines.push(`*ID interno:* ${contact.internalId}`);
+  if (recentSummary && recentSummary !== latestMessage) lines.push(`*Contexto recente:* ${recentSummary}`);
+  lines.push(...buildOperationalExtraLines(lead));
+  lines.push(`*Acao:* ${handoff.action}`);
+  lines.push(contact.waLink ? `*Abrir conversa:* https://wa.me/${contact.waLink}` : '*Abrir conversa:* pelo painel/conversa atual');
+  return lines.join('\n');
 }
 
 export async function executeFinancialHandoff(wa, lead, config, event = {}) {
-  const consultor = await selectConsultor(config, 'support');
-  if (!consultor) {
-    console.warn('[Handoff] No consultor configured - skipping financial notification');
-    await recordEvent({
-      leadKey: getEventLeadKey(lead),
-      eventType: 'handoff_failed',
-      payload: { type: 'financial', reason: 'no_consultant_configured' },
-    });
-    return;
-  }
-
-  const contact = buildContactCardFields(lead);
-  const status = lead.status || event.status || 'awaiting_financial_review';
+  const leadKey = persistLead(lead);
   const handoff = resolveOperationalHandoff(event, lead);
-  const consultorMsg = [
-    `*${handoff.title}*`,
-    ...buildShortContactLines(lead, contact),
-    `*Cliente quer:* ${buildOperationalWant(event, lead)}`,
-    ...buildOperationalExtraLines(lead, event),
-    `*Acao:* ${handoff.action}`,
-    buildWaLinkLine(contact),
-  ].join('\n');
+  const consultants = await listOrderedConsultants(config, 'operational');
 
-  const consultorTarget = resolveConsultorSendTarget(consultor, 'agent_financial_handoff');
-  console.log(`[Handoff] Notifying financial/consultor: ${consultor.name} -> target="${consultorTarget.target}"`);
-  await recordEvent({
-    leadKey: getEventLeadKey(lead),
-    eventType: 'handoff_started',
-    payload: { type: 'financial', consultant: consultor.name, consultant_phone: consultor.phone || consultor.number },
-  });
+  lead.handoffAttemptedAt = new Date().toISOString();
+  lead.operationalStatus = 'notifying_consultant';
+  persistLead(lead);
 
-  try {
-    await wa.sendMessage(consultorTarget.target, consultorMsg, null, consultorTarget.options);
-    updateLead(lead.number, {
-      status: handoff.status,
-      operationalStatus: status,
-      financialTransferredAt: new Date().toISOString(),
-      financialTransferredTo: consultor.number || null,
-      financialTransferredToName: consultor.name || null,
-      stage: handoff.status,
-    });
-    console.log(`[Handoff] Financial notification sent: ${consultor.name} (${consultorTarget.target})`);
-    await recordEvent({
-      leadKey: getEventLeadKey(lead),
-      eventType: 'handoff_success',
-      payload: { type: 'financial', consultant: consultor.name, status: handoff.status },
-    });
-  } catch (err) {
-    console.error(`[Handoff] FAILED financial notification ${consultor.name} (${consultorTarget.target}): ${err.message}`);
-    await recordEvent({
-      leadKey: getEventLeadKey(lead),
-      eventType: 'handoff_failed',
-      payload: { type: 'financial', consultant: consultor.name, error: err.message },
-    });
-  }
-}
-
-/**
- * Executes the commercial handoff. Consultant notification happens before
- * client confirmation, so the bot never claims a fake transfer.
- */
-export async function executeHandoff(wa, lead, config, options = {}) {
-  const consultor = await selectConsultor(config, 'sales');
-
-  if (!consultor) {
-    const error = new Error('Nenhum consultor configurado para handoff comercial.');
-    updateLead(lead.number, {
-      handoffError: error.message,
+  if (consultants.length === 0) {
+    const error = 'Nenhum consultor configurado para atendimentos.';
+    Object.assign(lead, {
+      status: 'handoff_failed',
+      stage: 'handoff_failed',
+      operationalStatus: 'handoff_failed',
+      handoffError: error,
       handoffFailedAt: new Date().toISOString(),
     });
-    console.warn('[Handoff] No consultor configured - commercial handoff aborted');
+    persistLead(lead);
     await recordEvent({
-      leadKey: getEventLeadKey(lead),
+      leadKey,
       eventType: 'handoff_failed',
-      payload: { type: 'sales', reason: 'no_consultant_configured' },
+      payload: { type: 'operational', intent: handoff.type, reason: 'no_consultant_configured' },
     });
-    throw error;
+    return { ok: false, consultorNotified: false, status: 'handoff_failed', error };
   }
 
-  const contact = buildContactCardFields(lead);
-  const handoffReason = options.reason || lead.salesHandoffReason || 'Lead comercial pronto para cotacao.';
-  const consultorMsg = [
-    '*VOCE RECEBEU UMA COTACAO*',
-    ...buildShortContactLines(lead, contact),
-    `*Cliente quer:* cotacao de protecao veicular`,
+  let lastError = null;
+  for (const consultant of consultants) {
+    try {
+      const target = resolveConsultantTarget(consultant, 'agent_operational_handoff');
+      const message = buildOperationalConsultantMessage(lead, event, handoff);
+      await recordEvent({
+        leadKey,
+        eventType: 'handoff_started',
+        payload: { type: 'operational', intent: handoff.type, consultant: consultant.name },
+      });
+      await wa.sendMessage(target.target, message, null, target.options);
+
+      Object.assign(lead, {
+        status: handoff.status,
+        stage: handoff.status,
+        operationalStatus: 'consultant_notified',
+        transferredAt: new Date().toISOString(),
+        transferredTo: consultant.phone || consultant.number || null,
+        transferredToName: consultant.name || null,
+        financialTransferredAt: new Date().toISOString(),
+        financialTransferredTo: consultant.phone || consultant.number || null,
+        financialTransferredToName: consultant.name || null,
+        handoffError: null,
+        handoffClientConfirmed: false,
+      });
+      persistLead(lead);
+      await recordEvent({
+        leadKey,
+        eventType: 'handoff_success',
+        payload: { type: 'operational', intent: handoff.type, consultant: consultant.name, status: handoff.status },
+      });
+      return {
+        ok: true,
+        consultorNotified: true,
+        status: handoff.status,
+        consultor: consultant,
+      };
+    } catch (error) {
+      lastError = error;
+      console.error(`[Handoff] Failed to notify ${consultant.name || 'consultor'}: ${error.message}`);
+    }
+  }
+
+  const errorMessage = lastError?.message || 'Falha ao avisar o consultor.';
+  Object.assign(lead, {
+    status: 'handoff_failed',
+    stage: 'handoff_failed',
+    operationalStatus: 'handoff_failed',
+    handoffError: errorMessage,
+    handoffFailedAt: new Date().toISOString(),
+  });
+  persistLead(lead);
+  await recordEvent({
+    leadKey,
+    eventType: 'handoff_failed',
+    payload: { type: 'operational', intent: handoff.type, error: errorMessage },
+  });
+  return { ok: false, consultorNotified: false, status: 'handoff_failed', error: errorMessage };
+}
+
+function buildSalesConsultantMessage(lead = {}) {
+  const contact = buildContact(lead);
+  return [
+    '*COTACAO SOLICITADA*',
+    `*Cliente:* ${lead.name || 'Nao informado'}`,
+    `*WhatsApp:* ${contact.phoneLabel}`,
+    '*Intencao:* cotacao de protecao veicular',
     `*Veiculo:* ${lead.model || 'Nao informado'}`,
     `*Ano:* ${lead.year || 'Nao informado'}`,
     `*Placa:* ${lead.plate || (lead.plateUnavailable ? 'nao possui placa' : 'Nao informada')}`,
-    `*Acao:* preparar cotacao real e retornar ao cliente`,
-    buildWaLinkLine(contact),
+    '*Acao:* preparar a cotacao real e continuar o atendimento',
+    contact.waLink ? `*Abrir conversa:* https://wa.me/${contact.waLink}` : '*Abrir conversa:* pelo painel/conversa atual',
   ].join('\n');
-
-  const consultorTarget = resolveConsultorSendTarget(consultor, 'agent_handoff_consultor');
-  console.log(`[Handoff] Notifying consultor: ${consultor.name} -> target="${consultorTarget.target}"`);
-  await recordEvent({
-    leadKey: getEventLeadKey(lead),
-    eventType: 'handoff_started',
-    payload: { type: 'sales', consultant: consultor.name, consultant_phone: consultor.phone || consultor.number },
-  });
-  await wa.sendMessage(consultorTarget.target, consultorMsg, null, consultorTarget.options);
-  console.log(`[Handoff] Consultor notified: ${consultor.name} (${consultorTarget.target})`);
-
-  const clientMessage = options.clientMessage
-    || `Recebi os dados principais${lead.name ? `, ${lead.name}` : ''}. Vou encaminhar para um consultor preparar sua cotacao e continuar o atendimento por aqui.`;
-  const handoffClientTarget = lead.replyTargetJid || getLeadRealPhone(lead) || lead.jid;
-  const clientSendOptions = {
-    ...buildClientSendOptions(handoffClientTarget, options.clientSendOptions || {}),
-    routeLabel: 'agent_handoff_client',
-    context: 'ai',
-    noInternalRetry: true,
-  };
-
-  let clientNotified = true;
-  await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
-  try {
-    await wa.sendMessage(handoffClientTarget, clientMessage, null, clientSendOptions);
-  } catch (err) {
-    clientNotified = false;
-    console.warn(`[Handoff] Consultant was notified, but client confirmation failed: ${err.message}`);
-  }
-
-  const finalStatus = clientNotified ? 'transferred' : 'handoff_client_confirmation_failed';
-  updateLead(lead.number, {
-    status: finalStatus,
-    stage: finalStatus,
-    transferredAt: new Date().toISOString(),
-    transferredTo: consultor.number || null,
-    transferredToName: consultor.name || null,
-    handoffReason,
-    handoffClientConfirmed: clientNotified,
-    handoffClientError: clientNotified ? null : 'Falha ao confirmar o encaminhamento para o cliente.',
-    handoffClientFailedAt: clientNotified ? null : new Date().toISOString(),
-  });
-
-  await recordEvent({
-    leadKey: getEventLeadKey(lead),
-    eventType: clientNotified ? 'handoff_success' : 'handoff_failed',
-    payload: {
-      type: 'sales',
-      consultant: consultor.name,
-      status: finalStatus,
-      clientNotified,
-    },
-  });
-
-  return {
-    ok: true,
-    consultorNotified: true,
-    clientNotified,
-    status: finalStatus,
-    consultor,
-  };
 }
 
-async function executeHandoffLegacy(wa, lead, config, options = {}) {
-  const consultor = await selectConsultor(config, 'sales');
-
-  if (!consultor) {
-    const error = new Error('Nenhum consultor configurado para handoff comercial.');
-    updateLead(lead.number, {
+export async function executeHandoff(wa, lead, config, options = {}) {
+  const leadKey = persistLead(lead);
+  const consultants = await listOrderedConsultants(config, 'sales');
+  if (consultants.length === 0) {
+    const error = new Error('Nenhum consultor configurado para cotacoes.');
+    Object.assign(lead, {
+      status: 'handoff_failed',
+      stage: 'handoff_failed',
       handoffError: error.message,
       handoffFailedAt: new Date().toISOString(),
     });
-    console.warn('[Handoff] No consultor configured - commercial handoff aborted');
+    persistLead(lead);
+    await recordEvent({ leadKey, eventType: 'handoff_failed', payload: { type: 'sales', reason: 'no_consultant_configured' } });
     throw error;
   }
 
-  const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  const contactPhone = lead.phone || lead.displayNumber || lead.number;
-  const waLinkNumber = buildWaLinkNumber(contactPhone);
-  const handoffReason = options.reason || lead.salesHandoffReason || 'Lead comercial pronto para cotacao.';
-  const consultorMsg =
-    `*NOVO LEAD QUALIFICADO - ZapBot Pro*\n` +
-    `------------------------------\n` +
-    `*Nome:* ${lead.name || 'Nao informado'}\n` +
-    `*WhatsApp:* ${formatNumber(contactPhone)}\n` +
-    `*Veiculo:* ${lead.model || 'Nao informado'}\n` +
-    `*Ano:* ${lead.year || 'Nao informado'}\n` +
-    `*Placa:* ${lead.plate || 'Nao informada'}\n` +
-    `*Motivo do handoff:* ${handoffReason}\n` +
-    `\n*Resumo da conversa:*\n${lead.caseSummary || lead.leadSummary?.caseSummary || buildSummary(lead)}\n` +
-    `\n*Acao sugerida:* preparar cotacao real e continuar o atendimento com o cliente.\n` +
-    `\nQualificado em: ${now}\n` +
-    `------------------------------\n` +
-    `Abrir conversa:\nhttps://wa.me/${waLinkNumber}`;
+  let consultant = null;
+  let lastError = null;
+  for (const candidate of consultants) {
+    try {
+      const target = resolveConsultantTarget(candidate, 'agent_sales_handoff');
+      await recordEvent({ leadKey, eventType: 'handoff_started', payload: { type: 'sales', consultant: candidate.name } });
+      await wa.sendMessage(target.target, buildSalesConsultantMessage(lead), null, target.options);
+      consultant = candidate;
+      break;
+    } catch (error) {
+      lastError = error;
+      console.error(`[Handoff] Failed to notify ${candidate.name || 'consultor'} about sales lead: ${error.message}`);
+    }
+  }
 
-  let cNum = String(consultor.number).replace(/\D/g, '');
-  if (cNum.startsWith('0')) cNum = cNum.substring(1);
-
-  console.log(`[Handoff] Notifying consultor: ${consultor.name} -> raw="${consultor.number}" clean="${cNum}"`);
-  await wa.sendMessage(cNum, consultorMsg, null, {
-    forcePhoneJid: true,
-    routeLabel: 'agent_handoff_consultor',
-    context: 'ai',
-    noInternalRetry: true,
-  });
-  console.log(`[Handoff] Consultor notified: ${consultor.name} (${cNum})`);
-
-  updateLead(lead.number, {
-    status: 'transferred',
-    stage: 'transferred',
-    transferredAt: new Date().toISOString(),
-    transferredTo: consultor.number || null,
-    transferredToName: consultor.name || null,
-    handoffReason,
-  });
+  if (!consultant) {
+    const error = lastError || new Error('Falha ao avisar o consultor.');
+    Object.assign(lead, {
+      status: 'handoff_failed',
+      stage: 'handoff_failed',
+      handoffError: error.message,
+      handoffFailedAt: new Date().toISOString(),
+    });
+    persistLead(lead);
+    await recordEvent({ leadKey, eventType: 'handoff_failed', payload: { type: 'sales', error: error.message } });
+    throw error;
+  }
 
   const clientMessage = options.clientMessage
-    || `Recebi os dados principais${lead.name ? `, ${lead.name}` : ''}. Vou encaminhar para um consultor preparar sua cotacao e continuar o atendimento por aqui.`;
-  const handoffClientTarget = lead.replyTargetJid || lead.phone || lead.displayNumber || lead.number || lead.jid;
-
-  let clientNotified = true;
-  await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
-  try {
-    await wa.sendMessage(handoffClientTarget, clientMessage, null, {
-      forcePhoneJid: true,
-      routeLabel: 'agent_handoff_client',
-      context: 'ai',
-      noInternalRetry: true,
-    });
-  } catch (err) {
-    clientNotified = false;
-    updateLead(lead.number, {
-      handoffClientError: err.message,
-      handoffClientFailedAt: new Date().toISOString(),
-    });
-    console.warn(`[Handoff] Consultant was notified, but client confirmation failed: ${err.message}`);
-  }
-
-  return {
-    ok: true,
-    consultorNotified: true,
-    clientNotified,
-    consultor,
+    || `Recebi os dados principais${lead.name ? `, ${lead.name}` : ''}. Encaminhei para um consultor preparar sua cotacao e continuar por aqui.`;
+  const clientTarget = lead.replyTargetJid || getLeadRealPhone(lead) || lead.jid;
+  const clientOptions = {
+    ...buildClientSendOptions(clientTarget, options.clientSendOptions || {}),
+    routeLabel: 'agent_handoff_client',
+    context: 'ai',
   };
 
-  // 1. Farewell to client (humanized — wait a bit before this one)
-  await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
-  const farewellMsg = `Perfeito${lead.name ? `, ${lead.name}` : ''}! 🙌\n\nJá anotei tudo aqui. Um dos nossos consultores vai entrar em contato com você em breve com as melhores opções${lead.model ? ` pra o seu ${lead.model}` : ''}.\n\nQualquer dúvida é só falar! 😊`;
-  // Prefer the same fast reply target chosen by the agent instead of raw @lid.
-  const clientTarget = lead.replyTargetJid || lead.phone || lead.displayNumber || lead.number || lead.jid;
-  await wa.sendMessage(clientTarget, farewellMsg, null, { forcePhoneJid: true, routeLabel: 'agent_handoff_client', context: 'ai', noInternalRetry: true });
-
-  // 2. Notify consultor
-  if (consultor) {
-    const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-    const contactPhone = lead.phone || lead.displayNumber || lead.number;
-    const waLinkNumber = buildWaLinkNumber(contactPhone);
-    let consultorMsg =
-      `🔔 *NOVO LEAD QUALIFICADO — ZapBot Pro*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `👤 *Nome:* ${lead.name || 'Não informado'}\n` +
-      `📱 *WhatsApp:* ${formatNumber(contactPhone)}\n` +
-      `🚗 *Veículo:* ${lead.model || 'Não informado'}\n` +
-      `🔑 *Placa:* ${lead.plate || 'Não informada'}\n` +
-      `\n💬 *Resumo da conversa:*\n${buildSummary(lead)}\n` +
-      `\n⏰ Qualificado em: ${now}\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `👆 Abrir conversa:\nhttps://wa.me/${waLinkNumber}`;
-
-    consultorMsg = consultorMsg.replace('*Placa:*', `*Ano:* ${lead.year || 'Nao informado'}\n*Placa:*`);
-
-    // Normalize consultor number: strip non-digits + remove leading zero if present
-    let cNum = String(consultor.number).replace(/\D/g, '');
-    if (cNum.startsWith('0')) cNum = cNum.substring(1); // remove leading zero (021xxx → 21xxx)
-    // buildJid adds 55 if not present → "21xxx" → "5521xxx@s.whatsapp.net"
-
-    console.log(`[Handoff] Notifying consultor: ${consultor.name} → raw="${consultor.number}" clean="${cNum}"`);
-
-    try {
-      await wa.sendMessage(cNum, consultorMsg, null, { forcePhoneJid: true, routeLabel: 'agent_handoff_consultor', context: 'ai', noInternalRetry: true });
-      console.log(`[Handoff] ✅ Consultor notified: ${consultor.name} (${cNum})`);
-    } catch (err) {
-      console.error(`[Handoff] ❌ FAILED to notify consultor ${consultor.name} (${cNum}): ${err.message}`);
-    }
-  } else {
-    console.warn('[Handoff] ⚠️ No consultor configured — skipping consultant notification');
+  let clientNotified = true;
+  let clientError = null;
+  try {
+    await wa.sendMessage(clientTarget, clientMessage, null, clientOptions);
+  } catch (error) {
+    clientNotified = false;
+    clientError = error.message;
   }
 
-  // 3. Mark lead
-  updateLead(lead.number, {
-    status: 'transferred',
+  const status = clientNotified ? 'transferred' : 'handoff_client_confirmation_failed';
+  Object.assign(lead, {
+    status,
+    stage: status,
     transferredAt: new Date().toISOString(),
-    transferredTo: consultor?.number || null,
-    transferredToName: consultor?.name || null,
+    transferredTo: consultant.phone || consultant.number || null,
+    transferredToName: consultant.name || null,
+    handoffReason: options.reason || lead.salesHandoffReason || 'Cotacao solicitada.',
+    handoffClientConfirmed: clientNotified,
+    handoffClientError: clientError,
+    handoffClientFailedAt: clientNotified ? null : new Date().toISOString(),
   });
+  persistLead(lead);
+  await recordEvent({
+    leadKey,
+    eventType: clientNotified ? 'handoff_success' : 'handoff_failed',
+    payload: { type: 'sales', consultant: consultant.name, status, clientNotified },
+  });
+
+  return { ok: true, consultorNotified: true, clientNotified, status, consultor: consultant };
 }
