@@ -412,3 +412,35 @@ test('restores a trashed contact on the next message and preserves the previous 
   assert.equal(lead.lastIntent, 'assistance_request');
   assert.equal(wa.messages[0].target, consultant.phone);
 });
+
+test('reopens a no-interest lead when the customer asks for a new quote', async () => {
+  writeConfig({
+    businessHoursStart: '00:00',
+    businessHoursEnd: '23:59',
+    followUpEnabled: true,
+  });
+  const wa = new MockWhatsApp();
+  const phone = '5511987654071';
+  saveLead(phone, {
+    number: phone,
+    phone,
+    displayNumber: phone,
+    phoneResolved: true,
+    status: 'no_interest',
+    stage: 'no_interest',
+    conversationMode: 'sales',
+    lastIntent: 'no_interest',
+    history: [{ role: 'user', content: 'nao quero mais', ts: 1 }],
+  });
+
+  await handleIncomingMessage(wa, textMessage(phone, 'quero uma cotacao'));
+  for (let attempt = 0; attempt < 60 && wa.messages.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  const lead = getLead(phone);
+  assert.equal(lead.status, 'talking');
+  assert.equal(lead.stage, 'ask_model_year');
+  assert.equal(wa.messages.length, 1);
+  assert.match(wa.messages[0].message, /modelo e o ano/i);
+});

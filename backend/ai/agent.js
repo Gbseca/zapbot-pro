@@ -108,6 +108,12 @@ const REENGAGEMENT_PATTERNS = [
   /como\s*(funciona|contrato|ader)/,
 ];
 
+const SALES_REENGAGEMENT_INTENTS = new Set([
+  'sales_consultant_requested',
+  'sales_price_request',
+  'sales_quote',
+]);
+
 const REFUSAL_RESPONSES = [
   'Tudo bem! Fico a disposicao caso mude de ideia. Ate mais.',
   'Perfeito, sem problema. Nao vou insistir. Se um dia quiser comparar, e so chamar.',
@@ -162,8 +168,12 @@ function isAmbiguousInterjection(normalizedText) {
   return INTERJECTION_PATTERNS.some(pattern => pattern.test(normalizedText));
 }
 
-function isReengagement(normalizedText) {
-  return REENGAGEMENT_PATTERNS.some(pattern => pattern.test(normalizedText));
+function isReengagement(normalizedText, decision = {}) {
+  return REENGAGEMENT_PATTERNS.some(pattern => pattern.test(normalizedText))
+    || (
+      decision.conversationMode === 'sales'
+      && SALES_REENGAGEMENT_INTENTS.has(decision.intent)
+    );
 }
 
 function isBusinessHours(config) {
@@ -1462,7 +1472,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
 
   if (existingLead?.status === 'no_interest' && !collectionsContext) {
     const normForReeng = normalizeText(text);
-    if (!isReengagement(normForReeng)) {
+    if (!isReengagement(normForReeng, decision)) {
       console.log(`[Agent] Silencing no_interest lead ${leadId}: "${text.slice(0, 40)}"`);
       return;
     }
