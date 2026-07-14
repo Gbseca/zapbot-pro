@@ -14,6 +14,11 @@ const COMMERCIAL_OVERRIDE_INTENTS = new Set([
   'sales_quote',
 ]);
 
+const SALES_PLAYBOOK_PRIORITY_INTENTS = new Set([
+  'plate_declined',
+  'plate_reason_question',
+]);
+
 const VALID_LLM_INTENTS = new Set([
   'app_blocked',
   'assistance_request',
@@ -72,6 +77,7 @@ function buildCaseSummary(lead, decision, text) {
   if (decision.emotion && decision.emotion !== 'neutral') facts.push(`Cliente aparenta estar ${decision.emotion}.`);
   if (lead.model) facts.push(`Veiculo: ${lead.model} (${lead.year || 'ano nao informado'}).`);
   if (lead.plate) facts.push(`Placa: ${lead.plate}.`);
+  if (!lead.plate && lead.plateWithheld) facts.push('Cliente preferiu nao informar a placa nesta etapa.');
   if (text) facts.push(`Ultima mensagem: "${String(text).slice(0, 160)}".`);
   return facts.join(' ');
 }
@@ -129,10 +135,12 @@ export async function makeConversationDecision({
   if (!isOperational && detectedIntent === 'general_question' && salesPreview?.intent) {
     detectedIntent = salesPreview.intent;
   }
+  const hasPrioritySalesPreview = SALES_PLAYBOOK_PRIORITY_INTENTS.has(salesPreview?.intent);
 
   const shouldUseLlm = !skipAI
     && !deterministic.explicit
-    && !inheritedOperational;
+    && !inheritedOperational
+    && !hasPrioritySalesPreview;
 
   if (shouldUseLlm) {
     try {
@@ -168,9 +176,11 @@ export async function makeConversationDecision({
   }
 
   const playbookIntent = playbookResult.intent || 'general_question';
-  const intent = detectedIntent && detectedIntent !== 'general_question'
-    ? detectedIntent
-    : playbookIntent;
+  const intent = SALES_PLAYBOOK_PRIORITY_INTENTS.has(playbookIntent)
+    ? playbookIntent
+    : detectedIntent && detectedIntent !== 'general_question'
+      ? detectedIntent
+      : playbookIntent;
   const riskLevel = determineRiskLevel(intent, emotion);
   const nextAction = playbookResult.requiredAction || 'respond';
   const forbiddenActions = playbookResult.mode === 'sales'
@@ -191,6 +201,7 @@ export async function makeConversationDecision({
     riskLevel,
     allowedQuestion: playbookResult.allowedQuestion || null,
     clientReply: playbookResult.clientReply || '',
+    plateWithheld: !!playbookResult.plateWithheld,
     notes: playbookResult.reason || deterministic.reason || 'Processado pelo playbook.',
     handoffDepartment: playbookResult.handoffDepartment || 'consultant',
   };
@@ -238,6 +249,16 @@ export function applyConversationDecisionToLead(lead, decision, content = {}) {
   if (decision.shouldHandoff) {
     lead.shouldHandoff = true;
     lead.handoffDepartment = decision.handoffDepartment;
+  }
+  if (decision.plateWithheld) {
+    lead.plateWithheld = true;
+    lead.plateWithheldAt = lead.plateWithheldAt || now;
+  }
+  if (decision.nextAction === 'explain_plate_request') {
+    lead.plateReasonExplainedAt = now;
+  }
+  if (decision.intent === 'plate_declined' && !decision.clientReply) {
+    delete lead.clientReply;
   }
   if (decision.clientReply) lead.clientReply = decision.clientReply;
 

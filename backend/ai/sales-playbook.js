@@ -88,6 +88,30 @@ const NO_PLATE_PATTERNS = [
   /\bsem emplacamento\b/
 ];
 
+const PLATE_REASON_PATTERNS = [
+  /\b(?:por que|porque|pra que|para que)\b.{0,35}\bplaca\b/,
+  /\b(?:qual|quero saber o) motivo\b.{0,30}\bplaca\b/,
+  /\b(?:precisa|precisam|quer|querem|pede|pedem)\b.{0,30}\b(?:da |de |a |minha )?placa\b/,
+];
+
+const SHORT_PLATE_REASON_PATTERNS = [
+  /^(?:por que|porque|pra que|para que|qual motivo)$/,
+  /^(?:a |minha )?placa(?: mesmo)?$/,
+];
+
+const PLATE_PRIVACY_REFUSAL_PATTERNS = [
+  /\b(?:nao quero|nao vou|nao posso|prefiro nao)\b.{0,20}\b(?:passar|informar|mandar|enviar|compartilhar|dar)\b.{0,20}\bplaca\b/,
+  /\b(?:nao quero|prefiro nao)\b.{0,20}\b(?:passar|informar|mandar|enviar|compartilhar|dar)\b\s*(?:ela|isso)?\b/,
+  /\b(?:pode ser|vamos|segue|continuar|continua)\b.{0,12}\bsem (?:a |minha )?placa\b/,
+  /\bnao me sinto (?:confortavel|a vontade)\b.{0,30}\bplaca\b/,
+];
+
+const PLATE_SKIP_CONFIRMATION_PATTERNS = [
+  /^(?:sim|pode|pode sim|ok|certo|beleza|blz|segue|pode seguir|continua|continue|pode continuar)$/,
+];
+
+const PLATE_REASON_REPLY = 'A placa ajuda o consultor a conferir os dados exatos do veiculo e evitar erro na cotacao. Se preferir nao informar agora, posso seguir so com o modelo e o ano.';
+
 const SALES_CONTINUATION_PATTERNS = [
   /^(sim|s|ok|okay|certo|isso|pode|pode sim|quero|vamos|bora|manda|prosseguir|continuar)\b/,
   /\b(modelo|ano|placa|veiculo|carro|moto)\b/,
@@ -129,8 +153,31 @@ function getModelYearQuestion(hasModel, hasYear) {
   return 'Qual o ano do veiculo?';
 }
 
+function isWaitingForPlate(lead = {}) {
+  return lead.stage === 'ask_plate'
+    || lead.operationalStatus === 'ask_plate'
+    || (Array.isArray(lead.missingData) && lead.missingData.includes('plate'));
+}
+
+function asksWhyPlate(lead = {}, normalized = '') {
+  if (matchAny(normalized, PLATE_REASON_PATTERNS)) return true;
+  return isWaitingForPlate(lead) && matchAny(normalized, SHORT_PLATE_REASON_PATTERNS);
+}
+
+function declinesPlateSharing(lead = {}, normalized = '') {
+  if (matchAny(normalized, PLATE_PRIVACY_REFUSAL_PATTERNS)) return true;
+  if (lead.stage !== 'explain_plate_request') return false;
+  return matchAny(normalized, PLATE_SKIP_CONFIRMATION_PATTERNS);
+}
+
 export function getNextSalesStep(lead, text, options = {}) {
   const normalized = normalizeText(text);
+  const plateReasonQuestion = asksWhyPlate(lead, normalized);
+  const repeatedPlateConcern = plateReasonQuestion && !!lead.plateReasonExplainedAt;
+  const newPlateSkip = declinesPlateSharing(lead, normalized) || repeatedPlateConcern;
+  const plateWithheld = !!lead.plateWithheld || newPlateSkip;
+  const declaresNoPlate = matchAny(normalized, NO_PLATE_PATTERNS);
+  const plateText = extractValidPlate(text);
   
   // 1. Detect Intent
   const preferredIntent = [
@@ -141,7 +188,11 @@ export function getNextSalesStep(lead, text, options = {}) {
     'sales_quote',
   ].includes(options.preferredIntent) ? options.preferredIntent : null;
   let intent = preferredIntent || 'general_question';
-  if (preferredIntent) {
+  if (newPlateSkip && !lead.plateWithheld) {
+    intent = 'plate_declined';
+  } else if (plateReasonQuestion) {
+    intent = 'plate_reason_question';
+  } else if (preferredIntent) {
     intent = preferredIntent;
   } else if (matchAny(normalized, CONSULTANT_PATTERNS)) {
     intent = 'sales_consultant_requested';
@@ -163,7 +214,10 @@ export function getNextSalesStep(lead, text, options = {}) {
   // 2. Identify missing data
   const hasModel = !!lead.model;
   const hasYear = !!lead.year;
-  const hasPlate = !!(lead.plate && isValidBrazilPlate(lead.plate)) || !!lead.plateUnavailable;
+  const hasPlate = !!(lead.plate && isValidBrazilPlate(lead.plate))
+    || !!lead.plateUnavailable
+    || declaresNoPlate
+    || plateWithheld;
   
   const missingData = [];
   if (!hasModel) missingData.push('model');
@@ -172,11 +226,7 @@ export function getNextSalesStep(lead, text, options = {}) {
 
   const hasMinData = hasModel && hasYear && hasPlate;
 
-  // 3. Check plate unavailability in client response
-  const declaresNoPlate = matchAny(normalized, NO_PLATE_PATTERNS);
-  const plateText = extractValidPlate(text);
-
-  // 4. Check if phone is resolved
+  // 3. Check if phone is resolved
   // Real phone should be set in lead.phone or lead.displayNumber (if Baileys returns it)
   // Check if we need to request a phone number
   const isPhoneResolved = !!(lead.phone && lead.phone.length >= 10) || !!(lead.displayNumber && lead.displayNumber.length >= 10);
@@ -187,6 +237,7 @@ export function getNextSalesStep(lead, text, options = {}) {
   let allowedQuestion = null;
   let shouldHandoff = false;
   let shouldStopAutomation = false;
+  let clientReply = '';
   let reason = 'Início de conversa com novo lead.';
 
   // If client requested consultant/human
@@ -203,6 +254,28 @@ export function getNextSalesStep(lead, text, options = {}) {
       reason = 'Cliente pediu consultor, encaminhando para o time comercial.';
     }
   } 
+  // Explain the purpose of the plate instead of repeating the collection question.
+  else if (intent === 'plate_reason_question') {
+    step = 'explain_plate_request';
+    requiredAction = 'explain_plate_request';
+    clientReply = PLATE_REASON_REPLY;
+    reason = 'Cliente perguntou por que a placa e solicitada; explicar a finalidade e oferecer continuidade sem ela.';
+  }
+  // Respect a privacy refusal and continue with the quote using model and year.
+  else if (intent === 'plate_declined') {
+    if (!hasModel || !hasYear) {
+      step = 'ask_model_year';
+      requiredAction = 'ask_model_year';
+      allowedQuestion = getModelYearQuestion(hasModel, hasYear);
+      reason = 'Cliente preferiu nao informar a placa; ainda faltam modelo ou ano.';
+    } else {
+      step = 'quote_ready_for_handoff';
+      requiredAction = 'execute_handoff';
+      shouldHandoff = true;
+      shouldStopAutomation = true;
+      reason = 'Cliente preferiu nao informar a placa; cotacao sera encaminhada com modelo e ano.';
+    }
+  }
   // If client is refusing or has no interest
   else if (intent === 'no_interest') {
     step = 'no_interest';
@@ -238,7 +311,7 @@ export function getNextSalesStep(lead, text, options = {}) {
     }
   }
   // Quote / Simulation / Active flow
-  else if (intent === 'sales_quote' || declaresNoPlate || plateText || (hasModel && hasYear)) {
+  else if (intent === 'sales_quote' || declaresNoPlate || plateText) {
     step = 'quote_interest_detected';
     
     if (hasMinData) {
@@ -275,6 +348,8 @@ export function getNextSalesStep(lead, text, options = {}) {
     missingData,
     requiredAction,
     allowedQuestion,
+    clientReply,
+    plateWithheld,
     shouldHandoff,
     shouldStopAutomation,
     tone: 'comercial_leve',

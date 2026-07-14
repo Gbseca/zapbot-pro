@@ -416,7 +416,9 @@ function refreshOperationalCaseSummary(lead, event = {}, content = {}) {
 }
 
 function buildSalesVehicleConfirmation(lead = {}) {
-  const plateText = lead.plate || (lead.plateUnavailable ? 'nao possui placa' : '');
+  const plateText = lead.plate
+    || (lead.plateUnavailable ? 'veiculo sem placa' : '')
+    || (lead.plateWithheld ? 'nao informada nesta etapa' : '');
   if (!lead.model || !lead.year || !plateText) return '';
   return [
     'Recebi:',

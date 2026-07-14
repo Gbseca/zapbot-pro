@@ -356,7 +356,7 @@ function buildSalesConsultantMessage(lead = {}) {
     '*Intencao:* cotacao de protecao veicular',
     `*Veiculo:* ${lead.model || 'Nao informado'}`,
     `*Ano:* ${lead.year || 'Nao informado'}`,
-    `*Placa:* ${lead.plate || (lead.plateUnavailable ? 'nao possui placa' : 'Nao informada')}`,
+    `*Placa:* ${lead.plate || (lead.plateUnavailable ? 'veiculo sem placa' : lead.plateWithheld ? 'cliente preferiu nao informar nesta etapa' : 'Nao informada')}`,
     '*Acao:* preparar a cotacao real e continuar o atendimento',
     contact.waLink ? `*Abrir conversa:* https://wa.me/${contact.waLink}` : '*Abrir conversa:* pelo painel/conversa atual',
   ].join('\n');

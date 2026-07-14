@@ -358,6 +358,37 @@ test('keeps commercial handoff ordered and sends a single client confirmation', 
   assert.equal(getLead(phone).status, 'transferred');
 });
 
+test('hands off a quote without a plate when the customer chose not to share it', async () => {
+  writeConfig();
+  const wa = new MockWhatsApp();
+  const phone = '5511987654052';
+  const lead = {
+    number: phone,
+    phone,
+    displayNumber: phone,
+    phoneResolved: true,
+    replyTargetJid: phone,
+    name: 'Cliente Privacidade',
+    model: 'Volkswagen Voyage',
+    year: '2015',
+    plateWithheld: true,
+    history: [{ role: 'user', content: 'prefiro nao informar a placa' }],
+  };
+
+  const result = await executeHandoff(
+    wa,
+    lead,
+    JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8')),
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(wa.messages.length, 2);
+  assert.equal(wa.messages[0].target, consultant.phone);
+  assert.match(wa.messages[0].message, /cliente preferiu nao informar nesta etapa/i);
+  assert.doesNotMatch(wa.messages[0].message, /nao possui placa/i);
+  assert.equal(getLead(phone).status, 'transferred');
+});
+
 test('restores a trashed contact on the next message and preserves the previous conversation', async () => {
   writeConfig();
   const wa = new MockWhatsApp();

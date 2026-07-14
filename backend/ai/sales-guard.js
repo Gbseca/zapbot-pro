@@ -152,6 +152,13 @@ const NO_PLATE_PATTERNS = [
   /\bainda nao (tem|possui) placa\b/,
 ];
 
+const PLATE_PRIVACY_REFUSAL_PATTERNS = [
+  /\b(?:nao quero|nao vou|nao posso|prefiro nao)\b.{0,20}\b(?:passar|informar|mandar|enviar|compartilhar|dar)\b.{0,20}\bplaca\b/,
+  /\b(?:nao quero|prefiro nao)\b.{0,20}\b(?:passar|informar|mandar|enviar|compartilhar|dar)\b\s*(?:ela|isso)?\b/,
+  /\b(?:pode ser|vamos|segue|continuar|continua)\b.{0,12}\bsem (?:a |minha )?placa\b/,
+  /\bnao me sinto (?:confortavel|a vontade)\b.{0,30}\bplaca\b/,
+];
+
 const SCOOTER_PATTERNS = [
   /\bscooter\b/,
   /\bmoto eletrica\b/,
@@ -262,6 +269,10 @@ function hasNoPlateStatement(text = '') {
   return matchAny(normalizeText(text), NO_PLATE_PATTERNS);
 }
 
+function hasPlatePrivacyRefusal(text = '') {
+  return matchAny(normalizeText(text), PLATE_PRIVACY_REFUSAL_PATTERNS);
+}
+
 function extractValidPlate(text = '') {
   const tokens = String(text || '').match(/\b[A-Za-z]{3}[-\s]?\d[A-Za-z0-9][-\s]?\d{2}\b/g) || [];
   for (const token of tokens) {
@@ -343,11 +354,13 @@ export function applySalesFactsToLead(lead, text = '') {
   const power = extractPower(text);
 
   if (plate) lead.plate = plate;
+  if (plate) lead.plateWithheld = false;
   if (year) lead.year = year;
   if (model && !lead.model) lead.model = model;
   if (vehicleType) lead.vehicleType = vehicleType;
   if (power) lead.vehiclePower = power;
   if (hasNoPlateStatement(text)) lead.plateUnavailable = true;
+  if (hasPlatePrivacyRefusal(text)) lead.plateWithheld = true;
   if (lead.awaitingVehicleChoice && vehicleType) delete lead.awaitingVehicleChoice;
   if (!lead.conversationMode) lead.conversationMode = 'sales';
   return lead;
@@ -356,23 +369,25 @@ export function applySalesFactsToLead(lead, text = '') {
 export function getSalesQualificationState(lead = {}, text = '') {
   const validPlate = extractValidPlate(text) || (isValidBrazilPlate(lead.plate) ? normalizePlate(lead.plate) : null);
   const plateUnavailable = !!lead.plateUnavailable || hasNoPlateStatement(text);
-  const invalidPlate = !validPlate && !plateUnavailable ? extractInvalidPlateCandidate(text) : null;
+  const plateWithheld = !!lead.plateWithheld || hasPlatePrivacyRefusal(text);
+  const invalidPlate = !validPlate && !plateUnavailable && !plateWithheld ? extractInvalidPlateCandidate(text) : null;
   const model = lead.model || extractVehicleModel(text) || null;
   const year = lead.year || extractYear(text) || null;
   const missingData = [];
 
   if (!model) missingData.push('model');
   if (!year) missingData.push('year');
-  if (!validPlate && !plateUnavailable) missingData.push('plate');
+  if (!validPlate && !plateUnavailable && !plateWithheld) missingData.push('plate');
 
   return {
     plate: validPlate,
     plateUnavailable,
+    plateWithheld,
     invalidPlate,
     model,
     year,
     missingData,
-    hasMinimumData: !!((validPlate || plateUnavailable) && model && year),
+    hasMinimumData: !!((validPlate || plateUnavailable || plateWithheld) && model && year),
   };
 }
 
@@ -640,6 +655,7 @@ export function applySalesEventToLead(lead, event, content = {}) {
       lead.model ? `Modelo: ${lead.model}.` : '',
       lead.year ? `Ano: ${lead.year}.` : '',
       lead.plate ? `Placa: ${lead.plate}.` : '',
+      !lead.plate && lead.plateWithheld ? 'Cliente preferiu nao informar a placa nesta etapa.' : '',
       content.historyText || content.text ? `Ultima mensagem: "${String(content.historyText || content.text).slice(0, 180)}".` : '',
     ].filter(Boolean).join(' '),
     updatedAt: now,

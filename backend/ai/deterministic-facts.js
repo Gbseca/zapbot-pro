@@ -465,6 +465,7 @@ export function applyDeterministicFactsToLead(lead, text = '', options = {}) {
 
   if (facts.plate) lead.plate = facts.plate;
   if (facts.plate) lead.plateUnavailable = false;
+  if (facts.plate) lead.plateWithheld = false;
   if (facts.phone) {
     lead.phone = facts.phone;
     lead.displayNumber = facts.phone;
