@@ -98,4 +98,37 @@ test('normalizes the account reachout restriction returned by WhatsApp', async (
         timeEnforcementEnds: '2026-07-15T12:00:00.000Z',
         enforcementType: 'DEFAULT',
     });
+    assert.deepEqual(manager.getStatus().reachoutTimeLock, {
+        supported: true,
+        isActive: true,
+        timeEnforcementEnds: '2026-07-15T12:00:00.000Z',
+        enforcementType: 'DEFAULT',
+    });
+});
+
+test('blocks typing and sends locally while a companion restriction is active', async () => {
+    let outboundCalls = 0;
+    const manager = new WhatsAppManager(null);
+    manager.status = 'connected';
+    manager.sock = {
+        sendMessage: async () => {
+            outboundCalls += 1;
+            return {};
+        },
+        sendPresenceUpdate: async () => {
+            outboundCalls += 1;
+        },
+    };
+    manager._setReachoutTimeLock({
+        isActive: true,
+        timeEnforcementEnds: new Date(Date.now() + 60_000),
+        enforcementType: 'RESTRICT_ALL_COMPANIONS',
+    });
+
+    await assert.rejects(
+        manager.sendMessage(TEST_PHONE, 'Teste'),
+        (error) => error.code === 'WA_REACHOUT_RESTRICTED' && error.retryable === false,
+    );
+    assert.equal(await manager.sendTyping(TEST_PHONE, 1), null);
+    assert.equal(outboundCalls, 0);
 });

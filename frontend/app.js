@@ -1423,7 +1423,9 @@ function renderSystemStatus() {
   renderStatusCard('status-card-whatsapp', snapshot.whatsapp, {
     eyebrow: 'Conexao',
     title: 'WhatsApp',
-    summary: (section) => `Estado atual: ${section.status || 'desconhecido'}.`,
+    summary: (section) => section.reachoutTimeLock?.isActive
+      ? `Conectado, mas com envios por dispositivos vinculados bloqueados ate ${formatStatusDate(section.reachoutTimeLock.timeEnforcementEnds)}.`
+      : `Estado atual: ${section.status || 'desconhecido'}.`,
     metrics: (section) => [
       statusMetric('Estado', section.status || '--'),
       statusMetric('WA Web', section.webVersion || '--'),
@@ -1434,6 +1436,12 @@ function renderSystemStatus() {
       statusDetail('Reconexoes', section.reconnectCount ?? 0),
       statusDetail('Ultimo erro', section.lastDisconnect?.message || 'Nenhum'),
       statusDetail('Ultima rota', section.lastInboundRoute?.addressingMode || '--'),
+      statusDetail(
+        'Envios vinculados',
+        section.reachoutTimeLock?.isActive
+          ? `Bloqueados ate ${formatStatusDate(section.reachoutTimeLock.timeEnforcementEnds)}`
+          : 'Liberados',
+      ),
     ],
     extra: (section) => `
       <div class="status-diagnostic-block">
@@ -1589,6 +1597,7 @@ function buildSystemDiagnosticText(snapshot = state.systemStatus) {
       routeStats: snapshot.whatsapp?.routeStats,
       predominantRoute: snapshot.whatsapp?.predominantRoute,
       lastInboundRoute: snapshot.whatsapp?.lastInboundRoute,
+      reachoutTimeLock: snapshot.whatsapp?.reachoutTimeLock,
       recentOutbound: snapshot.whatsapp?.recentOutbound || [],
     },
     campaign: {

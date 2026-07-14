@@ -86,3 +86,22 @@ test('an authoritative inbound LID is sent only once when confirmation is delaye
   assert.equal(sends.length, 1);
   assert.equal(sends[0].target, lidJid);
 });
+
+test('does not retry an account-level WhatsApp restriction', async () => {
+  let sends = 0;
+  const wa = {
+    async sendMessage() {
+      sends += 1;
+      const error = new Error('Envio temporariamente bloqueado');
+      error.code = 'WA_REACHOUT_RESTRICTED';
+      error.retryable = false;
+      throw error;
+    },
+  };
+
+  const result = await sendTextWithConfirmation(wa, '5511999999999', 'Teste');
+
+  assert.equal(result.status, 'failed');
+  assert.equal(sends, 1);
+  assert.match(result.error, /bloqueado/i);
+});
