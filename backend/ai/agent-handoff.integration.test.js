@@ -42,9 +42,10 @@ const { executeHandoff } = await import('./handoff.js');
 const { deleteLead, getAllLeads, getDeletedLeads, getLead, saveLead } = await import('../data/leads-manager.js');
 
 class MockWhatsApp {
-  constructor({ failConsultant = false } = {}) {
+  constructor({ failConsultant = false, inboundRoute = null } = {}) {
     this.messages = [];
     this.failConsultant = failConsultant;
+    this.inboundRoute = inboundRoute;
     this.sequence = 0;
   }
 
@@ -54,8 +55,9 @@ class MockWhatsApp {
     return raw.split('@')[0].split(':')[0].replace(/\D/g, '') || null;
   }
 
-  getInboundRouteContext() {
-    return null;
+  getInboundRouteContext(message) {
+    if (typeof this.inboundRoute === 'function') return this.inboundRoute(message);
+    return this.inboundRoute;
   }
 
   async sendTyping() {}
@@ -144,6 +146,45 @@ test('asks only for WhatsApp on unresolved LID and then completes the same hando
   assert.equal(lead.phone, '5521987654321');
   assert.equal(lead.lastIntent, 'boleto_request');
   assert.equal(lead.status, 'transferred_to_financial');
+});
+
+test('replies to the exact inbound LID even when a real phone is mapped', async () => {
+  writeConfig();
+  const lid = '193768103915999';
+  const phone = '5511987654099';
+  const lidJid = `${lid}@lid`;
+  const inboundRoute = {
+    remoteJid: lidJid,
+    remoteJidAlt: '',
+    addressingMode: 'unknown',
+    senderPn: `${phone}@s.whatsapp.net`,
+    participantPn: '',
+    lidJid,
+    lidBase: lid,
+    phoneCandidates: [phone],
+    mappedPhone: phone,
+  };
+  const wa = new MockWhatsApp({ inboundRoute });
+
+  await handleIncomingMessage(wa, {
+    key: { remoteJid: lidJid, senderPn: `${phone}@s.whatsapp.net`, fromMe: false },
+    pushName: 'Cliente LID Resolvido',
+    message: { conversation: 'preciso de reboque agora' },
+  });
+
+  assert.equal(wa.messages.length, 2);
+  assert.equal(wa.messages[0].target, consultant.phone);
+  assert.equal(wa.messages[1].target, lidJid);
+  assert.equal(wa.messages[1].options.allowRawLid, true);
+  assert.equal(wa.messages[1].options.forcePhoneJid, false);
+  assert.equal(wa.messages[1].options.disableDeliveryRecovery, true);
+  assert.equal(wa.messages[1].options.routeLabel, 'agent_inbound_lid');
+
+  const lead = getLead(phone);
+  assert.ok(lead);
+  assert.equal(lead.phone, phone);
+  assert.equal(lead.lidJid, lidJid);
+  assert.equal(lead.replyTargetJid, lidJid);
 });
 
 test('critical routing bypasses business hours for different operational intents', async () => {
