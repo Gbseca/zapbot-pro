@@ -6,6 +6,7 @@ import { DOCS_DIR, PDF_CACHE_FILE } from '../storage/paths.js';
 // pdf-parse is CommonJS — use createRequire for ESM compatibility
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
+let chunkCache = { key: '', chunks: [] };
 
 function loadCache() {
   if (!fs.existsSync(PDF_CACHE_FILE)) return {};
@@ -69,6 +70,56 @@ export function searchPDFs(query = '') {
   }
 
   return matches.join('\n\n');
+}
+
+export function splitPDFText(text = '', { maxChunkChars = 1800, overlapChars = 180 } = {}) {
+  const normalized = String(text || '')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (!normalized) return [];
+
+  const chunks = [];
+  let cursor = 0;
+  while (cursor < normalized.length) {
+    let end = Math.min(normalized.length, cursor + maxChunkChars);
+    if (end < normalized.length) {
+      const boundary = Math.max(
+        normalized.lastIndexOf('\n\n', end),
+        normalized.lastIndexOf('. ', end),
+        normalized.lastIndexOf('; ', end),
+      );
+      if (boundary > cursor + Math.floor(maxChunkChars * 0.55)) end = boundary + 1;
+    }
+    const chunk = normalized.slice(cursor, end).trim();
+    if (chunk) chunks.push(chunk);
+    if (end >= normalized.length) break;
+    cursor = Math.max(cursor + 1, end - overlapChars);
+  }
+  return chunks;
+}
+
+export function getPDFKnowledgeChunks(options = {}) {
+  let modifiedAt = 0;
+  try {
+    modifiedAt = fs.statSync(PDF_CACHE_FILE).mtimeMs;
+  } catch {
+    return [];
+  }
+  const cacheKey = `${modifiedAt}:${options.maxChunkChars || 1800}:${options.overlapChars || 180}`;
+  if (chunkCache.key === cacheKey) return chunkCache.chunks;
+
+  const cache = loadCache();
+  const chunks = [];
+  for (const [filename, data] of Object.entries(cache)) {
+    const documentChunks = splitPDFText(data.text, options);
+    documentChunks.forEach((text, index) => {
+      chunks.push({ filename, index: index + 1, text });
+    });
+  }
+  chunkCache = { key: cacheKey, chunks };
+  return chunks;
 }
 
 export function getUploadedDocs() {

@@ -6,6 +6,7 @@
 import { getDefaultModel, resolveEffectiveAIConfig } from '../data/config-manager.js';
 
 const GEMINI_RATE_LIMIT_COOLDOWN_MS = 65_000;
+const GROQ_BACKUP_MODELS = ['openai/gpt-oss-20b', 'qwen/qwen3.6-27b'];
 let geminiCooldownUntil = 0;
 
 function shortProviderError(error) {
@@ -14,6 +15,11 @@ function shortProviderError(error) {
 
 function isRateLimitError(error) {
   return /\b429\b|too many requests|quota|resource_exhausted|rate.?limit/i.test(String(error?.message || error || ''));
+}
+
+function shouldTryGroqBackup(error) {
+  return isRateLimitError(error)
+    || /model.{0,80}(?:not found|decommission|deprecated|permission|unavailable)|json_validate_failed|does not match the expected schema|failed_generation|\b404\b|\b403\b/i.test(String(error?.message || error || ''));
 }
 
 function resolveModel(config, purpose = 'reply') {
@@ -35,14 +41,16 @@ function buildHistory(history = []) {
 function resolveGenerationSettings(options = {}) {
   const purpose = options.purpose || 'reply';
   const mode = options.mode || 'sales';
-  const jsonMode = purpose === 'qualification' || purpose === 'decision';
+  const jsonMode = purpose === 'qualification'
+    || purpose === 'decision'
+    || purpose === 'customer_agent';
 
   if (jsonMode) {
     return {
       jsonMode: true,
-      temperature: 0.15,
-      topP: 0.4,
-      maxTokens: purpose === 'decision' ? 512 : 300,
+      temperature: purpose === 'customer_agent' ? 0.35 : 0.15,
+      topP: purpose === 'customer_agent' ? 0.7 : 0.4,
+      maxTokens: purpose === 'customer_agent' ? 750 : purpose === 'decision' ? 512 : 300,
     };
   }
 
@@ -72,6 +80,22 @@ function resolveGenerationSettings(options = {}) {
   };
 }
 
+function toJsonSchema(value) {
+  if (Array.isArray(value)) return value.map(toJsonSchema);
+  if (!value || typeof value !== 'object') return value;
+  const normalized = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'type' && typeof item === 'string') normalized[key] = item.toLowerCase();
+    else normalized[key] = toJsonSchema(item);
+  }
+  if (normalized.type === 'object') normalized.additionalProperties = false;
+  return normalized;
+}
+
+function supportsGroqJsonSchema(model = '') {
+  return /^openai\/gpt-oss-(?:20b|120b)$/i.test(String(model));
+}
+
 async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, options = {}) {
   const settings = resolveGenerationSettings(options);
   const messages = [
@@ -92,7 +116,24 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, opt
   };
 
   if (settings.jsonMode) {
-    body.response_format = { type: 'json_object' };
+    body.response_format = options.responseSchema && supportsGroqJsonSchema(options.model)
+      ? {
+          type: 'json_schema',
+          json_schema: {
+            name: 'customer_agent_response',
+            strict: true,
+            schema: toJsonSchema(options.responseSchema),
+          },
+        }
+      : { type: 'json_object' };
+  }
+
+  if (/^openai\/gpt-oss-/i.test(String(options.model)) && options.purpose === 'customer_agent') {
+    body.reasoning_effort = 'low';
+    body.reasoning_format = 'hidden';
+  } else if (/^qwen\/qwen3/i.test(String(options.model)) && options.purpose === 'customer_agent') {
+    body.reasoning_effort = 'none';
+    body.reasoning_format = 'hidden';
   }
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -106,11 +147,30 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, opt
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Groq ${response.status}: ${errorText}`);
+    const retryAfter = response.headers.get('retry-after');
+    throw new Error(`Groq ${response.status}: ${errorText}${retryAfter ? ` Retry after ${retryAfter}s.` : ''}`);
   }
 
   const data = await response.json();
   return data.choices?.[0]?.message?.content?.trim() || '';
+}
+
+async function callGroqResilient(apiKey, context, options = {}) {
+  const models = [...new Set([options.model, ...GROQ_BACKUP_MODELS].filter(Boolean))];
+  let lastError = null;
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+    try {
+      const text = await callGroq(apiKey, context, { ...options, model });
+      return { text, model };
+    } catch (error) {
+      lastError = error;
+      const nextModel = models[index + 1];
+      if (!nextModel || !shouldTryGroqBackup(error)) throw error;
+      console.warn(`[AI] Groq model ${model} unavailable; using ${nextModel}: ${shortProviderError(error)}`);
+    }
+  }
+  throw lastError;
 }
 
 async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
@@ -131,9 +191,7 @@ async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
     }
 
     const data = await response.json();
-    const label = model === 'llama-3.3-70b-versatile'
-      ? 'Groq OK - Llama 3.3 70B ativo!'
-      : `Groq OK - ${model} ativo!`;
+    const label = `Groq OK - ${model} ativo!`;
     return { ok: true, message: `${label} (${data.choices?.[0]?.message?.content?.trim() || 'OK'})` };
   } catch (error) {
     return { ok: false, message: error.message };
@@ -141,45 +199,54 @@ async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
 }
 
 async function callGemini(apiKey, { systemPrompt, history = [], userMessage }, options = {}) {
-  const { GoogleGenerativeAI } = await import('@google/generative-ai');
+  const { GoogleGenAI } = await import('@google/genai');
   const settings = resolveGenerationSettings(options);
   const generationConfig = {
     temperature: settings.temperature,
     topP: settings.topP,
     maxOutputTokens: settings.maxTokens,
+    systemInstruction: systemPrompt,
   };
 
   if (settings.jsonMode) {
     generationConfig.responseMimeType = 'application/json';
+    if (options.responseSchema) generationConfig.responseSchema = options.responseSchema;
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
+  const ai = new GoogleGenAI({ apiKey });
+  const contents = [
+    ...buildHistory(history).map((item) => ({
+      role: item.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: item.content }],
+    })),
+    { role: 'user', parts: [{ text: userMessage }] },
+  ];
+  const response = await ai.models.generateContent({
     model: options.model,
-    systemInstruction: systemPrompt,
-    generationConfig,
+    contents,
+    config: generationConfig,
   });
-
-  const chatHistory = buildHistory(history).map((item) => ({
-    role: item.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: item.content }],
-  }));
-
-  const chat = model.startChat({ history: chatHistory });
-  const result = await chat.sendMessage(userMessage);
-  return result.response.text().trim();
+  return String(response.text || '').trim();
 }
 
 async function testGeminiKey(apiKey, model = getDefaultModel('gemini')) {
   try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const modelClient = genAI.getGenerativeModel({ model });
-    const result = await modelClient.generateContent('Responda so com: OK');
-    return { ok: true, message: `Gemini OK - ${model} ativo! (${result.response.text().trim()})` };
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model,
+      contents: 'Responda so com: OK',
+      config: { maxOutputTokens: 10, temperature: 0 },
+    });
+    return { ok: true, message: `Gemini OK - ${model} ativo! (${String(response.text || '').trim()})` };
   } catch (error) {
     return { ok: false, message: error.message };
   }
+}
+
+function formatCallResult(text, provider, model, options = {}) {
+  if (!options.returnMetadata) return text;
+  return { text, provider, model };
 }
 
 export async function callAI(config, context, options = {}) {
@@ -196,11 +263,13 @@ export async function callAI(config, context, options = {}) {
     };
 
     if (effective.effectiveGroqKey && Date.now() < geminiCooldownUntil) {
-      return callGroq(effective.effectiveGroqKey, context, groqFallbackOptions);
+      const result = await callGroqResilient(effective.effectiveGroqKey, context, groqFallbackOptions);
+      return formatCallResult(result.text, 'groq', result.model, options);
     }
 
     try {
-      return await callGemini(effective.effectiveGeminiKey, context, { ...options, model, purpose });
+      const text = await callGemini(effective.effectiveGeminiKey, context, { ...options, model, purpose });
+      return formatCallResult(text, 'gemini', model, options);
     } catch (error) {
       if (!effective.effectiveGroqKey) throw error;
 
@@ -209,7 +278,8 @@ export async function callAI(config, context, options = {}) {
       }
       console.warn(`[AI] Gemini failed for ${purpose}; using Groq fallback: ${shortProviderError(error)}`);
       try {
-        return await callGroq(effective.effectiveGroqKey, context, groqFallbackOptions);
+        const result = await callGroqResilient(effective.effectiveGroqKey, context, groqFallbackOptions);
+        return formatCallResult(result.text, 'groq', result.model, options);
       } catch (fallbackError) {
         throw new Error(
           `Gemini failed: ${shortProviderError(error)}; Groq fallback failed: ${shortProviderError(fallbackError)}`,
@@ -219,15 +289,18 @@ export async function callAI(config, context, options = {}) {
   }
 
   try {
-    return await callGroq(effective.effectiveGroqKey, context, { ...options, model, purpose });
+    const result = await callGroqResilient(effective.effectiveGroqKey, context, { ...options, model, purpose });
+    return formatCallResult(result.text, 'groq', result.model, options);
   } catch (error) {
     if (effective.geminiFallbackEnabled && effective.effectiveGeminiKey) {
       console.warn(`[AI] Groq failed for ${purpose}; using Gemini fallback: ${error.message}`);
-      return callGemini(effective.effectiveGeminiKey, context, {
+      const fallbackModel = getDefaultModel('gemini');
+      const text = await callGemini(effective.effectiveGeminiKey, context, {
         ...options,
-        model: getDefaultModel('gemini'),
+        model: fallbackModel,
         purpose,
       });
+      return formatCallResult(text, 'gemini', fallbackModel, options);
     }
     throw error;
   }

@@ -24,6 +24,7 @@ const consultant = {
 function writeConfig(overrides = {}) {
   const config = {
     aiEnabled: true,
+    customerAgentV2Enabled: false,
     aiProvider: 'gemini',
     geminiKey: 'test-key-not-used',
     businessHoursStart: '23:59',
@@ -345,6 +346,8 @@ test('keeps commercial handoff ordered and sends a single client confirmation', 
     model: 'Gol',
     year: '2020',
     plate: 'ABC1D23',
+    aiMemory: { customerGoal: 'receber cotacao real para o Gol 2020' },
+    handoffSummary: 'Cliente quer comparar o valor e ja informou modelo, ano e placa.',
     history: [{ role: 'user', content: 'quero uma cotacao' }],
   };
 
@@ -354,7 +357,8 @@ test('keeps commercial handoff ordered and sends a single client confirmation', 
   assert.equal(wa.messages.length, 2);
   assert.equal(wa.messages[0].target, consultant.phone);
   assert.equal(wa.messages[1].target, phone);
-  assert.match(wa.messages[0].message, /cotacao de protecao veicular/i);
+  assert.match(wa.messages[0].message, /receber cotacao real para o Gol 2020/i);
+  assert.match(wa.messages[0].message, /Cliente quer comparar o valor/i);
   assert.equal(getLead(phone).status, 'transferred');
 });
 

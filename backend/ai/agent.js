@@ -24,6 +24,11 @@ import {
 } from './conversation-decision.js';
 import { buildHumanizedReply } from './humanized-reply-builder.js';
 import { getRelevantKnowledge } from './knowledge-retriever.js';
+import {
+  applyCustomerAgentTurnToLead,
+  customerAgentTurnToDecision,
+  runCustomerAgent,
+} from './customer-agent.js';
 import { getNextSalesStep } from './sales-playbook.js';
 import {
   applySalesEventToLead,
@@ -377,9 +382,10 @@ function buildOperationalContactRequest(lead = {}, event = {}, config = {}) {
 
 function buildOperationalReply(event = {}, lead = {}) {
   const type = getOperationalEventType(event);
+  if (event.clientReply || event.reply) return event.clientReply || event.reply;
   if (type === 'assistance_request') return 'Entendi o pedido de reboque ou assistencia. Encaminhei seu atendimento para um consultor continuar por aqui.';
   if (type === 'event_report') return 'Entendi o que aconteceu com o veiculo. Encaminhei seu atendimento para um consultor continuar por aqui.';
-  return event.clientReply || event.reply || 'Entendi. Encaminhei seu atendimento para um consultor continuar por aqui.';
+  return 'Entendi. Encaminhei seu atendimento para um consultor continuar por aqui.';
 }
 
 function buildOperationalContactReceivedReply(event = {}) {
@@ -1228,6 +1234,144 @@ async function handlePendingOperationalHandoff(wa, leadId, lead, route, config, 
   return handleOperationalEventAction(wa, leadId, lead, route, config, event, content);
 }
 
+async function processCustomerAgentV2(wa, {
+  leadId,
+  lead,
+  route,
+  config,
+  message,
+} = {}) {
+  let turn;
+  try {
+    turn = await runCustomerAgent({ config, lead, message });
+  } catch (error) {
+    console.warn(`[Agent] Customer agent v2 failed for ${leadId}; using legacy fallback: ${error.message}`);
+    void recordEvent({
+      leadKey: leadId,
+      eventType: 'customer_agent_v2_failed',
+      payload: { error: error.message },
+    });
+    return false;
+  }
+
+  applyCustomerAgentTurnToLead(lead, turn);
+  const decision = customerAgentTurnToDecision(turn, lead);
+  decision.type = turn.primaryIntent;
+  decision.reply = turn.reply;
+  decision.clientReply = turn.reply;
+  decision.reason = turn.handoffReason || turn.reasoningSummary;
+  decision.shouldNotifyHuman = turn.shouldHandoff;
+  applyConversationDecisionToLead(lead, decision, { text: message, historyText: message });
+
+  void recordEvent({
+    leadKey: leadId,
+    eventType: 'customer_agent_v2_decision',
+    payload: {
+      intent: turn.primaryIntent,
+      secondaryIntent: turn.secondaryIntent,
+      action: turn.action,
+      confidence: turn.confidence,
+      answerStatus: turn.answerStatus,
+      provider: turn.provider,
+      model: turn.model,
+      knowledgeIds: turn.knowledgeIds,
+    },
+  });
+
+  if (turn.action === 'stop') {
+    lead.status = 'no_interest';
+    lead.stage = 'no_interest';
+    lead.softRefusalSent = false;
+    await persistSimpleReply(wa, leadId, lead, route.target, turn.reply, () => ({}), route.options);
+    return true;
+  }
+
+  if (turn.action === 'handoff_operational') {
+    saveLead(leadId, lead);
+    await handleOperationalEventAction(
+      wa,
+      leadId,
+      lead,
+      route,
+      config,
+      decision,
+      { text: message, historyText: message, clientConfirmationReply: turn.reply },
+    );
+    return true;
+  }
+
+  if (turn.action === 'handoff_sales') {
+    if (!getLeadRealPhone(lead)) {
+      lead.status = 'awaiting_phone_for_handoff';
+      lead.stage = 'awaiting_phone_for_handoff';
+      lead.phoneResolved = false;
+      lead.pendingHandoffReason = turn.handoffReason || turn.reasoningSummary;
+      saveLead(leadId, lead);
+      await persistSimpleReply(
+        wa,
+        leadId,
+        lead,
+        route.target,
+        ASK_PHONE_FOR_HANDOFF_REPLY,
+        () => ({}),
+        route.options,
+      );
+      return true;
+    }
+
+    lead.status = 'qualified';
+    lead.stage = 'qualified';
+    lead.qualifiedAt = new Date().toISOString();
+    saveLead(leadId, lead);
+    try {
+      const handoffResult = await executeHandoff(wa, lead, config, {
+        reason: turn.handoffReason || turn.reasoningSummary,
+        clientMessage: turn.reply,
+        clientSendOptions: route.options,
+      });
+      appendAssistantMessage(lead, turn.reply, {
+        status: handoffResult.clientNotified ? 'confirmed' : 'failed',
+        targetJid: route.target,
+        error: handoffResult.clientNotified ? null : lead.handoffClientError,
+      });
+      saveLead(leadId, lead);
+    } catch (error) {
+      markSalesHandoffFailure(lead, error);
+      await persistSimpleReply(
+        wa,
+        leadId,
+        lead,
+        route.target,
+        getSalesHandoffFailedReply(),
+        () => ({ handoffError: error.message }),
+        route.options,
+      );
+    }
+    return true;
+  }
+
+  const reply = ensureCompleteReply(turn.reply, {
+    lead,
+    latestUserText: message,
+    mode: turn.mode,
+  });
+  console.log(`[Agent] Customer agent v2 sending to ${route.target}: intent=${turn.primaryIntent}, action=${turn.action}`);
+  let delivery;
+  try {
+    delivery = await sendHumanized(wa, route.target, reply, message, false, route.options || {});
+  } catch (error) {
+    delivery = {
+      status: 'failed',
+      messageId: null,
+      targetJid: error.targetResolved || null,
+      error: error.message,
+    };
+  }
+  appendAssistantMessage(lead, reply, delivery);
+  saveLead(leadId, lead);
+  return true;
+}
+
 export async function handleIncomingMessage(wa, rawMsg) {
   if (!isValidIncoming(rawMsg)) return;
 
@@ -1305,6 +1449,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
 
   const provider = config.effectiveProvider || 'groq';
   const hasKey = !!config.hasEffectiveKey;
+  const useCustomerAgentV2 = config.customerAgentV2Enabled !== false && hasKey;
   if (!hasKey) {
     console.warn(`[Agent] No API key for "${provider}"; deterministic routing remains active.`);
   }
@@ -1487,7 +1632,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     saveLead(leadId, existingLead);
   }
 
-  if (!isBusinessHours(config)) {
+  if (!useCustomerAgentV2 && !isBusinessHours(config)) {
     const today = new Date().toDateString();
     if (existingLead?.lastOutOfHoursMsg !== today) {
       const [sh] = (config.businessHoursStart || '08:00').split(':');
@@ -1505,7 +1650,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
 
   const norm = normalizeText(text);
 
-  if (isStrongRefusal(norm)) {
+  if (!useCustomerAgentV2 && isStrongRefusal(norm)) {
     console.log(`[Agent] Strong refusal detected from ${leadId}: "${text}"`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.status = 'no_interest';
@@ -1515,7 +1660,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  if (!collectionsContext && isSoftRefusal(norm)) {
+  if (!useCustomerAgentV2 && !collectionsContext && isSoftRefusal(norm)) {
     if (existingLead?.softRefusalSent) {
       console.log(`[Agent] 2nd soft refusal - closing ${leadId}`);
       const lead = existingLead;
@@ -1533,7 +1678,7 @@ export async function handleIncomingMessage(wa, rawMsg) {
     return;
   }
 
-  if (!collectionsContext && isAmbiguousInterjection(norm)) {
+  if (!useCustomerAgentV2 && !collectionsContext && isAmbiguousInterjection(norm)) {
     console.log(`[Agent] Ambiguous interjection from ${leadId}: "${text}"`);
     const lead = existingLead || createNewLead(leadId, displayNum, pushName, conversationPhone);
     lead.history = lead.history || [];
@@ -1653,6 +1798,17 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
   } else if (lead.status === 'new' || lead.status === 'cold') {
     lead.status = 'talking';
     lead.stage = lead.stage || 'engaged';
+  }
+
+  if (config.customerAgentV2Enabled !== false && config.hasEffectiveKey) {
+    const handled = await processCustomerAgentV2(wa, {
+      leadId,
+      lead,
+      route,
+      config,
+      message: combinedText,
+    });
+    if (handled) return;
   }
 
   const decision = await makeConversationDecision({
