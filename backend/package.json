@@ -6,12 +6,12 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test ai/conversation-regression.test.js ai/agent-handoff.integration.test.js ai/humanizer.test.js data/leads-manager.test.js data/lead-lifecycle-service.test.js security/leads-access-guard.test.js"
+    "test": "node --test ai/conversation-regression.test.js ai/agent-handoff.integration.test.js ai/humanizer.test.js whatsapp-lid-routing.test.js data/leads-manager.test.js data/lead-lifecycle-service.test.js security/leads-access-guard.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "2.109.0",
-    "@whiskeysockets/baileys": "6.7.23",
+    "@whiskeysockets/baileys": "7.0.0-rc13",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "multer": "^2.2.0",
@@ -20,6 +20,9 @@
     "pino": "^9.3.2",
     "qrcode": "^1.5.3",
     "ws": "^8.17.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "overrides": {
     "node-cron": {

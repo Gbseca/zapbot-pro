@@ -292,6 +292,39 @@ class WhatsAppManager extends EventEmitter {
         return baseId ? `${baseId}@lid` : '';
     }
 
+    async _resolveLidFromSignalRepository(phoneJid) {
+        const lidMapping = this.sock?.signalRepository?.lidMapping;
+        if (!lidMapping || typeof lidMapping.getLIDForPN !== 'function') return '';
+
+        try {
+            return this._normalizeLidJid(await lidMapping.getLIDForPN(phoneJid));
+        } catch (error) {
+            console.warn(`[WA] signal LID lookup failed target=${phoneJid}: ${error.message}`);
+            return '';
+        }
+    }
+
+    _registerSyncedContact(contact) {
+        const preferredJid = String(contact?.id || '').trim();
+        const phoneJid = String(
+            contact?.phoneNumber
+            || (!isLidJid(preferredJid) ? preferredJid : '')
+            || '',
+        ).trim();
+        const lidJid = this._normalizeLidJid(
+            contact?.lid
+            || (isLidJid(preferredJid) ? preferredJid : ''),
+        );
+        const phone = normalizePhoneCandidate(phoneJid);
+        if (!phone) return 0;
+
+        let mapped = 0;
+        if (this._registerPhoneAlias(phone, phone, 'contacts.upsert:phone')) mapped++;
+        if (lidJid && this._registerPhoneAlias(lidJid, phone, 'contacts.upsert:lid')) mapped++;
+        if (lidJid) this._registerPreferredJidForPhone(phone, lidJid, 'contacts.upsert:preferred');
+        return mapped;
+    }
+
     _getSignalSessionPrefixesForJid(jid) {
         const target = String(jid || '').trim();
         const baseId = toBaseId(target);
@@ -322,20 +355,28 @@ class WhatsAppManager extends EventEmitter {
         const ownJids = [
             this.sock?.user?.id,
             this.sock?.user?.lid,
+            this.sock?.user?.phoneNumber,
         ].filter(Boolean);
 
         return ownJids.some(jid => this._getSignalSessionPrefixesForJid(jid).includes(prefix));
     }
 
     async _hydrateOutboundTarget(targetInfo) {
-        if (!this.sock || typeof this.sock.onWhatsApp !== 'function' || !targetInfo?.resolvedPhone) {
+        if (!this.sock || !targetInfo?.resolvedPhone) {
             return null;
         }
 
         const phoneJid = WhatsAppManager.buildJid(targetInfo.resolvedPhone);
+        const signalLid = await this._resolveLidFromSignalRepository(phoneJid);
+        if (signalLid) {
+            this._registerPreferredJidForPhone(targetInfo.resolvedPhone, signalLid, 'signalRepository:lidMapping');
+        }
+
+        if (typeof this.sock.onWhatsApp !== 'function') return signalLid || null;
+
         try {
             const [result] = await this.sock.onWhatsApp(phoneJid);
-            const resultLid = this._normalizeLidJid(result?.lid);
+            const resultLid = signalLid || this._normalizeLidJid(result?.lid);
             const lookup = {
                 target: targetInfo.originalTarget,
                 exists: !!result?.exists,
@@ -346,7 +387,7 @@ class WhatsAppManager extends EventEmitter {
             this._lastOnWhatsAppByPhone.set(targetInfo.resolvedPhone, lookup);
             console.log(`[WA] onWhatsApp target=${targetInfo.originalTarget} exists=${lookup.exists} jid=${lookup.jid || '-'} lid=${lookup.lid || '-'}`);
 
-            if (!result?.exists || !result?.jid) return null;
+            if (!result?.exists || !result?.jid) return resultLid || null;
             const existingLid = this._lidByPhone.get(targetInfo.resolvedPhone)
                 || (isLidJid(this._preferredJidByPhone.get(targetInfo.resolvedPhone))
                     ? this._preferredJidByPhone.get(targetInfo.resolvedPhone)
@@ -361,7 +402,7 @@ class WhatsAppManager extends EventEmitter {
             return resultLid || result.jid;
         } catch (error) {
             console.warn(`[WA] onWhatsApp failed target=${targetInfo.originalTarget}: ${error.message}`);
-            return null;
+            return signalLid || null;
         }
     }
 
@@ -1058,14 +1099,7 @@ class WhatsAppManager extends EventEmitter {
             this.sock.ev.on('contacts.upsert', (contacts) => {
                 let mapped = 0;
                 for (const contact of contacts) {
-                    const phoneJid = contact?.id || '';
-                    const lidJid = contact?.lid || '';
-                    const phone = normalizePhoneCandidate(phoneJid);
-                    const lid = toBaseId(lidJid);
-
-                    if (phone && this._registerPhoneAlias(phone, phone, 'contacts.upsert:phone')) mapped++;
-                    if (phone && lid && lid !== phone && this._registerPhoneAlias(lid, phone, 'contacts.upsert:lid')) mapped++;
-                    if (phone && lidJid) this._registerPreferredJidForPhone(phone, lidJid, 'contacts.upsert:preferred');
+                    mapped += this._registerSyncedContact(contact);
                 }
                 if (mapped > 0) {
                     console.log(`[WA] Contacts synced: ${mapped} mapped (total in map: ${this._contactMap.size})`);
