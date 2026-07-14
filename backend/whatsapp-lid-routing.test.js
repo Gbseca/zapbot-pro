@@ -106,14 +106,14 @@ test('normalizes the account reachout restriction returned by WhatsApp', async (
     });
 });
 
-test('blocks typing and sends locally while a companion restriction is active', async () => {
+test('keeps sends enabled when the session reports a reachout timelock', async () => {
     let outboundCalls = 0;
     const manager = new WhatsAppManager(null);
     manager.status = 'connected';
     manager.sock = {
         sendMessage: async () => {
             outboundCalls += 1;
-            return {};
+            return { key: { id: 'reachout-send-test-id' } };
         },
         sendPresenceUpdate: async () => {
             outboundCalls += 1;
@@ -125,10 +125,12 @@ test('blocks typing and sends locally while a companion restriction is active', 
         enforcementType: 'RESTRICT_ALL_COMPANIONS',
     });
 
-    await assert.rejects(
-        manager.sendMessage(TEST_PHONE, 'Teste'),
-        (error) => error.code === 'WA_REACHOUT_RESTRICTED' && error.retryable === false,
-    );
-    assert.equal(await manager.sendTyping(TEST_PHONE, 1), null);
-    assert.equal(outboundCalls, 0);
+    const accepted = await manager.sendMessage(TEST_PHONE, 'Teste');
+    assert.equal(accepted.status, 'accepted');
+    assert.ok(await manager.sendTyping(TEST_PHONE, 1));
+    assert.equal(outboundCalls, 3);
+
+    const record = manager._outboundRecords.get(accepted.messageId);
+    clearTimeout(record?.cleanupTimer);
+    manager._outboundRecords.delete(accepted.messageId);
 });

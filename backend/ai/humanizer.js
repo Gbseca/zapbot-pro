@@ -104,7 +104,7 @@ export async function sendTextWithConfirmation(wa, number, text, sendOptions = {
         targetKind: error.targetKind || null,
         error: error.message,
       };
-      if (error.retryable === false || error.code === 'WA_REACHOUT_RESTRICTED') return lastDelivery;
+      if (error.retryable === false) return lastDelivery;
       if (index < attempts.length - 1) continue;
       return lastDelivery;
     }
