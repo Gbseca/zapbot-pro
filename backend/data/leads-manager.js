@@ -380,7 +380,8 @@ export function toLeadSummary(lead = {}, { duplicateCount = 1 } = {}) {
     || anyMessage?.content
     || '',
   ).trim();
-  const updatedAt = lead.updatedAt || lead.lastInteraction || lead.createdAt || null;
+  // List activity follows the conversation, not background CRM maintenance.
+  const updatedAt = lead.lastInteraction || lead.updatedAt || lead.createdAt || null;
   const inactivityDays = updatedAt ? Math.max(0, Math.floor((Date.now() - toTimestamp(updatedAt)) / 86400000)) : null;
   const pipelineStage = deriveLeadPipelineStage(lead);
   const attentionStartedAt = pipelineStage === 'attention'
