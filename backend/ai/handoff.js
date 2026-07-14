@@ -4,6 +4,7 @@ import {
   listHandoffConsultants,
 } from '../data/consultants-repository.js';
 import { recordEvent } from '../data/events-repository.js';
+import { sendTextWithConfirmation } from './humanizer.js';
 import {
   buildClientSendOptions,
   buildWaLinkNumber,
@@ -67,6 +68,55 @@ function resolveConsultantTarget(consultant = {}, routeLabel = 'agent_consultant
   }
 
   throw new Error(`Consultor ${consultant.name || 'sem nome'} nao tem contato valido.`);
+}
+
+function isLidTarget(value = '') {
+  return /@(?:hosted\.)?lid\b/i.test(String(value));
+}
+
+async function preferConsultantConversationRoute(wa, target) {
+  if (!target?.options?.forcePhoneJid || typeof wa?.preferStoredLidForTarget !== 'function') {
+    return target;
+  }
+
+  try {
+    const preferred = await wa.preferStoredLidForTarget(target.target);
+    if (!isLidTarget(preferred?.preferredJid)) return target;
+    return {
+      target: preferred.preferredJid,
+      options: {
+        ...target.options,
+        forcePhoneJid: false,
+        allowRawLid: true,
+      },
+    };
+  } catch (error) {
+    console.warn(`[Handoff] Could not resolve consultant LID route: ${error.message}`);
+    return target;
+  }
+}
+
+async function sendConfirmedConsultantMessage(wa, consultant, message, routeLabel) {
+  const configuredTarget = resolveConsultantTarget(consultant, routeLabel);
+  const target = await preferConsultantConversationRoute(wa, configuredTarget);
+  const delivery = await sendTextWithConfirmation(wa, target.target, message, {
+    ...target.options,
+    disableDeliveryRecovery: true,
+  });
+
+  if (delivery?.status !== 'confirmed') {
+    const error = new Error(
+      delivery?.error
+      || `Envio ao consultor sem confirmacao de entrega (${delivery?.status || 'desconhecido'}).`,
+    );
+    error.code = delivery?.status === 'failed'
+      ? 'CONSULTANT_DELIVERY_FAILED'
+      : 'CONSULTANT_DELIVERY_UNCONFIRMED';
+    error.delivery = delivery || null;
+    throw error;
+  }
+
+  return { target, delivery };
 }
 
 function sanitizeCustomerText(value = '') {
@@ -224,14 +274,18 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
   let lastError = null;
   for (const consultant of consultants) {
     try {
-      const target = resolveConsultantTarget(consultant, 'agent_operational_handoff');
       const message = buildOperationalConsultantMessage(lead, event, handoff);
       await recordEvent({
         leadKey,
         eventType: 'handoff_started',
         payload: { type: 'operational', intent: handoff.type, consultant: consultant.name },
       });
-      await wa.sendMessage(target.target, message, null, target.options);
+      const notification = await sendConfirmedConsultantMessage(
+        wa,
+        consultant,
+        message,
+        'agent_operational_handoff',
+      );
 
       Object.assign(lead, {
         status: handoff.status,
@@ -243,6 +297,9 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
         financialTransferredAt: new Date().toISOString(),
         financialTransferredTo: consultant.phone || consultant.number || null,
         financialTransferredToName: consultant.name || null,
+        handoffDeliveryStatus: notification.delivery.status,
+        handoffMessageId: notification.delivery.messageId || null,
+        handoffConfirmedAt: new Date().toISOString(),
         handoffError: null,
         handoffClientConfirmed: false,
       });
@@ -250,7 +307,14 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
       await recordEvent({
         leadKey,
         eventType: 'handoff_success',
-        payload: { type: 'operational', intent: handoff.type, consultant: consultant.name, status: handoff.status },
+        payload: {
+          type: 'operational',
+          intent: handoff.type,
+          consultant: consultant.name,
+          status: handoff.status,
+          deliveryStatus: notification.delivery.status,
+          messageId: notification.delivery.messageId || null,
+        },
       });
       return {
         ok: true,
@@ -270,6 +334,8 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
     stage: 'handoff_failed',
     operationalStatus: 'handoff_failed',
     handoffError: errorMessage,
+    handoffDeliveryStatus: lastError?.delivery?.status || 'failed',
+    handoffMessageId: lastError?.delivery?.messageId || null,
     handoffFailedAt: new Date().toISOString(),
   });
   persistLead(lead);
@@ -316,9 +382,16 @@ export async function executeHandoff(wa, lead, config, options = {}) {
   let lastError = null;
   for (const candidate of consultants) {
     try {
-      const target = resolveConsultantTarget(candidate, 'agent_sales_handoff');
       await recordEvent({ leadKey, eventType: 'handoff_started', payload: { type: 'sales', consultant: candidate.name } });
-      await wa.sendMessage(target.target, buildSalesConsultantMessage(lead), null, target.options);
+      const notification = await sendConfirmedConsultantMessage(
+        wa,
+        candidate,
+        buildSalesConsultantMessage(lead),
+        'agent_sales_handoff',
+      );
+      lead.handoffDeliveryStatus = notification.delivery.status;
+      lead.handoffMessageId = notification.delivery.messageId || null;
+      lead.handoffConfirmedAt = new Date().toISOString();
       consultant = candidate;
       break;
     } catch (error) {
@@ -333,6 +406,8 @@ export async function executeHandoff(wa, lead, config, options = {}) {
       status: 'handoff_failed',
       stage: 'handoff_failed',
       handoffError: error.message,
+      handoffDeliveryStatus: error.delivery?.status || 'failed',
+      handoffMessageId: error.delivery?.messageId || null,
       handoffFailedAt: new Date().toISOString(),
     });
     persistLead(lead);
@@ -352,7 +427,14 @@ export async function executeHandoff(wa, lead, config, options = {}) {
   let clientNotified = true;
   let clientError = null;
   try {
-    await wa.sendMessage(clientTarget, clientMessage, null, clientOptions);
+    const clientDelivery = await sendTextWithConfirmation(wa, clientTarget, clientMessage, {
+      ...clientOptions,
+      disableDeliveryRecovery: true,
+    });
+    clientNotified = clientDelivery?.status === 'confirmed';
+    clientError = clientNotified
+      ? null
+      : clientDelivery?.error || `Confirmacao ao cliente sem entrega confirmada (${clientDelivery?.status || 'desconhecido'}).`;
   } catch (error) {
     clientNotified = false;
     clientError = error.message;
