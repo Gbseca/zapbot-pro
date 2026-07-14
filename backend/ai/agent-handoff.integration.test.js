@@ -42,10 +42,17 @@ const { executeHandoff } = await import('./handoff.js');
 const { deleteLead, getAllLeads, getDeletedLeads, getLead, saveLead } = await import('../data/leads-manager.js');
 
 class MockWhatsApp {
-  constructor({ failConsultant = false, inboundRoute = null } = {}) {
+  constructor({
+    failConsultant = false,
+    consultantDeliveryStatus = 'confirmed',
+    inboundRoute = null,
+    preferredConsultantLid = null,
+  } = {}) {
     this.messages = [];
     this.failConsultant = failConsultant;
+    this.consultantDeliveryStatus = consultantDeliveryStatus;
     this.inboundRoute = inboundRoute;
+    this.preferredConsultantLid = preferredConsultantLid;
     this.sequence = 0;
   }
 
@@ -62,6 +69,10 @@ class MockWhatsApp {
 
   async sendTyping() {}
 
+  async preferStoredLidForTarget() {
+    return { preferredJid: this.preferredConsultantLid };
+  }
+
   async sendMessage(target, message, _image, options = {}) {
     if (this.failConsultant && String(target) === consultant.phone) {
       throw new Error('consultant delivery failed');
@@ -75,7 +86,7 @@ class MockWhatsApp {
     };
     this.messages.push(record);
     return {
-      status: 'confirmed',
+      status: String(target) === consultant.phone ? this.consultantDeliveryStatus : 'confirmed',
       messageId: `mock-${this.sequence}`,
       resolvedJid: String(target),
     };
@@ -255,6 +266,42 @@ test('persists a delivery failure and gives the client a truthful response', asy
   assert.ok(lead);
   assert.equal(lead.status, 'handoff_failed');
   assert.match(lead.handoffError, /consultant delivery failed/i);
+});
+
+test('does not claim a handoff when the consultant send is accepted without delivery confirmation', async () => {
+  writeConfig();
+  const wa = new MockWhatsApp({ consultantDeliveryStatus: 'accepted' });
+  const phone = '5511987654032';
+
+  await handleIncomingMessage(wa, textMessage(phone, 'preciso do boleto deste mes'));
+
+  assert.equal(wa.messages.length, 2);
+  assert.equal(wa.messages[0].target, consultant.phone);
+  assert.equal(wa.messages[1].target, phone);
+  assert.match(wa.messages[1].message, /nao consegui avisar o consultor/i);
+  assert.doesNotMatch(wa.messages[1].message, /encaminhei/i);
+  const lead = getLead(phone);
+  assert.ok(lead);
+  assert.equal(lead.status, 'handoff_failed');
+  assert.equal(lead.handoffDeliveryStatus, 'accepted');
+  assert.match(lead.handoffError, /sem confirmacao de entrega/i);
+});
+
+test('prefers the consultant LID route and still requires confirmed delivery', async () => {
+  writeConfig();
+  const consultantLid = '127766703915999@lid';
+  const wa = new MockWhatsApp({ preferredConsultantLid: consultantLid });
+  const phone = '5511987654033';
+
+  await handleIncomingMessage(wa, textMessage(phone, 'quero falar sobre uma cobranca'));
+
+  assert.equal(wa.messages.length, 2);
+  assert.equal(wa.messages[0].target, consultantLid);
+  assert.equal(wa.messages[0].options.forcePhoneJid, false);
+  assert.equal(wa.messages[0].options.allowRawLid, true);
+  assert.equal(wa.messages[0].options.disableDeliveryRecovery, true);
+  assert.equal(getLead(phone).operationalStatus, 'consultant_notified');
+  assert.equal(getLead(phone).handoffDeliveryStatus, 'confirmed');
 });
 
 test('ignores media-only messages and handles a caption as ordinary text', async () => {
