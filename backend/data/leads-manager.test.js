@@ -226,6 +226,27 @@ test('internal notes do not reset the waiting time of an urgent lead', () => {
   assert.equal(manager.getLead('legacy').attentionStartedAt, waitingSince);
 });
 
+test('summary activity date ignores background CRM maintenance', () => {
+  resetStorage();
+  const interactionAt = '2026-05-20T12:00:00.000Z';
+  const maintenanceAt = '2026-07-14T17:00:00.000Z';
+  fs.writeFileSync(path.join(dataDir, 'leads.json'), JSON.stringify({
+    legacy: {
+      number: 'legacy',
+      phone: '5511911111111',
+      status: 'talking',
+      lastInteraction: interactionAt,
+      updatedAt: maintenanceAt,
+      intentReclassifiedAt: maintenanceAt,
+      history: [{ role: 'user', content: 'mensagem antiga', ts: Date.parse(interactionAt) }],
+    },
+  }));
+
+  const summary = manager.getAllLeads({ summary: true })[0];
+  assert.equal(summary.updatedAt, interactionAt);
+  assert.ok(summary.inactivityDays > 30);
+});
+
 test.after(() => {
   fs.rmSync(storageRoot, { recursive: true, force: true });
 });
