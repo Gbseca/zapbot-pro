@@ -195,6 +195,7 @@ class WhatsAppManager extends EventEmitter {
             : [null, KNOWN_QR_FALLBACK_VERSION];
         this._versionCursor = 0;
         this._activeConnectVersion = this._versionCandidates[0] || null;
+        this._reachoutTimeLock = null;
         this.lastDisconnect = null;
     }
 
@@ -248,6 +249,48 @@ class WhatsAppManager extends EventEmitter {
 
     _clearLastDisconnect() {
         this.lastDisconnect = null;
+    }
+
+    _normalizeReachoutTimeLock(result) {
+        if (!result) return null;
+        const rawEnd = result.timeEnforcementEnds;
+        const parsedEnd = rawEnd instanceof Date ? rawEnd : (rawEnd ? new Date(rawEnd) : null);
+        return {
+            supported: result.supported !== false,
+            isActive: !!result.isActive,
+            timeEnforcementEnds: parsedEnd && !Number.isNaN(parsedEnd.getTime())
+                ? parsedEnd.toISOString()
+                : null,
+            enforcementType: result.enforcementType || null,
+        };
+    }
+
+    _setReachoutTimeLock(result) {
+        this._reachoutTimeLock = this._normalizeReachoutTimeLock(result);
+        return this._reachoutTimeLock;
+    }
+
+    _getActiveReachoutTimeLock() {
+        if (!this._reachoutTimeLock?.isActive) return null;
+        const enforcementEnd = Date.parse(this._reachoutTimeLock.timeEnforcementEnds || '');
+        if (Number.isFinite(enforcementEnd) && enforcementEnd <= Date.now()) {
+            this._reachoutTimeLock = { ...this._reachoutTimeLock, isActive: false };
+            return null;
+        }
+        return this._reachoutTimeLock;
+    }
+
+    _createReachoutRestrictedError() {
+        const restriction = this._getActiveReachoutTimeLock();
+        if (!restriction) return null;
+        const suffix = restriction.timeEnforcementEnds
+            ? ` ate ${restriction.timeEnforcementEnds}`
+            : '';
+        const error = new Error(`WhatsApp bloqueou temporariamente envios por dispositivos vinculados${suffix}`);
+        error.code = 'WA_REACHOUT_RESTRICTED';
+        error.retryable = false;
+        error.restriction = restriction;
+        return error;
     }
 
     _broadcastStatus(status = this.status) {
@@ -1035,6 +1078,10 @@ class WhatsAppManager extends EventEmitter {
             this.sock.ev.on('connection.update', async (update) => {
                 const { connection, lastDisconnect, qr } = update;
 
+                if (update.reachoutTimeLock) {
+                    this._setReachoutTimeLock(update.reachoutTimeLock);
+                }
+
                 if (qr) {
                     try {
                         attemptState.sawQr = true;
@@ -1099,6 +1146,14 @@ class WhatsAppManager extends EventEmitter {
                     console.log('[WhatsApp] Conectado com sucesso!');
                     this._broadcastStatus('connected');
                     this.broadcast({ type: 'log', level: 'success', message: 'WhatsApp conectado com sucesso!' });
+                    this.fetchReachoutTimeLock()
+                        .then((restriction) => {
+                            if (restriction?.isActive) {
+                                console.warn(`[WhatsApp] Outbound companion restriction active until ${restriction.timeEnforcementEnds || 'unknown'}`);
+                                this._broadcastStatus('connected');
+                            }
+                        })
+                        .catch((error) => console.warn(`[WhatsApp] Reachout restriction check failed: ${error.message}`));
                 }
             });
 
@@ -1189,6 +1244,8 @@ class WhatsAppManager extends EventEmitter {
         if (!this.sock || this.status !== 'connected') {
             throw new Error('WhatsApp nao esta conectado');
         }
+        const reachoutError = this._createReachoutRestrictedError();
+        if (reachoutError) throw reachoutError;
 
         const targetInfo = this.resolveOutboundTarget(target, options);
         const sendMeta = {
@@ -1369,6 +1426,7 @@ class WhatsAppManager extends EventEmitter {
 
     async sendTyping(number, duration = 2500, options = {}) {
         if (!this.sock || this.status !== 'connected') return null;
+        if (this._getActiveReachoutTimeLock()) return null;
 
         let targetInfo;
         try {
@@ -1400,14 +1458,7 @@ class WhatsAppManager extends EventEmitter {
         }
 
         const result = await this.sock.fetchAccountReachoutTimelock();
-        return {
-            supported: true,
-            isActive: !!result?.isActive,
-            timeEnforcementEnds: result?.timeEnforcementEnds instanceof Date
-                ? result.timeEnforcementEnds.toISOString()
-                : result?.timeEnforcementEnds || null,
-            enforcementType: result?.enforcementType || null,
-        };
+        return this._setReachoutTimeLock({ supported: true, ...result });
     }
 
     getStatus() {
@@ -1427,6 +1478,7 @@ class WhatsAppManager extends EventEmitter {
                 campaignRouteMode: String(process.env.WA_CAMPAIGN_ROUTE_MODE || 'lid_first').toLowerCase(),
                 retryPhoneOnLidTimeout: WA_RETRY_PHONE_ON_LID_TIMEOUT,
             },
+            reachoutTimeLock: this._reachoutTimeLock,
             outboundDiagnostics: this.getOutboundDiagnostics(),
             recentOutbound: this._recentOutbound.slice(-50).reverse(),
         };
@@ -1449,6 +1501,7 @@ class WhatsAppManager extends EventEmitter {
         this.qrCode = null;
         this.reconnecting = false;
         this._authKeys = null;
+        this._reachoutTimeLock = null;
         this._clearLastDisconnect();
         if (fs.existsSync(this.authPath)) {
             fs.rmSync(this.authPath, { recursive: true, force: true });

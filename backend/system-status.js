@@ -187,14 +187,18 @@ export function createSystemStatusService({ wa, queue, adResearch, loadConfig, b
 
   function whatsappSnapshot() {
     const status = wa.getStatus();
+    const activeRestriction = status.reachoutTimeLock?.isActive ? status.reachoutTimeLock : null;
     let severity = 'healthy';
-    if (status.status === 'disconnected') severity = status.lastDisconnect ? 'error' : 'warning';
+    if (activeRestriction) severity = 'error';
+    else if (status.status === 'disconnected') severity = status.lastDisconnect ? 'error' : 'warning';
     else if (status.status === 'qr_ready') severity = 'warning';
     else if (status.outboundDiagnostics?.degraded) severity = 'degraded';
 
     return {
       severity,
-      recommendation: status.outboundDiagnostics?.recommendation || '',
+      recommendation: activeRestriction
+        ? `WhatsApp bloqueou envios por dispositivos vinculados ate ${activeRestriction.timeEnforcementEnds || 'a liberacao da conta'}.`
+        : status.outboundDiagnostics?.recommendation || '',
       ...status,
     };
   }
