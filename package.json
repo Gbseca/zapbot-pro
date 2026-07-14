@@ -17,6 +17,7 @@
     "@whiskeysockets/baileys": "6.7.23",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "lucide": "1.24.0",
     "multer": "^2.2.0",
     "node-cron": "^3.0.3",
     "pdf-parse": "^1.1.4",

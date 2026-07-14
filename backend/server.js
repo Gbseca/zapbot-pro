@@ -11,7 +11,21 @@ import { handleIncomingMessage } from './ai/agent.js';
 import { startFollowUpCron } from './ai/follow-up.js';
 import { startDailyReportCron } from './ai/daily-report.js';
 import { loadConfig, saveConfig, resolveEffectiveAIConfig, maskSecret } from './data/config-manager.js';
-import { getAllLeads, getLead, updateLead, deleteLead, clearAllLeads, exportLeadsCSV, getLeadStats } from './data/leads-manager.js';
+import {
+  bulkDeleteLeads,
+  bulkUpdateLeads,
+  clearAllLeads,
+  deleteLead,
+  exportLeadsCSV,
+  getAllLeads,
+  getDeletedLeads,
+  getLead,
+  getLeadOverview,
+  getLeadStats,
+  restoreDeletedLeads,
+  subscribeLeadEvents,
+  updateLead,
+} from './data/leads-manager.js';
 import { extractAndSavePDF, getUploadedDocs, removePDF } from './knowledge/pdf-loader.js';
 import { testAPIKey } from './ai/gemini.js';
 import { createAdResearchService } from './ad-research/service.js';
@@ -38,6 +52,7 @@ import {
   completeAllRemindersForLead,
 } from './data/reminders-repository.js';
 import { isLidIdentifier, normalizeLidJid, normalizeRealWhatsAppPhone } from './phone-utils.js';
+import { createLeadsAccessGuard } from './security/leads-access-guard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +63,7 @@ const wss = new WebSocketServer({ server });
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+app.use('/vendor/lucide', express.static(path.join(__dirname, '../node_modules/lucide/dist/umd'), { maxAge: '1y' }));
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 const upload = multer({
@@ -142,7 +158,10 @@ const wa = new WhatsAppManager(wss);
 const queue = new MessageQueue(wa, wss, { loadConfig });
 const adResearch = createAdResearchService({ loadConfig, broadcast });
 const adResearchAccess = createAdResearchAccessGuard();
+const leadsAccess = createLeadsAccessGuard();
 const systemStatus = createSystemStatusService({ wa, queue, adResearch, loadConfig, broadcast });
+
+subscribeLeadEvents((event) => broadcast(event));
 
 wa.onMessage = handleIncomingMessage;
 wa.on('contact-map-update', ({ alias, phone, source }) => {
@@ -197,6 +216,7 @@ wss.on('connection', (ws) => {
   const config = loadConfig();
   ws.send(JSON.stringify({ type: 'ai_status', enabled: config.aiEnabled }));
   ws.send(JSON.stringify({ type: 'system_status', snapshot: systemStatus.buildSnapshot() }));
+  ws.send(JSON.stringify({ type: 'lead_overview', overview: getLeadOverview() }));
 
   adResearch.listRecentJobs().forEach((job) => {
     ws.send(JSON.stringify({ type: 'ad_research_update', job }));
@@ -718,44 +738,162 @@ app.post('/api/reminders/:lead_key/complete', async (req, res) => {
   }
 });
 
-app.get('/api/leads', (req, res) => {
+const CRM_STAGE_VALUES = new Set(['attention', 'active', 'qualified', 'waiting', 'closed']);
+const LEAD_TAG_VALUES = new Set(['', 'quente', 'morno', 'frio', 'boleto', 'suporte']);
+const DASHBOARD_UPDATE_FIELDS = new Set(['status', 'stage', 'operationalStatus', 'crmStage', 'tag']);
+
+function sanitizeLeadDashboardUpdates(body = {}, { bulk = false } = {}) {
+  const updates = {};
+  for (const [key, rawValue] of Object.entries(body || {})) {
+    if (!DASHBOARD_UPDATE_FIELDS.has(key)) continue;
+    if (bulk && !['crmStage', 'tag'].includes(key)) continue;
+    const value = rawValue == null ? '' : String(rawValue).trim();
+    if (key === 'crmStage') {
+      if (value && !CRM_STAGE_VALUES.has(value)) throw new Error('Categoria de CRM invalida.');
+      updates.crmStage = value || null;
+      continue;
+    }
+    if (key === 'tag') {
+      if (!LEAD_TAG_VALUES.has(value)) throw new Error('Etiqueta invalida.');
+      updates.tag = value;
+      continue;
+    }
+    if (!/^[a-z0-9_]{1,64}$/i.test(value)) throw new Error(`Valor invalido para ${key}.`);
+    updates[key] = value;
+  }
+  return updates;
+}
+
+function uniqueLeadNumbers(input) {
+  const numbers = [...new Set((Array.isArray(input) ? input : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))];
+  if (numbers.length > 5000) throw new Error('Selecione no maximo 5000 leads por operacao.');
+  return numbers;
+}
+
+app.get('/api/leads/session', (req, res) => {
+  const session = leadsAccess.issue(req);
+  if (!session) return res.status(403).json({ error: 'Origem da requisicao nao permitida.' });
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  res.cookie('zapbot_leads_session', session.token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: req.secure || forwardedProto === 'https',
+    path: '/api/leads',
+    maxAge: session.maxAgeMs,
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(session);
+});
+
+app.get('/api/leads/overview', leadsAccess.read, (req, res) => {
+  const overview = getLeadOverview();
+  res.json({ ...overview, trashCount: getDeletedLeads().length });
+});
+
+app.get('/api/leads/trash', leadsAccess.read, (req, res) => {
+  res.json(getDeletedLeads({ summary: req.query.view === 'summary' }));
+});
+
+app.post('/api/leads/trash/restore', leadsAccess.mutation, (req, res) => {
+  try {
+    const numbers = uniqueLeadNumbers(req.body?.numbers);
+    if (numbers.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado.' });
+    const result = restoreDeletedLeads(numbers, { origin: 'dashboard' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview() });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.patch('/api/leads/bulk', leadsAccess.mutation, (req, res) => {
+  try {
+    const numbers = uniqueLeadNumbers(req.body?.numbers);
+    const updates = sanitizeLeadDashboardUpdates(req.body?.updates, { bulk: true });
+    if (numbers.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado.' });
+    if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nenhuma alteracao valida.' });
+    const result = bulkUpdateLeads(numbers, updates, { origin: 'dashboard' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview() });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/leads/bulk', leadsAccess.mutation, (req, res) => {
+  try {
+    const numbers = uniqueLeadNumbers(req.body?.numbers);
+    if (req.body?.confirmation !== 'delete_selected') {
+      return res.status(400).json({ error: 'Confirmacao de exclusao invalida.' });
+    }
+    if (Number(req.body?.expectedCount) !== numbers.length || numbers.length === 0) {
+      return res.status(409).json({ error: 'A selecao mudou. Revise os leads antes de excluir.' });
+    }
+    const result = bulkDeleteLeads(numbers, { origin: 'dashboard' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview() });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get('/api/leads', leadsAccess.read, (req, res) => {
   const { status } = req.query;
-  let leads = getAllLeads();
+  let leads = getAllLeads({ summary: req.query.view === 'summary' });
   if (status && status !== 'all') leads = leads.filter((lead) => lead.status === status);
   res.json(leads);
 });
 
-app.get('/api/leads/stats', (req, res) => res.json(getLeadStats()));
+app.get('/api/leads/stats', leadsAccess.read, (req, res) => res.json(getLeadStats()));
 
-app.get('/api/leads/export', (req, res) => {
+app.get('/api/leads/export', leadsAccess.read, (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="leads_${Date.now()}.csv"`);
   res.send('\uFEFF' + exportLeadsCSV());
 });
 
-app.get('/api/leads/:number', (req, res) => {
+app.post('/api/leads/clear', leadsAccess.mutation, (req, res) => {
+  const currentCount = getAllLeads().length;
+  if (req.body?.confirmation !== 'EXCLUIR TUDO') {
+    return res.status(400).json({ error: 'Digite EXCLUIR TUDO para confirmar.' });
+  }
+  if (Number(req.body?.expectedCount) !== currentCount) {
+    return res.status(409).json({ error: 'A lista mudou. Atualize a tela e confirme novamente.' });
+  }
+  const deleted = clearAllLeads({ origin: 'dashboard' });
+  systemStatus.emitSnapshot();
+  res.json({ success: true, deleted, overview: getLeadOverview() });
+});
+
+app.get('/api/leads/:number', leadsAccess.read, (req, res) => {
   const lead = getLead(req.params.number);
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' });
   res.json(lead);
 });
 
-app.patch('/api/leads/:number', (req, res) => {
-  const updated = updateLead(req.params.number, req.body);
-  if (!updated) return res.status(404).json({ error: 'Lead nao encontrado' });
-  systemStatus.emitSnapshot();
-  res.json(updated);
+app.patch('/api/leads/:number', leadsAccess.mutation, (req, res) => {
+  try {
+    const updates = sanitizeLeadDashboardUpdates(req.body);
+    if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nenhuma alteracao valida.' });
+    const updated = updateLead(req.params.number, updates, { origin: 'dashboard' });
+    if (!updated) return res.status(404).json({ error: 'Lead nao encontrado' });
+    systemStatus.emitSnapshot();
+    res.json(updated);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
-app.delete('/api/leads/:number', (req, res) => {
-  deleteLead(req.params.number);
+app.delete('/api/leads/:number', leadsAccess.mutation, (req, res) => {
+  if (req.body?.confirmation !== 'delete_one') {
+    return res.status(400).json({ error: 'Confirmacao de exclusao invalida.' });
+  }
+  const deleted = deleteLead(req.params.number, { origin: 'dashboard' });
+  if (!deleted) return res.status(404).json({ error: 'Lead nao encontrado' });
   systemStatus.emitSnapshot();
-  res.json({ success: true });
-});
-
-app.post('/api/leads/clear', (req, res) => {
-  clearAllLeads();
-  systemStatus.emitSnapshot();
-  res.json({ success: true });
+  res.json({ success: true, deleted: 1, overview: getLeadOverview() });
 });
 
 const PORT = process.env.PORT || 3001;
