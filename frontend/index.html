@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="leads.css?v=3.1.0-leads">
 </head>
 <body>
   <div class="app">
@@ -1252,63 +1253,147 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
       </section>
 
       <section id="tab-leads" class="tab-pane">
-        <div class="page-header">
-          <h1 class="page-title">👥 Leads</h1>
-          <p class="page-sub">Gerencie os contatos capturados pelo Agente IA</p>
-        </div>
+        <div class="leads-shell" data-testid="leads-workspace">
+          <header class="leads-page-header">
+            <div>
+              <div class="leads-eyebrow">Central de atendimento</div>
+              <h1 class="page-title">Leads</h1>
+              <p class="page-sub" id="leads-page-summary">Separando conversas reais de contatos que ainda n&atilde;o responderam.</p>
+            </div>
+            <div class="leads-header-actions">
+              <button class="btn btn-outline lead-icon-text-btn" id="lead-export-btn" type="button">
+                <i data-lucide="download" aria-hidden="true"></i><span>Exportar</span>
+              </button>
+              <button class="btn btn-outline lead-icon-text-btn" id="lead-refresh-btn" type="button">
+                <i data-lucide="refresh-cw" aria-hidden="true"></i><span>Atualizar</span>
+              </button>
+            </div>
+          </header>
 
-        <!-- Lead Stats -->
-        <div class="stats-row" id="lead-stats-row">
-          <div class="stat-card">
-            <div class="stat-icon">🆕</div>
-            <div class="stat-value" id="ls-total">0</div>
-            <div class="stat-label">Total</div>
+          <div class="lead-metrics" id="lead-metrics" aria-label="Resumo dos leads">
+            <button class="lead-metric is-active" type="button" data-lead-stage="customer">
+              <span class="lead-metric-label">Conversas reais</span>
+              <strong id="lead-count-customer">0</strong>
+              <small>contatos que responderam</small>
+            </button>
+            <button class="lead-metric lead-metric-attention" type="button" data-lead-stage="attention">
+              <span class="lead-metric-label">A&ccedil;&atilde;o imediata</span>
+              <strong id="lead-count-attention">0</strong>
+              <small>aguardando consultor</small>
+            </button>
+            <button class="lead-metric lead-metric-active" type="button" data-lead-stage="active">
+              <span class="lead-metric-label">Em conversa</span>
+              <strong id="lead-count-active">0</strong>
+              <small>atendimentos em andamento</small>
+            </button>
+            <button class="lead-metric lead-metric-qualified" type="button" data-lead-stage="qualified">
+              <span class="lead-metric-label">Oportunidades</span>
+              <strong id="lead-count-qualified">0</strong>
+              <small>prontas para continuidade</small>
+            </button>
+            <button class="lead-metric lead-metric-waiting" type="button" data-lead-stage="waiting">
+              <span class="lead-metric-label">Aguardando resposta</span>
+              <strong id="lead-count-waiting">0</strong>
+              <small>disparos sem retorno</small>
+            </button>
+            <button class="lead-metric lead-metric-closed" type="button" data-lead-stage="closed">
+              <span class="lead-metric-label">Encerrados</span>
+              <strong id="lead-count-closed">0</strong>
+              <small>resolvidos ou sem continuidade</small>
+            </button>
           </div>
-          <div class="stat-card" style="--card-accent:#3b82f6;">
-            <div class="stat-icon">💬</div>
-            <div class="stat-value" id="ls-talking">0</div>
-            <div class="stat-label">Em conversa</div>
-          </div>
-          <div class="stat-card stat-success">
-            <div class="stat-icon">✅</div>
-            <div class="stat-value" id="ls-qualified">0</div>
-            <div class="stat-label">Qualificados</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon">🥶</div>
-            <div class="stat-value" id="ls-cold">0</div>
-            <div class="stat-label">Frios</div>
-          </div>
-          <div class="stat-card stat-pending">
-            <div class="stat-icon">📈</div>
-            <div class="stat-value" id="ls-rate">0%</div>
-            <div class="stat-label">Conversão</div>
-          </div>
-        </div>
 
-        <!-- Kanban Board CRM -->
-        <div class="kanban-wrapper">
-          <div class="kanban-board" id="kanban-board">
-            <div class="kanban-column" data-status="new" ondrop="drop(event)" ondragover="allowDrop(event)">
-              <div class="kanban-column-header">Novos</div>
-              <div class="kanban-cards" id="col-new"></div>
+          <div class="leads-toolbar" aria-label="Ferramentas da lista">
+            <label class="lead-search" for="lead-search-input">
+              <i data-lucide="search" aria-hidden="true"></i>
+              <input id="lead-search-input" type="search" placeholder="Buscar nome, telefone, placa ou mensagem" autocomplete="off">
+            </label>
+            <label class="lead-select-label">
+              <span>Origem</span>
+              <select id="lead-source-filter" class="form-input form-input-sm">
+                <option value="all">Todas</option>
+                <option value="inbound">Contato espont&acirc;neo</option>
+                <option value="campaign">Campanha</option>
+              </select>
+            </label>
+            <label class="lead-select-label">
+              <span>Ordem</span>
+              <select id="lead-sort-filter" class="form-input form-input-sm">
+                <option value="updated_desc">Mais recentes</option>
+                <option value="updated_asc">Mais antigos</option>
+                <option value="name_asc">Nome A-Z</option>
+                <option value="priority">Prioridade</option>
+              </select>
+            </label>
+            <div class="leads-toolbar-spacer"></div>
+            <button class="lead-toolbar-btn" id="lead-trash-view-btn" type="button" title="Abrir lixeira">
+              <i data-lucide="archive-restore" aria-hidden="true"></i>
+              <span>Lixeira</span><span class="lead-toolbar-count" id="lead-trash-count">0</span>
+            </button>
+            <button class="lead-toolbar-btn lead-toolbar-danger" id="lead-delete-all-btn" type="button" title="Excluir todos os leads ativos">
+              <i data-lucide="trash-2" aria-hidden="true"></i><span>Excluir todos</span>
+            </button>
+          </div>
+
+          <div class="lead-bulk-bar hidden" id="lead-bulk-bar" role="region" aria-label="A&ccedil;&otilde;es para leads selecionados">
+            <strong id="lead-selected-count">0 selecionados</strong>
+            <button class="lead-link-btn hidden" id="lead-select-all-results" type="button"></button>
+            <div class="lead-bulk-spacer"></div>
+            <label class="lead-bulk-move-label" for="lead-bulk-stage">Mover para</label>
+            <select id="lead-bulk-stage" class="form-input form-input-sm">
+              <option value="">Escolha uma categoria</option>
+              <option value="attention">A&ccedil;&atilde;o imediata</option>
+              <option value="active">Em conversa</option>
+              <option value="qualified">Oportunidades</option>
+              <option value="waiting">Aguardando resposta</option>
+              <option value="closed">Encerrados</option>
+            </select>
+            <button class="btn btn-outline btn-sm" id="lead-bulk-apply" type="button">Aplicar</button>
+            <button class="btn btn-outline btn-sm lead-danger-btn" id="lead-bulk-delete" type="button">
+              <i data-lucide="trash-2" aria-hidden="true"></i><span>Excluir</span>
+            </button>
+            <button class="btn btn-outline btn-sm hidden" id="lead-bulk-restore" type="button">
+              <i data-lucide="rotate-ccw" aria-hidden="true"></i><span>Restaurar</span>
+            </button>
+          </div>
+
+          <div class="lead-table-shell" id="lead-table-shell" aria-busy="true">
+            <div class="lead-table-loading" id="lead-table-loading">
+              <span class="lead-loading-line"></span><span class="lead-loading-line"></span><span class="lead-loading-line"></span>
             </div>
-            <div class="kanban-column" data-status="talking" ondrop="drop(event)" ondragover="allowDrop(event)">
-              <div class="kanban-column-header">Em Atendimento</div>
-              <div class="kanban-cards" id="col-talking"></div>
+            <table class="lead-table" id="lead-table">
+              <thead>
+                <tr>
+                  <th class="lead-check-cell"><input type="checkbox" id="lead-select-page" aria-label="Selecionar leads desta p&aacute;gina"></th>
+                  <th>Contato</th>
+                  <th>Situa&ccedil;&atilde;o</th>
+                  <th>Inten&ccedil;&atilde;o e resumo</th>
+                  <th>Origem</th>
+                  <th>Atualiza&ccedil;&atilde;o</th>
+                  <th class="lead-actions-cell"><span class="sr-only">A&ccedil;&otilde;es</span></th>
+                </tr>
+              </thead>
+              <tbody id="lead-table-body"></tbody>
+            </table>
+            <div class="lead-empty hidden" id="lead-empty-state">
+              <i data-lucide="inbox" aria-hidden="true"></i>
+              <h2>Nenhum lead encontrado</h2>
+              <p>Ajuste os filtros ou aguarde uma nova conversa.</p>
             </div>
-            <div class="kanban-column kanban-attention" data-status="transferred" ondrop="drop(event)" ondragover="allowDrop(event)">
-              <div class="kanban-column-header">Humano / Boleto</div>
-              <div class="kanban-cards" id="col-transferred"></div>
-            </div>
-            <div class="kanban-column kanban-success" data-status="qualified" ondrop="drop(event)" ondragover="allowDrop(event)">
-              <div class="kanban-column-header">Resolvidos / Qualificados</div>
-              <div class="kanban-cards" id="col-qualified"></div>
-            </div>
-            <div class="kanban-column kanban-cold" data-status="cold" ondrop="drop(event)" ondragover="allowDrop(event)">
-              <div class="kanban-column-header">Frios / Perdidos</div>
-              <div class="kanban-cards" id="col-cold"></div>
-            </div>
+            <footer class="lead-table-footer">
+              <span id="lead-results-summary">0 resultados</span>
+              <div class="lead-pagination">
+                <label for="lead-page-size">Por p&aacute;gina</label>
+                <select id="lead-page-size" class="form-input form-input-sm">
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+                <button class="lead-icon-btn" id="lead-page-prev" type="button" title="P&aacute;gina anterior" aria-label="P&aacute;gina anterior"><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+                <span id="lead-page-label">1 de 1</span>
+                <button class="lead-icon-btn" id="lead-page-next" type="button" title="Pr&oacute;xima p&aacute;gina" aria-label="Pr&oacute;xima p&aacute;gina"><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+              </div>
+            </footer>
           </div>
         </div>
       </section>
@@ -1316,51 +1401,110 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
     </main><!-- /main-content -->
   </div><!-- /app -->
 
-  <!-- Lead Detail Modal -->
-  <div id="lead-modal" class="modal-backdrop hidden" onclick="closeLeadModal(event)">
-    <div class="modal-content" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <div>
-          <h2 class="modal-title" id="modal-lead-name">Lead</h2>
-          <p class="modal-sub" id="modal-lead-number"></p>
-        </div>
-        <button class="modal-close" onclick="closeLeadModal()">✕</button>
-      </div>
-      <div class="modal-vehicle" id="modal-vehicle"></div>
-      
-      <!-- CRM Tools: Tags & Agenda -->
-      <div class="modal-crm-tools">
-        <div class="crm-tool-group">
-          <label>Cor / Etiqueta</label>
-          <select id="modal-lead-tag" class="form-input form-input-sm" onchange="updateLeadTag()">
-            <option value="">Sem etiqueta</option>
-            <option value="quente">🔥 Quente (Pronto pra fechar)</option>
-            <option value="morno">🟡 Morno (Pensando)</option>
-            <option value="frio">🥶 Frio (Não responde)</option>
-            <option value="boleto">📄 Boleto (Apenas financeiro)</option>
-            <option value="suporte">🛠️ Suporte / Sinistro</option>
-          </select>
-        </div>
-        <div class="crm-tool-group">
-          <label>Agendar Retorno</label>
-          <div style="display:flex;gap:4px;">
-            <input type="datetime-local" id="modal-lead-agenda" class="form-input form-input-sm">
-            <button class="btn btn-primary btn-sm" onclick="saveLeadAgenda()">Salvar</button>
-            <button class="btn btn-outline btn-sm" onclick="completeLeadAgenda()" title="Concluir compromisso">✓</button>
+  <div id="lead-modal" class="modal-backdrop lead-detail-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-lead-name">
+    <div class="lead-detail-dialog" data-testid="lead-detail-dialog">
+      <header class="lead-detail-header">
+        <div class="lead-detail-identity">
+          <span class="lead-detail-avatar" id="modal-lead-avatar">L</span>
+          <div>
+            <h2 id="modal-lead-name">Lead</h2>
+            <p id="modal-lead-number"></p>
           </div>
         </div>
+        <button class="lead-icon-btn" id="lead-modal-close" type="button" aria-label="Fechar detalhes" title="Fechar"><i data-lucide="x" aria-hidden="true"></i></button>
+      </header>
+      <div class="lead-detail-statusline" id="modal-lead-statusline"></div>
+      <div class="lead-detail-actions" id="modal-actions"></div>
+      <div class="lead-detail-content">
+        <section class="lead-detail-section" aria-labelledby="lead-case-title">
+          <div class="lead-section-heading">
+            <h3 id="lead-case-title">Resumo do atendimento</h3>
+            <span id="modal-lead-updated"></span>
+          </div>
+          <p class="lead-case-summary" id="modal-lead-summary">Sem resumo dispon&iacute;vel.</p>
+          <dl class="lead-detail-facts" id="modal-lead-facts"></dl>
+        </section>
+        <section class="lead-detail-section" aria-labelledby="lead-crm-title">
+          <h3 id="lead-crm-title">Organiza&ccedil;&atilde;o</h3>
+          <div class="lead-crm-grid">
+            <label>Categoria
+              <select id="modal-lead-stage" class="form-input form-input-sm">
+                <option value="attention">A&ccedil;&atilde;o imediata</option>
+                <option value="active">Em conversa</option>
+                <option value="qualified">Oportunidades</option>
+                <option value="waiting">Aguardando resposta</option>
+                <option value="closed">Encerrados</option>
+              </select>
+            </label>
+            <label>Etiqueta
+              <select id="modal-lead-tag" class="form-input form-input-sm">
+                <option value="">Sem etiqueta</option>
+                <option value="quente">Quente</option>
+                <option value="morno">Morno</option>
+                <option value="frio">Frio</option>
+                <option value="boleto">Boleto / cobran&ccedil;a</option>
+                <option value="suporte">Evento / assist&ecirc;ncia</option>
+              </select>
+            </label>
+            <label class="lead-reminder-field">Pr&oacute;ximo retorno
+              <span class="lead-reminder-controls">
+                <input type="datetime-local" id="modal-lead-agenda" class="form-input form-input-sm">
+                <button class="lead-icon-btn" id="lead-reminder-save" type="button" title="Salvar retorno" aria-label="Salvar retorno"><i data-lucide="save" aria-hidden="true"></i></button>
+                <button class="lead-icon-btn" id="lead-reminder-complete" type="button" title="Concluir retorno" aria-label="Concluir retorno"><i data-lucide="check" aria-hidden="true"></i></button>
+              </span>
+            </label>
+          </div>
+        </section>
+        <section class="lead-detail-section lead-chat-section" aria-labelledby="lead-history-title">
+          <h3 id="lead-history-title">Conversa</h3>
+          <div class="modal-chat lead-chat" id="modal-chat"></div>
+        </section>
       </div>
-
-      <div class="modal-actions" id="modal-actions"></div>
-      <div class="modal-chat" id="modal-chat"></div>
     </div>
   </div>
+
+  <div id="lead-delete-modal" class="modal-backdrop lead-confirm-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="lead-delete-title">
+    <div class="lead-confirm-dialog">
+      <div class="lead-confirm-icon"><i data-lucide="trash-2" aria-hidden="true"></i></div>
+      <h2 id="lead-delete-title">Excluir lead?</h2>
+      <p id="lead-delete-description">O registro ser&aacute; movido para a lixeira e poder&aacute; ser restaurado.</p>
+      <label class="lead-confirm-phrase hidden" id="lead-delete-phrase-wrap">Digite <strong>EXCLUIR TUDO</strong> para confirmar
+        <input id="lead-delete-phrase" class="form-input" type="text" autocomplete="off">
+      </label>
+      <div class="lead-confirm-actions">
+        <button class="btn btn-outline" id="lead-delete-cancel" type="button">Cancelar</button>
+        <button class="btn lead-danger-solid" id="lead-delete-confirm" type="button">Mover para a lixeira</button>
+      </div>
+    </div>
+  </div>
+
+  <aside class="lead-notification-hub" id="lead-notification-hub" aria-label="Notifica&ccedil;&otilde;es de leads">
+    <button class="lead-notification-trigger" id="lead-notification-trigger" type="button" aria-expanded="false" aria-controls="lead-notification-panel" title="Notifica&ccedil;&otilde;es de leads">
+      <i data-lucide="bell" aria-hidden="true"></i><span id="lead-notification-count" class="hidden">0</span>
+    </button>
+    <div class="lead-notification-panel hidden" id="lead-notification-panel">
+      <div class="lead-notification-head">
+        <div><strong>Alertas de leads</strong><span>Funcionam em qualquer aba</span></div>
+        <button class="lead-icon-btn" id="lead-notification-clear" type="button" title="Marcar alertas como lidos" aria-label="Marcar alertas como lidos"><i data-lucide="check-check" aria-hidden="true"></i></button>
+      </div>
+      <div class="lead-notification-settings">
+        <label><input type="checkbox" id="lead-sound-toggle" checked> Som dos alertas</label>
+        <button class="lead-link-btn" id="lead-browser-notification-btn" type="button">Ativar alerta do navegador</button>
+      </div>
+      <div class="lead-notification-list" id="lead-notification-list">
+        <div class="lead-notification-empty">Nenhum alerta novo.</div>
+      </div>
+    </div>
+  </aside>
+  <div id="lead-live-region" class="sr-only" aria-live="polite"></div>
 
   <!-- Toast container -->
   <div id="toast-container" class="toast-container"></div>
 
+  <script src="/vendor/lucide/lucide.min.js"></script>
   <script src="ad-research-ui.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=3.1.0-leads"></script>
+  <script src="leads-workspace.js?v=3.1.0-leads"></script>
   <script src="ad-research.js"></script>
 </body>
 </html>

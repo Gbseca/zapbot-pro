@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test ai/conversation-regression.test.js ai/agent-handoff.integration.test.js"
+    "test": "node --test ai/conversation-regression.test.js ai/agent-handoff.integration.test.js data/leads-manager.test.js security/leads-access-guard.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

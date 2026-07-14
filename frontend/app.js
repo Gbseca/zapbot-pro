@@ -159,6 +159,12 @@ function handleWsMessage(data) {
     case 'system_status':
       handleSystemStatusUpdate(data.snapshot);
       break;
+    case 'lead_event':
+      window.leadsWorkspace?.handleEvent(data);
+      break;
+    case 'lead_overview':
+      window.leadsWorkspace?.handleOverview(data.overview);
+      break;
   }
 }
 
@@ -269,7 +275,10 @@ function switchTab(tabId) {
   if (tabId === 'internal') loadInternalPanel();
   if (tabId === 'ad-research') loadAdResearchTab();
   if (tabId === 'status') loadSystemStatus();
-  if (tabId === 'leads') loadLeads();
+  if (tabId === 'leads') {
+    if (window.leadsWorkspace) window.leadsWorkspace.open();
+    else loadLeads();
+  }
 }
 
 function updateBadge(tabId, text) {
@@ -2829,9 +2838,6 @@ let allLeads = [];
 let currentFilter = 'all';
 
 let notifiedLeads = new Set();
-if ('Notification' in window && Notification.permission === 'default') {
-  Notification.requestPermission();
-}
 function playBeep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
