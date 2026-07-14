@@ -50,3 +50,33 @@ test('keeps compatibility with contacts that provide phone id and separate LID',
     assert.equal(manager.resolvePhone(TEST_LID_JID), TEST_PHONE);
     assert.equal(manager.resolveOutboundTarget(TEST_PHONE).resolvedJid, TEST_LID_JID);
 });
+
+test('records an explicit WhatsApp rejection instead of waiting for a timeout', async () => {
+    const manager = new WhatsAppManager(null);
+    const target = manager.resolveOutboundTarget(TEST_PHONE);
+    const accepted = manager._registerAcceptedOutbound('message', target, {
+        key: {
+            id: 'test-message-id',
+            remoteJid: TEST_PHONE_JID,
+            fromMe: true,
+        },
+        status: 1,
+    });
+
+    manager._handleMessagesUpdate([{
+        key: { id: accepted.messageId, remoteJid: TEST_PHONE_JID },
+        update: {
+            status: 0,
+            messageStubParameters: ['479'],
+        },
+    }]);
+
+    const final = await manager.waitForOutboundFinal(accepted.messageId);
+    assert.equal(final.status, 'failed');
+    assert.match(final.error, /479/);
+    assert.deepEqual(final.updates[0].messageStubParameters, ['479']);
+
+    const record = manager._outboundRecords.get(accepted.messageId);
+    clearTimeout(record?.cleanupTimer);
+    manager._outboundRecords.delete(accepted.messageId);
+});

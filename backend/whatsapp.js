@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore, generateWAMessage, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore, generateWAMessage, fetchLatestBaileysVersion, WAMessageStatus } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -151,6 +151,9 @@ function compactOutboundUpdate(item) {
         participant: item?.key?.participant || item?.participant || '',
         status: item?.update?.status ?? item?.status ?? null,
         error: item?.update?.error?.message || item?.error?.message || item?.update?.error || item?.error || '',
+        messageStubParameters: Array.isArray(item?.update?.messageStubParameters)
+            ? item.update.messageStubParameters.slice(0, 4)
+            : [],
         updateKeys: item?.update ? Object.keys(item.update) : Object.keys(item || {}),
     };
 }
@@ -941,10 +944,15 @@ class WhatsAppManager extends EventEmitter {
                 || item?.error?.message
                 || item?.update?.error
                 || item?.error;
+            const rejectionCode = numericStatus === Number(WAMessageStatus.ERROR)
+                ? item?.update?.messageStubParameters?.[0] || 'unknown'
+                : null;
 
-            if (errorMessage) {
+            if (errorMessage || rejectionCode) {
                 this._finalizeOutbound(messageId, 'failed', {
-                    error: String(errorMessage),
+                    error: errorMessage
+                        ? String(errorMessage)
+                        : `WhatsApp rejeitou o envio (codigo ${rejectionCode})`,
                     ackStatus: Number.isFinite(numericStatus) ? numericStatus : undefined,
                 });
                 continue;
