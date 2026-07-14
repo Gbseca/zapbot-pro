@@ -12,20 +12,33 @@ import { startFollowUpCron } from './ai/follow-up.js';
 import { startDailyReportCron } from './ai/daily-report.js';
 import { loadConfig, saveConfig, resolveEffectiveAIConfig, maskSecret } from './data/config-manager.js';
 import {
-  bulkDeleteLeads,
+  addInternalNote,
   bulkUpdateLeads,
-  clearAllLeads,
-  deleteLead,
+  deleteInternalNote,
   exportLeadsCSV,
   getAllLeads,
+  getDeletedLead,
   getDeletedLeads,
+  getDuplicateLeadGroups,
   getLead,
   getLeadOverview,
+  getLeadSettings,
   getLeadStats,
-  restoreDeletedLeads,
   subscribeLeadEvents,
+  updateLeadSettings,
   updateLead,
 } from './data/leads-manager.js';
+import {
+  archiveLeads,
+  cleanupExpiredTrash,
+  deleteLeadsPermanently,
+  emptyTrashPermanently,
+  getLeadTimeline,
+  mergeLeads,
+  previewLeadArchive,
+  reclassifyHistoricalLeads,
+  restoreLeads,
+} from './data/lead-lifecycle-service.js';
 import { extractAndSavePDF, getUploadedDocs, removePDF } from './knowledge/pdf-loader.js';
 import { testAPIKey } from './ai/gemini.js';
 import { createAdResearchService } from './ad-research/service.js';
@@ -50,6 +63,8 @@ import {
   listOpenReminders,
   getLatestOpenReminderForLead,
   completeAllRemindersForLead,
+  getReminderState,
+  resumeRemindersForLead,
 } from './data/reminders-repository.js';
 import { isLidIdentifier, normalizeLidJid, normalizeRealWhatsAppPhone } from './phone-utils.js';
 import { createLeadsAccessGuard } from './security/leads-access-guard.js';
@@ -789,22 +804,148 @@ app.get('/api/leads/session', (req, res) => {
 
 app.get('/api/leads/overview', leadsAccess.read, (req, res) => {
   const overview = getLeadOverview();
-  res.json({ ...overview, trashCount: getDeletedLeads().length });
+  res.json({
+    ...overview,
+    trashCount: getDeletedLeads().length,
+    settings: getLeadSettings(),
+  });
 });
 
 app.get('/api/leads/trash', leadsAccess.read, (req, res) => {
-  res.json(getDeletedLeads({ summary: req.query.view === 'summary' }));
+  const leads = getDeletedLeads({ summary: req.query.view === 'summary' });
+  res.json(leads.map((lead) => {
+    const reminderState = getReminderState(lead.number);
+    return {
+      ...lead,
+      reminderPaused: !!reminderState?.paused,
+      reminderReviewRequired: !!reminderState?.review_required,
+    };
+  }));
 });
 
-app.post('/api/leads/trash/restore', leadsAccess.mutation, (req, res) => {
+app.get('/api/leads/settings', leadsAccess.read, (req, res) => {
+  res.json(getLeadSettings());
+});
+
+app.patch('/api/leads/settings', leadsAccess.mutation, async (req, res) => {
+  try {
+    const settings = updateLeadSettings({ trashRetentionDays: req.body?.trashRetentionDays });
+    const cleanup = await cleanupExpiredTrash();
+    res.json({ success: true, settings, cleanup });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/reminders/:lead_key/resume', leadsAccess.mutation, async (req, res) => {
+  try {
+    await resumeRemindersForLead(req.params.lead_key);
+    systemStatus.emitSnapshot();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/leads/duplicates', leadsAccess.read, (req, res) => {
+  res.json(getDuplicateLeadGroups());
+});
+
+app.post('/api/leads/delete-preview', leadsAccess.read, async (req, res) => {
+  try {
+    const numbers = req.body?.all
+      ? getAllLeads().map((lead) => lead.number)
+      : uniqueLeadNumbers(req.body?.numbers);
+    if (numbers.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado.' });
+    res.json(await previewLeadArchive(numbers));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/leads/merge', leadsAccess.mutation, async (req, res) => {
   try {
     const numbers = uniqueLeadNumbers(req.body?.numbers);
-    if (numbers.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado.' });
-    const result = restoreDeletedLeads(numbers, { origin: 'dashboard' });
+    if (req.body?.confirmation !== 'merge_duplicates') {
+      return res.status(400).json({ error: 'Confirmacao de mesclagem invalida.' });
+    }
+    if (Number(req.body?.expectedCount) !== numbers.length || numbers.length < 2) {
+      return res.status(409).json({ error: 'A selecao mudou. Revise os registros antes de mesclar.' });
+    }
+    const result = await mergeLeads(numbers, {
+      targetNumber: String(req.body?.targetNumber || '').trim() || null,
+      origin: 'dashboard',
+    });
     systemStatus.emitSnapshot();
     res.json({ success: true, ...result, overview: getLeadOverview() });
   } catch (error) {
     res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/leads/reclassify', leadsAccess.mutation, async (req, res) => {
+  if (req.body?.confirmation !== 'reclassify_leads') {
+    return res.status(400).json({ error: 'Confirmacao invalida.' });
+  }
+  try {
+    const result = await reclassifyHistoricalLeads({ origin: 'dashboard' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/leads/trash/:number', leadsAccess.read, (req, res) => {
+  const lead = getDeletedLead(req.params.number);
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado na lixeira.' });
+  const reminderState = getReminderState(req.params.number);
+  res.json({ ...lead, reminderState });
+});
+
+app.post('/api/leads/trash/restore', leadsAccess.mutation, async (req, res) => {
+  try {
+    const numbers = uniqueLeadNumbers(req.body?.numbers);
+    if (numbers.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado.' });
+    const result = await restoreLeads(numbers, { origin: 'dashboard' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview() });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/leads/trash/permanent', leadsAccess.mutation, async (req, res) => {
+  try {
+    const numbers = uniqueLeadNumbers(req.body?.numbers);
+    if (req.body?.confirmation !== 'EXCLUIR DEFINITIVAMENTE') {
+      return res.status(400).json({ error: 'Digite EXCLUIR DEFINITIVAMENTE para confirmar.' });
+    }
+    if (Number(req.body?.expectedCount) !== numbers.length || numbers.length === 0) {
+      return res.status(409).json({ error: 'A selecao mudou. Atualize a lixeira antes de excluir.' });
+    }
+    const result = await deleteLeadsPermanently(numbers, { origin: 'dashboard' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview(), trashCount: getDeletedLeads().length });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/leads/trash', leadsAccess.mutation, async (req, res) => {
+  const currentCount = getDeletedLeads().length;
+  if (req.body?.confirmation !== 'ESVAZIAR LIXEIRA') {
+    return res.status(400).json({ error: 'Digite ESVAZIAR LIXEIRA para confirmar.' });
+  }
+  if (Number(req.body?.expectedCount) !== currentCount) {
+    return res.status(409).json({ error: 'A lixeira mudou. Atualize a tela e confirme novamente.' });
+  }
+  try {
+    const result = await emptyTrashPermanently({ origin: 'dashboard' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview(), trashCount: 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -822,7 +963,7 @@ app.patch('/api/leads/bulk', leadsAccess.mutation, (req, res) => {
   }
 });
 
-app.delete('/api/leads/bulk', leadsAccess.mutation, (req, res) => {
+app.delete('/api/leads/bulk', leadsAccess.mutation, async (req, res) => {
   try {
     const numbers = uniqueLeadNumbers(req.body?.numbers);
     if (req.body?.confirmation !== 'delete_selected') {
@@ -831,7 +972,7 @@ app.delete('/api/leads/bulk', leadsAccess.mutation, (req, res) => {
     if (Number(req.body?.expectedCount) !== numbers.length || numbers.length === 0) {
       return res.status(409).json({ error: 'A selecao mudou. Revise os leads antes de excluir.' });
     }
-    const result = bulkDeleteLeads(numbers, { origin: 'dashboard' });
+    const result = await archiveLeads(numbers, { origin: 'dashboard', backup: numbers.length > 1 });
     systemStatus.emitSnapshot();
     res.json({ success: true, ...result, overview: getLeadOverview() });
   } catch (error) {
@@ -843,7 +984,14 @@ app.get('/api/leads', leadsAccess.read, (req, res) => {
   const { status } = req.query;
   let leads = getAllLeads({ summary: req.query.view === 'summary' });
   if (status && status !== 'all') leads = leads.filter((lead) => lead.status === status);
-  res.json(leads);
+  res.json(leads.map((lead) => {
+    const reminderState = getReminderState(lead.number);
+    return {
+      ...lead,
+      reminderPaused: !!reminderState?.paused,
+      reminderReviewRequired: !!reminderState?.review_required,
+    };
+  }));
 });
 
 app.get('/api/leads/stats', leadsAccess.read, (req, res) => res.json(getLeadStats()));
@@ -854,7 +1002,7 @@ app.get('/api/leads/export', leadsAccess.read, (req, res) => {
   res.send('\uFEFF' + exportLeadsCSV());
 });
 
-app.post('/api/leads/clear', leadsAccess.mutation, (req, res) => {
+app.post('/api/leads/clear', leadsAccess.mutation, async (req, res) => {
   const currentCount = getAllLeads().length;
   if (req.body?.confirmation !== 'EXCLUIR TUDO') {
     return res.status(400).json({ error: 'Digite EXCLUIR TUDO para confirmar.' });
@@ -862,15 +1010,46 @@ app.post('/api/leads/clear', leadsAccess.mutation, (req, res) => {
   if (Number(req.body?.expectedCount) !== currentCount) {
     return res.status(409).json({ error: 'A lista mudou. Atualize a tela e confirme novamente.' });
   }
-  const deleted = clearAllLeads({ origin: 'dashboard' });
-  systemStatus.emitSnapshot();
-  res.json({ success: true, deleted, overview: getLeadOverview() });
+  try {
+    const numbers = getAllLeads().map((lead) => lead.number);
+    const result = await archiveLeads(numbers, { origin: 'dashboard', backup: true, reason: 'archive_all' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/leads/:number/timeline', leadsAccess.read, async (req, res) => {
+  try {
+    const timeline = await getLeadTimeline(req.params.number);
+    if (!timeline) return res.status(404).json({ error: 'Lead nao encontrado.' });
+    res.json(timeline);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/leads/:number/notes', leadsAccess.mutation, (req, res) => {
+  try {
+    const note = addInternalNote(req.params.number, req.body?.text, { origin: 'dashboard' });
+    if (!note) return res.status(404).json({ error: 'Lead nao encontrado.' });
+    res.status(201).json(note);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/leads/:number/notes/:noteId', leadsAccess.mutation, (req, res) => {
+  const deleted = deleteInternalNote(req.params.number, req.params.noteId, { origin: 'dashboard' });
+  if (!deleted) return res.status(404).json({ error: 'Observacao nao encontrada.' });
+  res.json({ success: true });
 });
 
 app.get('/api/leads/:number', leadsAccess.read, (req, res) => {
   const lead = getLead(req.params.number);
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' });
-  res.json(lead);
+  res.json({ ...lead, reminderState: getReminderState(req.params.number) });
 });
 
 app.patch('/api/leads/:number', leadsAccess.mutation, (req, res) => {
@@ -886,14 +1065,18 @@ app.patch('/api/leads/:number', leadsAccess.mutation, (req, res) => {
   }
 });
 
-app.delete('/api/leads/:number', leadsAccess.mutation, (req, res) => {
+app.delete('/api/leads/:number', leadsAccess.mutation, async (req, res) => {
   if (req.body?.confirmation !== 'delete_one') {
     return res.status(400).json({ error: 'Confirmacao de exclusao invalida.' });
   }
-  const deleted = deleteLead(req.params.number, { origin: 'dashboard' });
-  if (!deleted) return res.status(404).json({ error: 'Lead nao encontrado' });
-  systemStatus.emitSnapshot();
-  res.json({ success: true, deleted: 1, overview: getLeadOverview() });
+  try {
+    const result = await archiveLeads([req.params.number], { origin: 'dashboard' });
+    if (!result.deleted && !result.alreadyDeleted) return res.status(404).json({ error: 'Lead nao encontrado' });
+    systemStatus.emitSnapshot();
+    res.json({ success: true, ...result, overview: getLeadOverview() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 const PORT = process.env.PORT || 3001;
@@ -905,6 +1088,16 @@ server.listen(PORT, () => {
   console.log('Aguardando conexao WhatsApp...');
   console.log('Modulo IA: pronto\n');
 });
+
+void cleanupExpiredTrash().catch((error) => {
+  console.warn(`[Leads] Falha ao aplicar a retencao da lixeira: ${error.message}`);
+});
+const trashRetentionTimer = setInterval(() => {
+  void cleanupExpiredTrash().catch((error) => {
+    console.warn(`[Leads] Falha ao aplicar a retencao da lixeira: ${error.message}`);
+  });
+}, 6 * 60 * 60 * 1000);
+trashRetentionTimer.unref?.();
 
 let shuttingDown = false;
 function shutdownServer(signal) {

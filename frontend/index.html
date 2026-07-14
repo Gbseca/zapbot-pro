@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="leads.css?v=3.1.0-leads">
+  <link rel="stylesheet" href="leads.css?v=3.2.0-leads">
 </head>
 <body>
   <div class="app">
@@ -1261,6 +1261,9 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
               <p class="page-sub" id="leads-page-summary">Separando conversas reais de contatos que ainda n&atilde;o responderam.</p>
             </div>
             <div class="leads-header-actions">
+              <button class="btn btn-outline lead-icon-text-btn" id="lead-reclassify-btn" type="button" title="Revisar a classifica&ccedil;&atilde;o dos leads antigos">
+                <i data-lucide="list-restart" aria-hidden="true"></i><span>Revisar antigos</span>
+              </button>
               <button class="btn btn-outline lead-icon-text-btn" id="lead-export-btn" type="button">
                 <i data-lucide="download" aria-hidden="true"></i><span>Exportar</span>
               </button>
@@ -1274,7 +1277,7 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
             <button class="lead-metric is-active" type="button" data-lead-stage="customer">
               <span class="lead-metric-label">Conversas reais</span>
               <strong id="lead-count-customer">0</strong>
-              <small>contatos que responderam</small>
+              <small id="lead-customer-caption">contatos que responderam</small>
             </button>
             <button class="lead-metric lead-metric-attention" type="button" data-lead-stage="attention">
               <span class="lead-metric-label">A&ccedil;&atilde;o imediata</span>
@@ -1284,29 +1287,88 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
             <button class="lead-metric lead-metric-active" type="button" data-lead-stage="active">
               <span class="lead-metric-label">Em conversa</span>
               <strong id="lead-count-active">0</strong>
-              <small>atendimentos em andamento</small>
+              <small id="lead-active-caption">atendimentos em andamento</small>
             </button>
             <button class="lead-metric lead-metric-qualified" type="button" data-lead-stage="qualified">
               <span class="lead-metric-label">Oportunidades</span>
               <strong id="lead-count-qualified">0</strong>
-              <small>prontas para continuidade</small>
+              <small id="lead-qualified-caption">prontas para continuidade</small>
             </button>
             <button class="lead-metric lead-metric-waiting" type="button" data-lead-stage="waiting">
               <span class="lead-metric-label">Aguardando resposta</span>
               <strong id="lead-count-waiting">0</strong>
-              <small>disparos sem retorno</small>
+              <small id="lead-waiting-caption">disparos sem retorno</small>
             </button>
             <button class="lead-metric lead-metric-closed" type="button" data-lead-stage="closed">
               <span class="lead-metric-label">Encerrados</span>
               <strong id="lead-count-closed">0</strong>
-              <small>resolvidos ou sem continuidade</small>
+              <small id="lead-closed-caption">resolvidos ou sem continuidade</small>
             </button>
           </div>
+
+          <div class="lead-health-strip" id="lead-health-strip" aria-label="Indicadores de organiza&ccedil;&atilde;o">
+            <button type="button" id="lead-duplicate-filter-btn" class="lead-health-item">
+              <i data-lucide="copy-check" aria-hidden="true"></i>
+              <span><strong id="lead-count-duplicates">0</strong> <span id="lead-duplicates-label">grupos duplicados</span></span>
+            </button>
+            <span class="lead-health-item">
+              <i data-lucide="timer" aria-hidden="true"></i>
+              <span><strong id="lead-count-overdue">0</strong> aguardando h&aacute; mais de 15 min</span>
+            </span>
+            <span class="lead-health-item">
+              <i data-lucide="archive-restore" aria-hidden="true"></i>
+              <span><strong id="lead-count-returned">0</strong> <span id="lead-returned-label">retornaram da lixeira</span></span>
+            </span>
+          </div>
+
+          <section class="lead-trash-panel hidden" id="lead-trash-panel" aria-label="Configura&ccedil;&otilde;es da lixeira">
+            <div class="lead-trash-panel-copy">
+              <i data-lucide="archive" aria-hidden="true"></i>
+              <div>
+                <strong>Lixeira inteligente</strong>
+                <span>Se o contato escrever novamente, o mesmo lead ser&aacute; restaurado automaticamente e voltar&aacute; para A&ccedil;&atilde;o imediata.</span>
+              </div>
+            </div>
+            <label class="lead-retention-control" for="lead-trash-retention">
+              <span>Apagar definitivamente ap&oacute;s</span>
+              <select id="lead-trash-retention" class="form-input form-input-sm">
+                <option value="0">Nunca</option>
+                <option value="30">30 dias</option>
+                <option value="60">60 dias</option>
+                <option value="90">90 dias</option>
+              </select>
+            </label>
+            <button class="btn btn-outline btn-sm lead-danger-btn" id="lead-empty-trash-btn" type="button">
+              <i data-lucide="trash-2" aria-hidden="true"></i><span>Esvaziar lixeira</span>
+            </button>
+          </section>
 
           <div class="leads-toolbar" aria-label="Ferramentas da lista">
             <label class="lead-search" for="lead-search-input">
               <i data-lucide="search" aria-hidden="true"></i>
               <input id="lead-search-input" type="search" placeholder="Buscar nome, telefone, placa ou mensagem" autocomplete="off">
+            </label>
+            <label class="lead-select-label">
+              <span>Atividade</span>
+              <select id="lead-age-filter" class="form-input form-input-sm">
+                <option value="all">Qualquer data</option>
+                <option value="today">Hoje</option>
+                <option value="1">H&aacute; 1 dia ou mais</option>
+                <option value="3">H&aacute; 3 dias ou mais</option>
+                <option value="7">H&aacute; 7 dias ou mais</option>
+                <option value="30">H&aacute; 30 dias ou mais</option>
+              </select>
+            </label>
+            <label class="lead-select-label">
+              <span>Inten&ccedil;&atilde;o</span>
+              <select id="lead-intent-filter" class="form-input form-input-sm">
+                <option value="all">Todas</option>
+                <option value="critical">Atendimento imediato</option>
+                <option value="assistance">Reboque / evento</option>
+                <option value="billing">Boleto / pend&ecirc;ncia</option>
+                <option value="sales">Cota&ccedil;&atilde;o</option>
+                <option value="undefined">Ainda n&atilde;o definida</option>
+              </select>
             </label>
             <label class="lead-select-label">
               <span>Origem</span>
@@ -1352,8 +1414,14 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
             <button class="btn btn-outline btn-sm lead-danger-btn" id="lead-bulk-delete" type="button">
               <i data-lucide="trash-2" aria-hidden="true"></i><span>Excluir</span>
             </button>
+            <button class="btn btn-outline btn-sm hidden" id="lead-bulk-merge" type="button">
+              <i data-lucide="combine" aria-hidden="true"></i><span>Mesclar duplicados</span>
+            </button>
             <button class="btn btn-outline btn-sm hidden" id="lead-bulk-restore" type="button">
               <i data-lucide="rotate-ccw" aria-hidden="true"></i><span>Restaurar</span>
+            </button>
+            <button class="btn btn-outline btn-sm lead-danger-btn hidden" id="lead-bulk-permanent" type="button">
+              <i data-lucide="trash-2" aria-hidden="true"></i><span>Excluir definitivamente</span>
             </button>
           </div>
 
@@ -1368,7 +1436,7 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
                   <th>Contato</th>
                   <th>Situa&ccedil;&atilde;o</th>
                   <th>Inten&ccedil;&atilde;o e resumo</th>
-                  <th>Origem</th>
+                  <th id="lead-table-context-heading">Origem</th>
                   <th>Atualiza&ccedil;&atilde;o</th>
                   <th class="lead-actions-cell"><span class="sr-only">A&ccedil;&otilde;es</span></th>
                 </tr>
@@ -1451,13 +1519,31 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
                 <input type="datetime-local" id="modal-lead-agenda" class="form-input form-input-sm">
                 <button class="lead-icon-btn" id="lead-reminder-save" type="button" title="Salvar retorno" aria-label="Salvar retorno"><i data-lucide="save" aria-hidden="true"></i></button>
                 <button class="lead-icon-btn" id="lead-reminder-complete" type="button" title="Concluir retorno" aria-label="Concluir retorno"><i data-lucide="check" aria-hidden="true"></i></button>
+                <button class="lead-icon-btn hidden" id="lead-reminder-resume" type="button" title="Reativar retorno" aria-label="Reativar retorno"><i data-lucide="play" aria-hidden="true"></i></button>
               </span>
+              <span class="lead-reminder-status" id="lead-reminder-status"></span>
             </label>
           </div>
         </section>
+        <section class="lead-detail-section lead-notes-section" aria-labelledby="lead-notes-title">
+          <div class="lead-section-heading">
+            <h3 id="lead-notes-title">Observa&ccedil;&otilde;es internas</h3>
+            <span>S&oacute; aparecem no painel</span>
+          </div>
+          <div class="lead-note-composer">
+            <textarea id="modal-lead-note-input" class="form-input" rows="2" maxlength="1200" placeholder="Registrar informa&ccedil;&atilde;o para o pr&oacute;ximo atendimento"></textarea>
+            <button class="btn btn-outline btn-sm" id="lead-note-save" type="button"><i data-lucide="plus" aria-hidden="true"></i><span>Adicionar</span></button>
+          </div>
+          <div class="lead-note-list" id="modal-lead-notes"></div>
+        </section>
         <section class="lead-detail-section lead-chat-section" aria-labelledby="lead-history-title">
-          <h3 id="lead-history-title">Conversa</h3>
-          <div class="modal-chat lead-chat" id="modal-chat"></div>
+          <div class="lead-detail-tabs" role="tablist" aria-label="Hist&oacute;rico do lead">
+            <button type="button" class="is-active" id="lead-conversation-tab" data-lead-detail-tab="conversation" role="tab" aria-selected="true">Conversa</button>
+            <button type="button" id="lead-timeline-tab" data-lead-detail-tab="timeline" role="tab" aria-selected="false">Atividade</button>
+          </div>
+          <h3 class="sr-only" id="lead-history-title">Hist&oacute;rico do lead</h3>
+          <div class="modal-chat lead-chat" id="modal-chat" data-lead-detail-panel="conversation"></div>
+          <div class="lead-timeline hidden" id="modal-timeline" data-lead-detail-panel="timeline"></div>
         </section>
       </div>
     </div>
@@ -1468,7 +1554,8 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
       <div class="lead-confirm-icon"><i data-lucide="trash-2" aria-hidden="true"></i></div>
       <h2 id="lead-delete-title">Excluir lead?</h2>
       <p id="lead-delete-description">O registro ser&aacute; movido para a lixeira e poder&aacute; ser restaurado.</p>
-      <label class="lead-confirm-phrase hidden" id="lead-delete-phrase-wrap">Digite <strong>EXCLUIR TUDO</strong> para confirmar
+      <div class="lead-confirm-warning hidden" id="lead-delete-warning"></div>
+      <label class="lead-confirm-phrase hidden" id="lead-delete-phrase-wrap">Digite <strong id="lead-delete-required-phrase">EXCLUIR TUDO</strong> para confirmar
         <input id="lead-delete-phrase" class="form-input" type="text" autocomplete="off">
       </label>
       <div class="lead-confirm-actions">
@@ -1503,8 +1590,8 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
 
   <script src="/vendor/lucide/lucide.min.js"></script>
   <script src="ad-research-ui.js"></script>
-  <script src="app.js?v=3.1.0-leads"></script>
-  <script src="leads-workspace.js?v=3.1.0-leads"></script>
+  <script src="app.js?v=3.2.0-leads"></script>
+  <script src="leads-workspace.js?v=3.2.0-leads"></script>
   <script src="ad-research.js"></script>
 </body>
 </html>

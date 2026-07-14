@@ -1,11 +1,18 @@
 import fs from 'fs';
 import path from 'path';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { LEADS_FILE } from '../storage/paths.js';
 import { getLeadInternalWhatsAppId, getLeadRealPhone } from '../phone-utils.js';
 
-const LEADS_TRASH_FILE = path.join(path.dirname(LEADS_FILE), 'leads-trash.json');
+const DATA_DIR = path.dirname(LEADS_FILE);
+const LEADS_TRASH_FILE = path.join(DATA_DIR, 'leads-trash.json');
+const LEADS_SETTINGS_FILE = path.join(DATA_DIR, 'leads-settings.json');
+const LEADS_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'leads');
 const CRM_STAGES = new Set(['attention', 'active', 'qualified', 'waiting', 'closed']);
+const TRACKED_ACTIVITY_FIELDS = new Set(['status', 'stage', 'operationalStatus', 'crmStage', 'tag']);
+const ACTIVITY_LIMIT = 200;
+const BACKUP_LIMIT = 20;
+const DEFAULT_SETTINGS = Object.freeze({ trashRetentionDays: 0 });
 const ATTENTION_STATUSES = new Set([
   'human_requested',
   'awaiting_financial_review',
@@ -43,11 +50,36 @@ const AUTOMATION_PAUSED_STATUSES = new Set([
   'handoff_failed',
   'handoff_client_confirmation_failed',
 ]);
+const INTENT_SUBJECTS = Object.freeze({
+  angry_customer: 'Cliente insatisfeito',
+  app_blocked: 'Aplicativo bloqueado',
+  assistance_request: 'Solicitou reboque ou assist\u00eancia',
+  billing_dispute: 'Contestou uma cobran\u00e7a',
+  billing_disputed: 'Contestou uma cobran\u00e7a',
+  boleto_request: 'Solicitou boleto ou segunda via',
+  cancel_request: 'Solicitou cancelamento',
+  event_report: 'Relatou um evento com o ve\u00edculo',
+  accident_report: 'Relatou um evento com o ve\u00edculo',
+  human_requested: 'Pediu atendimento humano',
+  inspection_pending: 'Precisa de vistoria ou revistoria',
+  inspection_request: 'Precisa de vistoria ou revistoria',
+  no_interest: 'Informou que n\u00e3o tem interesse',
+  payment_claimed: 'Informou que j\u00e1 realizou o pagamento',
+  reactivation_request: 'Solicitou reativa\u00e7\u00e3o',
+  receipt_available: 'Informou que possui comprovante',
+  receipt_received: 'Enviou comprovante',
+  receipt_sent: 'Enviou comprovante',
+  regularization_request: 'Quer regularizar uma pend\u00eancia',
+  sales_consultant_requested: 'Pediu um consultor',
+  sales_price_request: 'Perguntou o valor da prote\u00e7\u00e3o veicular',
+  sales_quote: 'Solicitou cota\u00e7\u00e3o de prote\u00e7\u00e3o veicular',
+  system_check_request: 'Solicitou verifica\u00e7\u00e3o do cadastro',
+});
 const listeners = new Set();
 let eventSequence = 0;
 
 function ensureDir(file = LEADS_FILE) {
-  const dir = path.dirname(file);
+  const dir = path.extname(file) ? path.dirname(file) : file;
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
@@ -90,6 +122,19 @@ function loadTrash() {
   return loadJson(LEADS_TRASH_FILE);
 }
 
+function cleanKey(value) {
+  return String(value || '').trim();
+}
+
+function uniqueKeys(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map(cleanKey).filter(Boolean))];
+}
+
+function toTimestamp(value) {
+  const timestamp = new Date(value || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function messageCount(lead, role) {
   return Array.isArray(lead?.history)
     ? lead.history.filter((entry) => entry?.role === role).length
@@ -113,6 +158,165 @@ function normalizedSource(lead = {}) {
   return lead.source || 'unknown';
 }
 
+function activityEntry(type, { origin = 'system', details = {}, at = null } = {}) {
+  return {
+    id: randomUUID(),
+    type: cleanKey(type) || 'updated',
+    origin: cleanKey(origin) || 'system',
+    details: details && typeof details === 'object' ? details : {},
+    at: at || new Date().toISOString(),
+  };
+}
+
+function appendActivity(lead, type, options = {}) {
+  const current = Array.isArray(lead?.activity) ? lead.activity : [];
+  return {
+    ...(lead || {}),
+    activity: [...current, activityEntry(type, options)].slice(-ACTIVITY_LIMIT),
+  };
+}
+
+function trackedChanges(previous = {}, current = {}) {
+  const changes = {};
+  for (const field of TRACKED_ACTIVITY_FIELDS) {
+    const before = previous[field] ?? null;
+    const after = current[field] ?? null;
+    if (before !== after) changes[field] = { from: before, to: after };
+  }
+  return changes;
+}
+
+function addTrackedUpdateActivity(previous, current, origin) {
+  const changes = trackedChanges(previous, current);
+  if (Object.keys(changes).length === 0) return current;
+  return appendActivity(current, 'lead_updated', { origin, details: { changes } });
+}
+
+function mergeHistory(records) {
+  const seen = new Set();
+  const merged = [];
+  for (const record of records) {
+    for (const entry of Array.isArray(record?.history) ? record.history : []) {
+      const signature = [entry?.role || '', entry?.content || '', entry?.ts || ''].join('|');
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      merged.push(entry);
+    }
+  }
+  return merged.sort((a, b) => Number(a?.ts || 0) - Number(b?.ts || 0));
+}
+
+function mergeActivity(records) {
+  const seen = new Set();
+  const merged = [];
+  for (const record of records) {
+    for (const entry of Array.isArray(record?.activity) ? record.activity : []) {
+      const signature = entry?.id || [entry?.type || '', entry?.at || '', JSON.stringify(entry?.details || {})].join('|');
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      merged.push(entry);
+    }
+  }
+  return merged.sort((a, b) => toTimestamp(a?.at) - toTimestamp(b?.at)).slice(-ACTIVITY_LIMIT);
+}
+
+function pickRecentRecord(records) {
+  return [...records].sort((a, b) => (
+    toTimestamp(b?.updatedAt || b?.lastInteraction || b?.createdAt)
+    - toTimestamp(a?.updatedAt || a?.lastInteraction || a?.createdAt)
+  ))[0] || {};
+}
+
+function mergeRecords(records, targetKey, { origin = 'system', reason = 'duplicate_merge' } = {}) {
+  const available = records.filter(Boolean);
+  const recent = pickRecentRecord(available);
+  const oldestCreatedAt = available
+    .map((lead) => lead?.createdAt)
+    .filter(Boolean)
+    .sort((a, b) => toTimestamp(a) - toTimestamp(b))[0] || recent.createdAt || new Date().toISOString();
+  const mergedFrom = [...new Set(available.flatMap((lead) => [lead?.number, ...(lead?.mergedFrom || [])]).filter(Boolean))]
+    .filter((key) => key !== targetKey);
+  let merged = {
+    ...available.reduce((result, lead) => ({ ...result, ...Object.fromEntries(
+      Object.entries(lead).filter(([, value]) => value !== null && value !== undefined && value !== ''),
+    ) }), {}),
+    ...recent,
+    number: targetKey,
+    history: mergeHistory(available),
+    activity: mergeActivity(available),
+    mergedFrom,
+    createdAt: oldestCreatedAt,
+    updatedAt: new Date().toISOString(),
+  };
+  merged = applyAttentionTracking(recent, merged, merged.updatedAt);
+  return appendActivity(merged, 'leads_merged', {
+    origin,
+    details: { reason, mergedFrom },
+  });
+}
+
+function clearDeletionMetadata(lead) {
+  const current = { ...(lead || {}) };
+  current.lastDeletedAt = current.deletedAt || current.lastDeletedAt || null;
+  current.lastDeleteReason = current.deleteReason || current.lastDeleteReason || null;
+  delete current.deletedAt;
+  delete current.deletedBy;
+  delete current.deleteReason;
+  delete current.deletedFromStage;
+  delete current.trashExpiresAt;
+  return current;
+}
+
+function resetAfterCustomerReturn(lead, previousStatus) {
+  const current = clearDeletionMetadata(lead);
+  const fieldsToClear = [
+    'pendingOperationalHandoff', 'pendingOperationalEvent', 'pendingHandoffReason',
+    'handoffClientError', 'handoffClientConfirmed', 'handoffError', 'handoffFailedAt',
+    'transferredTo', 'transferredToName', 'transferredAt',
+  ];
+  for (const field of fieldsToClear) delete current[field];
+  current.status = 'new';
+  current.stage = 'new';
+  current.operationalStatus = null;
+  current.crmStage = 'attention';
+  current.followUp1Sent = false;
+  current.followUp2Sent = false;
+  current.autoRestoredAt = new Date().toISOString();
+  current.attentionStartedAt = current.autoRestoredAt;
+  current.returnedFromTrashCount = Number(current.returnedFromTrashCount || 0) + 1;
+  current.updatedAt = current.autoRestoredAt;
+  return appendActivity(current, 'auto_restored_from_trash', {
+    origin: 'customer_message',
+    details: { previousStatus: previousStatus || null },
+    at: current.autoRestoredAt,
+  });
+}
+
+function recordMatchesIdentifiers(key, lead, identifiers) {
+  if (identifiers.has(key)) return true;
+  const candidates = [
+    lead?.number,
+    lead?.phone,
+    lead?.displayNumber,
+    lead?.jid,
+    lead?.replyTargetJid,
+    lead?.lidJid,
+    lead?.internalWhatsAppId,
+    getLeadRealPhone(lead),
+    getLeadInternalWhatsAppId(lead),
+  ].map(cleanKey).filter(Boolean);
+  return candidates.some((candidate) => identifiers.has(candidate));
+}
+
+function duplicatePhoneMap(leads) {
+  const counts = new Map();
+  for (const lead of leads) {
+    const phone = getLeadRealPhone(lead);
+    if (phone) counts.set(phone, (counts.get(phone) || 0) + 1);
+  }
+  return counts;
+}
+
 export function deriveLeadPipelineStage(lead = {}) {
   const status = String(lead.status || 'new');
   if (ATTENTION_STATUSES.has(status)) return 'attention';
@@ -127,7 +331,43 @@ export function deriveLeadPipelineStage(lead = {}) {
   return 'waiting';
 }
 
-export function toLeadSummary(lead = {}) {
+function applyAttentionTracking(previous, current, now = new Date().toISOString()) {
+  const previousStage = previous ? deriveLeadPipelineStage(previous) : null;
+  const currentStage = deriveLeadPipelineStage(current);
+
+  if (currentStage === 'attention') {
+    const startedAt = current.attentionStartedAt
+      || previous?.attentionStartedAt
+      || (previousStage === 'attention'
+        ? previous?.transferredAt
+          || previous?.handoffAttemptedAt
+          || previous?.lastInteraction
+          || previous?.updatedAt
+        : current.transferredAt || current.handoffAttemptedAt || now);
+    const timestamp = toTimestamp(startedAt) || toTimestamp(now) || Date.now();
+    return { ...current, attentionStartedAt: new Date(timestamp).toISOString() };
+  }
+
+  if (!current.attentionStartedAt) return current;
+  const next = {
+    ...current,
+    lastAttentionStartedAt: current.attentionStartedAt,
+  };
+  delete next.attentionStartedAt;
+  return next;
+}
+
+export function buildLeadSubject(lead = {}) {
+  const intent = lead.lastIntent || lead.lastDetectedIntent || '';
+  if (INTENT_SUBJECTS[intent]) return INTENT_SUBJECTS[intent];
+  if (!messageCount(lead, 'user') && normalizedSource(lead) === 'campaign') return 'Campanha sem resposta do contato';
+  if (lead.status === 'human_taken_over') return 'Atendimento assumido pelo consultor';
+  if (lead.status === 'blocked') return 'Automa\u00e7\u00e3o pausada';
+  if (lead.status === 'resolved') return 'Atendimento resolvido';
+  return 'Inten\u00e7\u00e3o ainda n\u00e3o definida';
+}
+
+export function toLeadSummary(lead = {}, { duplicateCount = 1 } = {}) {
   const userMessage = latestMessage(lead, 'user');
   const anyMessage = latestMessage(lead);
   const realPhone = getLeadRealPhone(lead);
@@ -140,6 +380,19 @@ export function toLeadSummary(lead = {}) {
     || anyMessage?.content
     || '',
   ).trim();
+  const updatedAt = lead.updatedAt || lead.lastInteraction || lead.createdAt || null;
+  const inactivityDays = updatedAt ? Math.max(0, Math.floor((Date.now() - toTimestamp(updatedAt)) / 86400000)) : null;
+  const pipelineStage = deriveLeadPipelineStage(lead);
+  const attentionStartedAt = pipelineStage === 'attention'
+    ? lead.attentionStartedAt
+      || lead.transferredAt
+      || lead.handoffAttemptedAt
+      || lead.lastInteraction
+      || updatedAt
+    : null;
+  const waitingMinutes = attentionStartedAt
+    ? Math.max(0, Math.floor((Date.now() - toTimestamp(attentionStartedAt)) / 60000))
+    : null;
 
   return {
     number: lead.number,
@@ -150,10 +403,11 @@ export function toLeadSummary(lead = {}) {
     status: lead.status || 'new',
     stage: lead.stage || null,
     crmStage: lead.crmStage || null,
-    pipelineStage: deriveLeadPipelineStage(lead),
+    pipelineStage,
     source: normalizedSource(lead),
     lastIntent: lead.lastIntent || lead.lastDetectedIntent || null,
     conversationMode: lead.conversationMode || null,
+    subject: buildLeadSubject(lead),
     summary: summary.slice(0, 220),
     lastCustomerMessage: String(userMessage?.content || '').trim().slice(0, 220),
     userMessageCount: userMessages,
@@ -165,13 +419,34 @@ export function toLeadSummary(lead = {}) {
     riskLevel: lead.riskLevel || null,
     automationPaused: AUTOMATION_PAUSED_STATUSES.has(String(lead.status || '')),
     createdAt: lead.createdAt || null,
-    updatedAt: lead.updatedAt || lead.lastInteraction || lead.createdAt || null,
+    updatedAt,
+    attentionStartedAt,
     deletedAt: lead.deletedAt || null,
+    deleteReason: lead.deleteReason || null,
+    deletedBy: lead.deletedBy || null,
+    trashExpiresAt: lead.trashExpiresAt || null,
+    autoRestoredAt: lead.autoRestoredAt || null,
+    returnedFromTrashCount: Number(lead.returnedFromTrashCount || 0),
+    inactivityDays,
+    attentionWaitingMinutes: pipelineStage === 'attention' ? waitingMinutes : null,
+    attentionOverdue: pipelineStage === 'attention' && waitingMinutes >= 15,
+    duplicateCount,
+    hasDuplicate: duplicateCount > 1,
+    internalNoteCount: Array.isArray(lead.internalNotes) ? lead.internalNotes.length : 0,
+    activityCount: Array.isArray(lead.activity) ? lead.activity.length : 0,
   };
 }
 
+function summarizeLeads(leads) {
+  const phoneCounts = duplicatePhoneMap(leads);
+  return leads.map((lead) => {
+    const phone = getLeadRealPhone(lead);
+    return toLeadSummary(lead, { duplicateCount: phone ? phoneCounts.get(phone) || 1 : 1 });
+  });
+}
+
 function buildOverviewFromLeads(leads) {
-  const summaries = leads.map(toLeadSummary);
+  const summaries = summarizeLeads(leads);
   const counts = {
     total: summaries.length,
     customerConversations: summaries.filter((lead) => lead.hasCustomerMessage).length,
@@ -180,6 +455,9 @@ function buildOverviewFromLeads(leads) {
     qualified: 0,
     waiting: 0,
     closed: 0,
+    overdueAttention: summaries.filter((lead) => lead.attentionOverdue).length,
+    returnedFromTrash: summaries.filter((lead) => lead.autoRestoredAt).length,
+    duplicateGroups: new Set(summaries.filter((lead) => lead.hasDuplicate && lead.phoneResolved).map((lead) => lead.phone)).size,
   };
   for (const lead of summaries) {
     if (Object.hasOwn(counts, lead.pipelineStage)) counts[lead.pipelineStage] += 1;
@@ -191,17 +469,15 @@ function buildOverviewFromLeads(leads) {
     return new Date(lead.createdAt).toDateString() === today;
   }).length;
 
-  return {
-    counts,
-    generatedAt: new Date().toISOString(),
-  };
+  return { counts, generatedAt: new Date().toISOString() };
 }
 
 export function getLeadOverview() {
   return buildOverviewFromLeads(getAllLeads());
 }
 
-function notificationFor(previous, current) {
+function notificationFor(previous, current, action = '') {
+  if (action === 'auto_restored') return { kind: 'returned_from_trash', priority: 'high' };
   if (!current) return null;
   const previousStage = previous ? deriveLeadPipelineStage(previous) : null;
   const currentStage = deriveLeadPipelineStage(current);
@@ -227,7 +503,7 @@ function emitLeadEvent({ action, previous = null, current = null, count = 1, ori
     origin,
     previousPipelineStage: previous ? deriveLeadPipelineStage(previous) : null,
     pipelineStage: current ? deriveLeadPipelineStage(current) : null,
-    notification: notificationFor(previous, current),
+    notification: notificationFor(previous, current, action),
     overview: overview || getLeadOverview(),
     occurredAt: new Date().toISOString(),
   };
@@ -248,17 +524,24 @@ export function getLead(number) {
   return loadAll()[number] || null;
 }
 
+export function getDeletedLead(number) {
+  return loadTrash()[number] || null;
+}
+
 export function saveLead(number, leadData, options = {}) {
-  const key = String(number || '').trim();
+  const key = cleanKey(number);
   if (!key) throw new Error('Lead number is required.');
   const all = loadAll();
   const previous = all[key] || null;
-  const current = {
+  const now = new Date().toISOString();
+  let current = {
     ...(previous || {}),
     ...(leadData || {}),
     number: key,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
   };
+  current = applyAttentionTracking(previous, current, now);
+  if (previous) current = addTrackedUpdateActivity(previous, current, options.origin || 'system');
   all[key] = current;
   saveJsonAtomic(LEADS_FILE, all);
   emitLeadEvent({
@@ -272,16 +555,19 @@ export function saveLead(number, leadData, options = {}) {
 }
 
 export function updateLead(number, updates, options = {}) {
-  const key = String(number || '').trim();
+  const key = cleanKey(number);
   const all = loadAll();
   if (!all[key]) return null;
   const previous = all[key];
-  const current = {
+  const now = new Date().toISOString();
+  let current = {
     ...previous,
     ...(updates || {}),
     number: key,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
   };
+  current = applyAttentionTracking(previous, current, now);
+  current = addTrackedUpdateActivity(previous, current, options.origin || 'system');
   all[key] = current;
   saveJsonAtomic(LEADS_FILE, all);
   emitLeadEvent({
@@ -295,13 +581,17 @@ export function updateLead(number, updates, options = {}) {
 }
 
 export function bulkUpdateLeads(numbers, updates, options = {}) {
-  const keys = [...new Set((Array.isArray(numbers) ? numbers : []).map((value) => String(value || '').trim()).filter(Boolean))];
+  const keys = uniqueKeys(numbers);
   const all = loadAll();
   const changed = [];
   const now = new Date().toISOString();
   for (const key of keys) {
     if (!all[key]) continue;
-    all[key] = { ...all[key], ...(updates || {}), number: key, updatedAt: now };
+    const previous = all[key];
+    let current = { ...previous, ...(updates || {}), number: key, updatedAt: now };
+    current = applyAttentionTracking(previous, current, now);
+    current = addTrackedUpdateActivity(previous, current, options.origin || 'system');
+    all[key] = current;
     changed.push(key);
   }
   if (changed.length > 0) {
@@ -318,20 +608,46 @@ export function bulkUpdateLeads(numbers, updates, options = {}) {
 
 export function getAllLeads({ summary = false } = {}) {
   const leads = Object.values(loadAll()).sort((a, b) =>
-    new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0)
+    toTimestamp(b.updatedAt || b.createdAt) - toTimestamp(a.updatedAt || a.createdAt)
   );
-  return summary ? leads.map(toLeadSummary) : leads;
+  return summary ? summarizeLeads(leads) : leads;
 }
 
 function moveToTrash(keys, options = {}) {
   const all = loadAll();
   const trash = loadTrash();
   const deletedAt = new Date().toISOString();
+  const retentionDays = Number(getLeadSettings().trashRetentionDays || 0);
   const moved = [];
+  const alreadyDeleted = [];
 
-  for (const key of keys) {
-    if (!all[key]) continue;
-    trash[key] = { ...all[key], deletedAt };
+  for (const key of uniqueKeys(keys)) {
+    if (!all[key]) {
+      if (trash[key]) alreadyDeleted.push(key);
+      continue;
+    }
+    const previous = all[key];
+    let archived = appendActivity(previous, 'moved_to_trash', {
+      origin: options.origin || 'system',
+      details: {
+        reason: options.reason || 'manual_delete',
+        previousStage: deriveLeadPipelineStage(previous),
+      },
+      at: deletedAt,
+    });
+    archived = {
+      ...archived,
+      deletedAt,
+      deletedBy: options.actor || options.origin || 'system',
+      deleteReason: options.reason || 'manual_delete',
+      deletedFromStage: deriveLeadPipelineStage(previous),
+      trashExpiresAt: retentionDays > 0
+        ? new Date(toTimestamp(deletedAt) + retentionDays * 86400000).toISOString()
+        : null,
+    };
+    trash[key] = trash[key]
+      ? mergeRecords([trash[key], archived], key, { origin: options.origin, reason: 'trash_conflict' })
+      : archived;
     delete all[key];
     moved.push(key);
   }
@@ -346,17 +662,21 @@ function moveToTrash(keys, options = {}) {
       overview: buildOverviewFromLeads(Object.values(all)),
     });
   }
-  return moved;
+  return { moved, alreadyDeleted };
 }
 
 export function deleteLead(number, options = {}) {
-  return moveToTrash([String(number || '').trim()], options).length === 1;
+  const result = moveToTrash([cleanKey(number)], options);
+  return result.moved.length === 1 || result.alreadyDeleted.length === 1;
 }
 
 export function bulkDeleteLeads(numbers, options = {}) {
-  const keys = [...new Set((Array.isArray(numbers) ? numbers : []).map((value) => String(value || '').trim()).filter(Boolean))];
-  const moved = moveToTrash(keys, options);
-  return { deleted: moved.length, numbers: moved };
+  const result = moveToTrash(numbers, options);
+  return {
+    deleted: result.moved.length,
+    alreadyDeleted: result.alreadyDeleted.length,
+    numbers: result.moved,
+  };
 }
 
 export function clearAllLeads(options = {}) {
@@ -366,41 +686,285 @@ export function clearAllLeads(options = {}) {
 
 export function getDeletedLeads({ summary = false } = {}) {
   const leads = Object.values(loadTrash()).sort((a, b) =>
-    new Date(b.deletedAt || 0) - new Date(a.deletedAt || 0)
+    toTimestamp(b.deletedAt) - toTimestamp(a.deletedAt)
   );
-  return summary ? leads.map(toLeadSummary) : leads;
+  return summary ? summarizeLeads(leads) : leads;
+}
+
+function findActiveDuplicate(all, lead, excludedKey = '') {
+  const phone = getLeadRealPhone(lead);
+  if (!phone) return null;
+  return Object.entries(all).find(([key, candidate]) => key !== excludedKey && getLeadRealPhone(candidate) === phone) || null;
 }
 
 export function restoreDeletedLeads(numbers, options = {}) {
-  const keys = [...new Set((Array.isArray(numbers) ? numbers : []).map((value) => String(value || '').trim()).filter(Boolean))];
+  const keys = uniqueKeys(numbers);
   const all = loadAll();
   const trash = loadTrash();
   const restored = [];
-  const skipped = [];
+  const merged = [];
+  const missing = [];
+  const referenceMoves = [];
 
   for (const key of keys) {
-    if (!trash[key]) continue;
-    if (all[key]) {
-      skipped.push(key);
+    const archived = trash[key];
+    if (!archived) {
+      missing.push(key);
       continue;
     }
-    const { deletedAt, ...lead } = trash[key];
-    all[key] = { ...lead, number: key, updatedAt: new Date().toISOString() };
+    const duplicate = all[key] ? [key, all[key]] : findActiveDuplicate(all, archived, key);
+    const targetKey = duplicate?.[0] || key;
+    let current = duplicate
+      ? mergeRecords([duplicate[1], archived], targetKey, { origin: options.origin, reason: 'restore_conflict' })
+      : clearDeletionMetadata(archived);
+    current = appendActivity(current, duplicate ? 'restored_and_merged' : 'restored_from_trash', {
+      origin: options.origin || 'dashboard',
+      details: { from: key, to: targetKey },
+    });
+    current.number = targetKey;
+    current.updatedAt = new Date().toISOString();
+    if (current.status !== 'blocked') current.crmStage = 'attention';
+    current.attentionStartedAt = current.updatedAt;
+    all[targetKey] = current;
     delete trash[key];
-    restored.push(key);
+    referenceMoves.push({ from: key, to: targetKey });
+    if (duplicate) merged.push(targetKey);
+    else restored.push(targetKey);
   }
 
-  if (restored.length > 0) {
+  if (restored.length > 0 || merged.length > 0) {
     saveJsonAtomic(LEADS_FILE, all);
     saveJsonAtomic(LEADS_TRASH_FILE, trash);
     emitLeadEvent({
-      action: 'restored',
-      count: restored.length,
+      action: merged.length > 0 ? 'restored_with_merge' : 'restored',
+      count: restored.length + merged.length,
       origin: options.origin,
       overview: buildOverviewFromLeads(Object.values(all)),
     });
   }
-  return { restored: restored.length, skipped: skipped.length, numbers: restored };
+  return {
+    restored: restored.length,
+    merged: merged.length,
+    skipped: missing.length,
+    numbers: [...restored, ...merged],
+    referenceMoves,
+  };
+}
+
+export function recoverDeletedLeadForIncoming({ identifiers = [], preferredKey = null } = {}) {
+  const identifierSet = new Set(uniqueKeys([preferredKey, ...identifiers]));
+  if (identifierSet.size === 0) return null;
+  const all = loadAll();
+  const trash = loadTrash();
+  const trashMatches = Object.entries(trash).filter(([key, lead]) => recordMatchesIdentifiers(key, lead, identifierSet));
+  if (trashMatches.length === 0) return null;
+
+  const archivedRecords = trashMatches.map(([, lead]) => lead);
+  const realPhone = archivedRecords.map(getLeadRealPhone).find(Boolean) || null;
+  const activeMatch = Object.entries(all).find(([key, lead]) => (
+    recordMatchesIdentifiers(key, lead, identifierSet)
+    || (realPhone && getLeadRealPhone(lead) === realPhone)
+  ));
+  const targetKey = activeMatch?.[0] || cleanKey(preferredKey) || trashMatches[0][0];
+  const previousStatus = pickRecentRecord(archivedRecords).status || null;
+  const records = [...(activeMatch ? [activeMatch[1]] : []), ...archivedRecords];
+  let current = mergeRecords(records, targetKey, { origin: 'customer_message', reason: 'customer_returned' });
+  current = resetAfterCustomerReturn(current, previousStatus);
+  all[targetKey] = current;
+
+  const referenceMoves = [];
+  for (const [key] of trashMatches) {
+    delete trash[key];
+    referenceMoves.push({ from: key, to: targetKey });
+  }
+  if (activeMatch && activeMatch[0] !== targetKey) {
+    delete all[activeMatch[0]];
+    referenceMoves.push({ from: activeMatch[0], to: targetKey });
+  }
+
+  saveJsonAtomic(LEADS_FILE, all);
+  saveJsonAtomic(LEADS_TRASH_FILE, trash);
+  emitLeadEvent({
+    action: 'auto_restored',
+    previous: archivedRecords[0],
+    current,
+    count: 1,
+    origin: 'customer_message',
+    overview: buildOverviewFromLeads(Object.values(all)),
+  });
+  return { lead: current, key: targetKey, referenceMoves, merged: records.length > 1 };
+}
+
+export function getDuplicateLeadGroups() {
+  const groups = new Map();
+  for (const lead of getAllLeads()) {
+    const phone = getLeadRealPhone(lead);
+    if (!phone) continue;
+    if (!groups.has(phone)) groups.set(phone, []);
+    groups.get(phone).push(lead);
+  }
+  return [...groups.entries()]
+    .filter(([, leads]) => leads.length > 1)
+    .map(([phone, leads]) => ({ phone, count: leads.length, leads: summarizeLeads(leads) }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export function mergeActiveLeads(numbers, { targetNumber = null, origin = 'dashboard', reason = 'manual_merge' } = {}) {
+  const keys = uniqueKeys(numbers);
+  const all = loadAll();
+  const entries = keys.filter((key) => all[key]).map((key) => [key, all[key]]);
+  if (entries.length < 2) throw new Error('Selecione pelo menos dois leads existentes para mesclar.');
+  const phones = [...new Set(entries.map(([, lead]) => getLeadRealPhone(lead)).filter(Boolean))];
+  if (phones.length !== 1 || entries.some(([, lead]) => !getLeadRealPhone(lead))) {
+    throw new Error('A mesclagem so e permitida para registros com o mesmo telefone confirmado.');
+  }
+  const targetKey = entries.some(([key]) => key === targetNumber)
+    ? targetNumber
+    : entries.find(([key]) => key === phones[0])?.[0] || entries[0][0];
+  const current = mergeRecords(entries.map(([, lead]) => lead), targetKey, { origin, reason });
+  for (const [key] of entries) delete all[key];
+  all[targetKey] = current;
+  saveJsonAtomic(LEADS_FILE, all);
+  emitLeadEvent({
+    action: 'merged',
+    current,
+    count: entries.length,
+    origin,
+    overview: buildOverviewFromLeads(Object.values(all)),
+  });
+  return {
+    merged: entries.length,
+    targetNumber: targetKey,
+    removedNumbers: entries.map(([key]) => key).filter((key) => key !== targetKey),
+    referenceMoves: entries.map(([key]) => ({ from: key, to: targetKey })),
+    lead: current,
+  };
+}
+
+export function permanentlyDeleteLeads(numbers, options = {}) {
+  const keys = uniqueKeys(numbers);
+  const trash = loadTrash();
+  const deleted = [];
+  const missing = [];
+  for (const key of keys) {
+    if (!trash[key]) {
+      missing.push(key);
+      continue;
+    }
+    delete trash[key];
+    deleted.push(key);
+  }
+  if (deleted.length > 0) {
+    saveJsonAtomic(LEADS_TRASH_FILE, trash);
+    emitLeadEvent({
+      action: 'permanently_deleted',
+      count: deleted.length,
+      origin: options.origin,
+      overview: buildOverviewFromLeads(getAllLeads()),
+    });
+  }
+  return { permanentlyDeleted: deleted.length, numbers: deleted, missing: missing.length };
+}
+
+export function emptyTrash(options = {}) {
+  return permanentlyDeleteLeads(Object.keys(loadTrash()), options);
+}
+
+export function getLeadSettings() {
+  const stored = loadJson(LEADS_SETTINGS_FILE);
+  const retention = Number(stored.trashRetentionDays);
+  return {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    trashRetentionDays: [0, 30, 60, 90].includes(retention) ? retention : 0,
+  };
+}
+
+export function updateLeadSettings(updates = {}) {
+  const current = getLeadSettings();
+  const retention = Number(updates.trashRetentionDays ?? current.trashRetentionDays);
+  if (![0, 30, 60, 90].includes(retention)) throw new Error('Prazo da lixeira invalido.');
+  const next = { ...current, trashRetentionDays: retention, updatedAt: new Date().toISOString() };
+  saveJsonAtomic(LEADS_SETTINGS_FILE, next);
+  const trash = loadTrash();
+  let trashChanged = false;
+  for (const [key, lead] of Object.entries(trash)) {
+    const expiresAt = retention > 0 && lead.deletedAt
+      ? new Date(toTimestamp(lead.deletedAt) + retention * 86400000).toISOString()
+      : null;
+    if ((lead.trashExpiresAt || null) === expiresAt) continue;
+    trash[key] = { ...lead, trashExpiresAt: expiresAt };
+    trashChanged = true;
+  }
+  if (trashChanged) saveJsonAtomic(LEADS_TRASH_FILE, trash);
+  return next;
+}
+
+export function getExpiredTrashKeys(now = Date.now()) {
+  return Object.entries(loadTrash())
+    .filter(([, lead]) => lead.trashExpiresAt && toTimestamp(lead.trashExpiresAt) <= now)
+    .map(([key]) => key);
+}
+
+export function createLeadsBackup(reason = 'manual') {
+  ensureDir(LEADS_BACKUP_DIR);
+  const createdAt = new Date().toISOString();
+  const backupId = createdAt.replace(/[:.]/g, '-') + `-${randomBytes(3).toString('hex')}`;
+  const file = path.join(LEADS_BACKUP_DIR, `${backupId}.json`);
+  saveJsonAtomic(file, {
+    backupId,
+    reason: cleanKey(reason) || 'manual',
+    createdAt,
+    active: loadAll(),
+    trash: loadTrash(),
+    settings: getLeadSettings(),
+  });
+  const backups = fs.readdirSync(LEADS_BACKUP_DIR)
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => ({ name, file: path.join(LEADS_BACKUP_DIR, name), timestamp: fs.statSync(path.join(LEADS_BACKUP_DIR, name)).mtimeMs }))
+    .sort((a, b) => b.timestamp - a.timestamp);
+  for (const backup of backups.slice(BACKUP_LIMIT)) {
+    try { fs.unlinkSync(backup.file); } catch {}
+  }
+  return { backupId, createdAt };
+}
+
+export function addInternalNote(number, text, { author = 'Consultor principal', origin = 'dashboard' } = {}) {
+  const key = cleanKey(number);
+  const noteText = String(text || '').trim().slice(0, 1200);
+  if (!noteText) throw new Error('Escreva uma observa\u00e7\u00e3o antes de salvar.');
+  const all = loadAll();
+  if (!all[key]) return null;
+  const now = new Date().toISOString();
+  const note = { id: randomUUID(), text: noteText, author, createdAt: now };
+  let current = {
+    ...all[key],
+    internalNotes: [...(Array.isArray(all[key].internalNotes) ? all[key].internalNotes : []), note].slice(-100),
+    updatedAt: now,
+  };
+  current = applyAttentionTracking(all[key], current, now);
+  current = appendActivity(current, 'internal_note_added', { origin, details: { noteId: note.id } });
+  all[key] = current;
+  saveJsonAtomic(LEADS_FILE, all);
+  emitLeadEvent({ action: 'note_added', previous: null, current, origin, overview: buildOverviewFromLeads(Object.values(all)) });
+  return note;
+}
+
+export function deleteInternalNote(number, noteId, { origin = 'dashboard' } = {}) {
+  const key = cleanKey(number);
+  const all = loadAll();
+  if (!all[key]) return false;
+  const notes = Array.isArray(all[key].internalNotes) ? all[key].internalNotes : [];
+  const nextNotes = notes.filter((note) => note.id !== noteId);
+  if (nextNotes.length === notes.length) return false;
+  const now = new Date().toISOString();
+  let current = { ...all[key], internalNotes: nextNotes, updatedAt: now };
+  current = applyAttentionTracking(all[key], current, now);
+  current = appendActivity(current, 'internal_note_deleted', { origin, details: { noteId } });
+  all[key] = current;
+  saveJsonAtomic(LEADS_FILE, all);
+  emitLeadEvent({ action: 'note_deleted', current, origin, overview: buildOverviewFromLeads(Object.values(all)) });
+  return true;
 }
 
 function csvCell(value) {
@@ -409,11 +973,12 @@ function csvCell(value) {
 
 export function exportLeadsCSV() {
   const leads = getAllLeads();
-  const headers = ['Telefone real', 'ID interno WhatsApp', 'Nome', 'Modelo', 'Placa', 'Status', 'Categoria CRM', 'Origem', 'Criado em', 'Atualizado em', 'Transferido para'];
+  const headers = ['Telefone real', 'ID interno WhatsApp', 'Nome', 'Assunto', 'Modelo', 'Placa', 'Status', 'Categoria CRM', 'Origem', 'Criado em', 'Atualizado em', 'Transferido para'];
   const rows = leads.map((lead) => [
-    getLeadRealPhone(lead) || 'Nao resolvido',
+    getLeadRealPhone(lead) || 'N\u00e3o resolvido',
     getLeadInternalWhatsAppId(lead) || '',
     lead.name || '',
+    buildLeadSubject(lead),
     lead.model || '',
     lead.plate || '',
     lead.status || '',
