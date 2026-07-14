@@ -1157,6 +1157,7 @@ class WhatsAppManager extends EventEmitter {
                 peerPrimary: !!options.peerPrimary,
                 noInternalRetry: !!options.noInternalRetry,
                 skipTyping: !!options.skipTyping,
+                disableDeliveryRecovery: !!options.disableDeliveryRecovery,
             },
             routeLabel: options.routeLabel || '',
             context: options.context || (options.campaignContext ? 'campaign' : undefined),

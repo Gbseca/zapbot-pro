@@ -1,3 +1,5 @@
+import { isLidIdentifier } from '../phone-utils.js';
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function normalizeFinalStatus(status) {
@@ -21,36 +23,48 @@ function mergeAcceptedAndFinal(accepted = {}, final = {}) {
   };
 }
 
-function buildRecoveryAttempts(sendOptions = {}) {
+function shouldPreserveLidRoute(number, sendOptions = {}) {
+  return isLidIdentifier(number) && sendOptions.forcePhoneJid !== true;
+}
+
+function buildRecoveryAttempts(number, sendOptions = {}) {
   if (sendOptions.disableDeliveryRecovery) return [sendOptions];
   const baseLabel = sendOptions.routeLabel || 'agent_reply';
+  const preserveLid = shouldPreserveLidRoute(number, sendOptions);
+  const routeKind = preserveLid ? 'lid' : 'phone';
+  const recoveryRoute = preserveLid
+    ? { forcePhoneJid: false, allowRawLid: true }
+    : { forcePhoneJid: true, allowRawLid: false };
   return [
     sendOptions,
     {
       ...sendOptions,
-      forcePhoneJid: true,
+      ...recoveryRoute,
       freshDevices: true,
       peerPrimary: false,
       noInternalRetry: true,
       skipTyping: true,
-      routeLabel: `${baseLabel}_fresh_phone`,
+      routeLabel: `${baseLabel}_fresh_${routeKind}`,
     },
     {
       ...sendOptions,
-      forcePhoneJid: true,
+      ...recoveryRoute,
       freshDevices: false,
       peerPrimary: true,
       noInternalRetry: true,
       skipTyping: true,
-      routeLabel: `${baseLabel}_peer_phone`,
+      routeLabel: `${baseLabel}_peer_${routeKind}`,
     },
   ];
 }
 
-async function prepareDeliveryRecovery(wa, number) {
+async function prepareDeliveryRecovery(wa, number, sendOptions = {}) {
+  const recoveryRoute = shouldPreserveLidRoute(number, sendOptions)
+    ? { forcePhoneJid: false, allowRawLid: true }
+    : { forcePhoneJid: true, allowRawLid: false };
   try {
     if (typeof wa.refreshDevicesForTarget === 'function') {
-      const refreshed = await wa.refreshDevicesForTarget(number, { forcePhoneJid: true });
+      const refreshed = await wa.refreshDevicesForTarget(number, recoveryRoute);
       console.warn(`[Humanizer] Recovery refresh devices target=${number} count=${refreshed.deviceCount || 0}`);
     }
   } catch (error) {
@@ -59,7 +73,7 @@ async function prepareDeliveryRecovery(wa, number) {
 
   try {
     if (typeof wa.resetSignalSessionsForTarget === 'function') {
-      const reset = await wa.resetSignalSessionsForTarget(number, { forcePhoneJid: true });
+      const reset = await wa.resetSignalSessionsForTarget(number, recoveryRoute);
       console.warn(`[Humanizer] Recovery reset sessions target=${number} purged=${reset.purged || 0}`);
     }
   } catch (error) {
@@ -68,13 +82,13 @@ async function prepareDeliveryRecovery(wa, number) {
 }
 
 export async function sendTextWithConfirmation(wa, number, text, sendOptions = {}) {
-  const attempts = buildRecoveryAttempts(sendOptions);
+  const attempts = buildRecoveryAttempts(number, sendOptions);
   let lastDelivery = null;
 
   for (let index = 0; index < attempts.length; index += 1) {
     const attemptOptions = attempts[index];
     if (index > 0) {
-      if (index === 1) await prepareDeliveryRecovery(wa, number);
+      if (index === 1) await prepareDeliveryRecovery(wa, number, sendOptions);
       console.warn(`[Humanizer] Retrying WhatsApp delivery via ${attemptOptions.routeLabel || 'recovery'} target=${number}`);
     }
 

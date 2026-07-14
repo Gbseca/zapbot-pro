@@ -497,6 +497,22 @@ function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute 
     || null;
   const commonOptions = { context: 'ai', noInternalRetry: true, inboundRoute };
 
+  // A LID recebido identifica a conversa exata. Responder pelo numero associado
+  // pode ser aceito pelo servidor do WhatsApp sem chegar ao mesmo chat.
+  if (isLidJid(fullJid)) {
+    return {
+      target: fullJid,
+      options: {
+        ...commonOptions,
+        allowRawLid: true,
+        forcePhoneJid: false,
+        disableDeliveryRecovery: true,
+        routeLabel: 'agent_inbound_lid',
+      },
+      source: 'inboundLid',
+    };
+  }
+
   if (altPhone) {
     return {
       target: altPhone,
@@ -526,14 +542,6 @@ function resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute 
       target: conversationPhone,
       options: { ...commonOptions, forcePhoneJid: true, routeLabel: 'agent_phone' },
       source: 'conversationPhone',
-    };
-  }
-
-  if (isLidJid(fullJid)) {
-    return {
-      target: fullJid,
-      options: { ...commonOptions, allowRawLid: true, skipTyping: true, routeLabel: 'agent_raw_lid' },
-      source: 'raw_lid_allowed',
     };
   }
 
