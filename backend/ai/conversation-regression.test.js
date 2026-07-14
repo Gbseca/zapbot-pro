@@ -470,3 +470,149 @@ test('keeps the commercial quote flow intact for real sales interest', async () 
   assert.equal(ready.nextAction, 'execute_handoff');
   assert.equal(ready.shouldHandoff, true);
 });
+
+test('explains the plate request once and lets the customer continue without sharing it', async () => {
+  const lead = createLead({
+    model: 'Volkswagen Voyage',
+    year: '2015',
+    stage: 'ask_plate',
+    lastIntent: 'sales_quote',
+    missingData: ['plate'],
+    history: [
+      { role: 'user', content: 'Quero uma cotacao pro meu veiculo' },
+      { role: 'assistant', content: 'Qual o modelo e o ano do veiculo?' },
+      { role: 'user', content: 'Volkswagen Voyage, 2015' },
+      { role: 'assistant', content: 'Pode me passar a placa do veiculo?' },
+    ],
+  });
+
+  const why = await makeConversationDecision({
+    config: {},
+    text: 'Porque?',
+    lead,
+    incomingContent: { text: 'Porque?', historyText: 'Porque?' },
+    skipAI: true,
+  });
+  assert.equal(why.intent, 'plate_reason_question');
+  assert.equal(why.nextAction, 'explain_plate_request');
+  assert.equal(why.shouldHandoff, false);
+  assert.equal(why.allowedQuestion, null);
+  assert.equal((why.clientReply.match(/\?/g) || []).length, 0);
+  assert.match(why.clientReply, /conferir os dados exatos/i);
+  assert.match(why.clientReply, /seguir so com o modelo e o ano/i);
+
+  applyConversationDecisionToLead(lead, why, { text: 'Porque?' });
+  const reply = await buildHumanizedReply({}, {
+    mode: why.conversationMode,
+    lead,
+    latestUserMessage: 'Porque?',
+    requiredAction: why.nextAction,
+    allowedQuestion: why.allowedQuestion,
+  });
+  assert.equal(reply, why.clientReply);
+  assert.doesNotMatch(reply, /pode me passar a placa/i);
+
+  const continueWithoutPlate = await makeConversationDecision({
+    config: {},
+    text: 'Porque voce precisa da minha placa?',
+    lead,
+    incomingContent: {
+      text: 'Porque voce precisa da minha placa?',
+      historyText: 'Porque voce precisa da minha placa?',
+    },
+    skipAI: true,
+  });
+  assert.equal(continueWithoutPlate.intent, 'plate_declined');
+  assert.equal(continueWithoutPlate.nextAction, 'execute_handoff');
+  assert.equal(continueWithoutPlate.shouldHandoff, true);
+  assert.equal(continueWithoutPlate.plateWithheld, true);
+  assert.doesNotMatch(continueWithoutPlate.missingData.join(','), /plate/);
+
+  applyConversationDecisionToLead(lead, continueWithoutPlate, { text: 'Porque voce precisa da minha placa?' });
+  assert.equal(lead.plateWithheld, true);
+});
+
+test('recognizes common plate privacy refusals without treating a real withdrawal as one', async () => {
+  const refusals = [
+    'prefiro nao informar a placa',
+    'nao quero passar minha placa',
+    'pode ser sem a placa',
+    'nao me sinto a vontade de compartilhar a placa',
+  ];
+
+  for (const message of refusals) {
+    const { decision } = await decide(message, {
+      model: 'Voyage',
+      year: '2015',
+      stage: 'ask_plate',
+      lastIntent: 'sales_quote',
+      missingData: ['plate'],
+    });
+    assert.equal(decision.intent, 'plate_declined', message);
+    assert.equal(decision.nextAction, 'execute_handoff', message);
+    assert.equal(decision.shouldHandoff, true, message);
+    assert.equal(decision.plateWithheld, true, message);
+  }
+
+  const { decision: skipConfirmation } = await decide('pode seguir', {
+    model: 'Voyage',
+    year: '2015',
+    stage: 'explain_plate_request',
+    lastIntent: 'plate_reason_question',
+    missingData: ['plate'],
+    plateReasonExplainedAt: new Date().toISOString(),
+  });
+  assert.equal(skipConfirmation.intent, 'plate_declined');
+  assert.equal(skipConfirmation.nextAction, 'execute_handoff');
+
+  const { decision: withdrawal } = await decide('nao quero mais', {
+    model: 'Voyage',
+    year: '2015',
+    stage: 'ask_plate',
+    lastIntent: 'sales_quote',
+    missingData: ['plate'],
+  });
+  assert.equal(withdrawal.intent, 'no_interest');
+  assert.equal(withdrawal.nextAction, 'stop_automation');
+  assert.equal(withdrawal.shouldHandoff, false);
+});
+
+test('answers a new sales question instead of forcing the missing plate again', async () => {
+  const lead = createLead({
+    model: 'Voyage',
+    year: '2015',
+    stage: 'ask_plate',
+    lastIntent: 'sales_quote',
+    missingData: ['plate'],
+  });
+
+  const questions = [
+    'como funciona a protecao veicular?',
+    'voces cobrem roubo e furto?',
+    'a associacao funciona por rateio?',
+  ];
+
+  for (const message of questions) {
+    const decision = await makeConversationDecision({
+      config: {},
+      text: message,
+      lead,
+      incomingContent: { text: message, historyText: message },
+      skipAI: true,
+    });
+    assert.equal(decision.intent, 'general_question', message);
+    assert.equal(decision.nextAction, 'respond', message);
+    assert.equal(decision.shouldHandoff, false, message);
+    assert.equal(decision.allowedQuestion, null, message);
+  }
+
+  const price = await makeConversationDecision({
+    config: {},
+    text: 'qual o valor?',
+    lead,
+    incomingContent: { text: 'qual o valor?', historyText: 'qual o valor?' },
+    skipAI: true,
+  });
+  assert.equal(price.intent, 'sales_price_request');
+  assert.equal(price.nextAction, 'ask_plate');
+});

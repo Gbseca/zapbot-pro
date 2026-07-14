@@ -35,6 +35,7 @@ function normalizeText(value = '') {
 }
 
 const FORBIDDEN_REPLY_TERMS = /\b(seguro|seguradora|ap[oó]lice|sinistro|pr[eê]mio)\b/i;
+const PLATE_REASON_REPLY = 'A placa ajuda o consultor a conferir os dados exatos do veiculo e evitar erro na cotacao. Se preferir nao informar agora, posso seguir so com o modelo e o ano.';
 
 function isLikelyIncompleteReply(reply = '') {
   const cleaned = String(reply || '').trim().replace(/[“”"']+$/g, '').trim();
@@ -129,6 +130,10 @@ export async function buildHumanizedReply(config, {
 
   if (mode === 'sales' && requiredAction === 'stop_automation') {
     return 'Tudo bem, sem problema. Nao vou insistir. Se precisar, e so chamar.';
+  }
+
+  if (mode === 'sales' && requiredAction === 'explain_plate_request') {
+    return lead.clientReply || PLATE_REASON_REPLY;
   }
 
   if (
