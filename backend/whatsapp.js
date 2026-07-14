@@ -1391,6 +1391,25 @@ class WhatsAppManager extends EventEmitter {
         }
     }
 
+    async fetchReachoutTimeLock() {
+        if (!this.sock || this.status !== 'connected') {
+            throw new Error('WhatsApp nao esta conectado');
+        }
+        if (typeof this.sock.fetchAccountReachoutTimelock !== 'function') {
+            return { supported: false, isActive: null, timeEnforcementEnds: null, enforcementType: null };
+        }
+
+        const result = await this.sock.fetchAccountReachoutTimelock();
+        return {
+            supported: true,
+            isActive: !!result?.isActive,
+            timeEnforcementEnds: result?.timeEnforcementEnds instanceof Date
+                ? result.timeEnforcementEnds.toISOString()
+                : result?.timeEnforcementEnds || null,
+            enforcementType: result?.enforcementType || null,
+        };
+    }
+
     getStatus() {
         const predominantRoute = Object.entries(this._routeStats)
             .sort((left, right) => right[1] - left[1])[0]?.[0] || 'unknown';

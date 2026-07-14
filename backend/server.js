@@ -243,6 +243,15 @@ wss.on('connection', (ws) => {
 app.get('/api/status', (req, res) => res.json(wa.getStatus()));
 app.get('/api/system/status', (req, res) => res.json(systemStatus.buildSnapshot()));
 
+app.get('/api/debug/reachout-status', async (req, res) => {
+  try {
+    if (!assertDebugToken(req)) return res.status(403).json({ error: 'Debug token invalido.' });
+    return res.json(await wa.fetchReachoutTimeLock());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/debug/send-test', async (req, res) => {
   try {
     if (!assertDebugToken(req)) return res.status(403).json({ error: 'Debug token invalido.' });

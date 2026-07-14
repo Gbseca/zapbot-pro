@@ -80,3 +80,22 @@ test('records an explicit WhatsApp rejection instead of waiting for a timeout', 
     clearTimeout(record?.cleanupTimer);
     manager._outboundRecords.delete(accepted.messageId);
 });
+
+test('normalizes the account reachout restriction returned by WhatsApp', async () => {
+    const manager = new WhatsAppManager(null);
+    manager.status = 'connected';
+    manager.sock = {
+        fetchAccountReachoutTimelock: async () => ({
+            isActive: true,
+            timeEnforcementEnds: new Date('2026-07-15T12:00:00.000Z'),
+            enforcementType: 'DEFAULT',
+        }),
+    };
+
+    assert.deepEqual(await manager.fetchReachoutTimeLock(), {
+        supported: true,
+        isActive: true,
+        timeEnforcementEnds: '2026-07-15T12:00:00.000Z',
+        enforcementType: 'DEFAULT',
+    });
+});
