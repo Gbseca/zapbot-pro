@@ -1,5 +1,6 @@
 import { loadConfig, resolveEffectiveAIConfig } from '../data/config-manager.js';
 import { getAllLeads, getLead, saveLead } from '../data/leads-manager.js';
+import { recoverLeadWhenCustomerReturns } from '../data/lead-lifecycle-service.js';
 import {
   getLeadRealPhone,
   isLidIdentifier,
@@ -1218,12 +1219,27 @@ export async function handleIncomingMessage(wa, rawMsg) {
   const persistentPhone = await resolvePersistentPhoneForLid(fullJid, inboundRoute);
   const displayNum = persistentPhone || inboundRoute?.mappedPhone || inboundRoute?.phoneCandidates?.[0] || wa.resolvePhone(fullJidAlt || fullJid);
   const conversationPhone = persistentPhone || resolveConversationPhone(displayNum, jidId, inboundRoute);
-  const { leadId, lead: leadFromStore } = resolveLeadIdentity(jidId, conversationPhone, fullJid);
+  const inboundLidJid = resolveInboundLidJid(fullJid, inboundRoute);
+  const recoveredLead = await recoverLeadWhenCustomerReturns({
+    preferredKey: conversationPhone || jidId,
+    identifiers: [
+      conversationPhone,
+      displayNum,
+      jidId,
+      fullJid,
+      fullJidAlt,
+      inboundLidJid,
+      inboundRoute?.mappedPhone,
+      ...(inboundRoute?.phoneCandidates || []),
+    ],
+  });
+  const { leadId, lead: leadFromStore } = recoveredLead
+    ? { leadId: recoveredLead.key, lead: recoveredLead.lead }
+    : resolveLeadIdentity(jidId, conversationPhone, fullJid);
   const replyRoute = resolveReplyRoute(fullJid, fullJidAlt, conversationPhone, inboundRoute, leadFromStore);
   const incomingContent = extractIncomingContent(rawMsg);
   const text = incomingContent.text;
   const pushName = rawMsg.pushName || null;
-  const inboundLidJid = resolveInboundLidJid(fullJid, inboundRoute);
 
   if (incomingContent.isDeleted) {
     console.log(`[Agent] Ignoring deleted/protocol message from ${displayNum} (jid: ${fullJid})`);

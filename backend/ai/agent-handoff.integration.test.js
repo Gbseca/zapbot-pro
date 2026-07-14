@@ -39,7 +39,7 @@ writeConfig();
 
 const { handleIncomingMessage } = await import('./agent.js');
 const { executeHandoff } = await import('./handoff.js');
-const { getAllLeads, getLead } = await import('../data/leads-manager.js');
+const { deleteLead, getAllLeads, getDeletedLeads, getLead, saveLead } = await import('../data/leads-manager.js');
 
 class MockWhatsApp {
   constructor({ failConsultant = false } = {}) {
@@ -268,4 +268,28 @@ test('keeps commercial handoff ordered and sends a single client confirmation', 
   assert.equal(wa.messages[1].target, phone);
   assert.match(wa.messages[0].message, /cotacao de protecao veicular/i);
   assert.equal(getLead(phone).status, 'transferred');
+});
+
+test('restores a trashed contact on the next message and preserves the previous conversation', async () => {
+  writeConfig();
+  const wa = new MockWhatsApp();
+  const phone = '5511987654061';
+  saveLead(phone, {
+    number: phone,
+    phone,
+    displayNumber: phone,
+    phoneResolved: true,
+    status: 'blocked',
+    history: [{ role: 'user', content: 'conversa antes do arquivamento', ts: 1 }],
+  });
+  deleteLead(phone, { origin: 'dashboard' });
+
+  await handleIncomingMessage(wa, textMessage(phone, 'preciso de reboque agora'));
+
+  const lead = getLead(phone);
+  assert.equal(getDeletedLeads().some((item) => item.number === phone), false);
+  assert.equal(lead.returnedFromTrashCount, 1);
+  assert.equal(lead.history.some((item) => item.content === 'conversa antes do arquivamento'), true);
+  assert.equal(lead.lastIntent, 'assistance_request');
+  assert.equal(wa.messages[0].target, consultant.phone);
 });

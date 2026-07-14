@@ -76,6 +76,42 @@
     'blocked',
   ]);
 
+  const CRITICAL_INTENTS = new Set([
+    'angry_customer', 'app_blocked', 'assistance_request', 'billing_dispute', 'billing_disputed',
+    'boleto_request', 'cancel_request', 'event_report', 'accident_report', 'human_requested',
+    'inspection_pending', 'inspection_request', 'payment_claimed', 'reactivation_request',
+    'receipt_available', 'receipt_received', 'receipt_sent', 'regularization_request',
+  ]);
+  const ASSISTANCE_INTENTS = new Set(['assistance_request', 'event_report', 'accident_report']);
+  const BILLING_INTENTS = new Set([
+    'app_blocked', 'billing_dispute', 'billing_disputed', 'boleto_request', 'cancel_request',
+    'payment_claimed', 'reactivation_request', 'receipt_available', 'receipt_received',
+    'receipt_sent', 'regularization_request',
+  ]);
+  const SALES_INTENTS = new Set(['sales_quote', 'sales_price_request', 'sales_consultant_requested']);
+
+  const ACTIVITY_LABELS = {
+    auto_restored_from_trash: 'Contato retornou e foi restaurado automaticamente',
+    duplicate_leads_merged: 'Registros duplicados foram mesclados',
+    handoff_completed: 'Atendimento encaminhado ao consultor',
+    handoff_started: 'Encaminhamento iniciado',
+    internal_note_added: 'Observa\u00e7\u00e3o interna adicionada',
+    internal_note_deleted: 'Observa\u00e7\u00e3o interna exclu\u00edda',
+    lead_auto_restored_from_trash: 'Contato retornou da lixeira',
+    lead_moved_to_trash: 'Lead movido para a lixeira',
+    lead_restored_from_trash: 'Lead restaurado da lixeira',
+    lead_updated: 'Dados do lead atualizados',
+    leads_merged: 'Registros do contato mesclados',
+    reminder_created: 'Retorno agendado',
+    reminder_review_required: 'Retorno antigo aguardando revis\u00e3o',
+    reminders_completed: 'Retorno conclu\u00eddo',
+    reminders_paused: 'Retorno pausado',
+    reminders_resumed: 'Retorno reativado',
+    restored_and_merged: 'Lead restaurado e unido ao registro ativo',
+    restored_from_trash: 'Lead restaurado da lixeira',
+    moved_to_trash: 'Lead movido para a lixeira',
+  };
+
   const SOUND_STORAGE_KEY = 'zapbot_lead_sound_enabled';
   const baseDocumentTitle = String(document.title || 'ZapBot Pro').replace(/^\[\d+\]\s*/, '');
   const state = {
@@ -87,6 +123,9 @@
     view: 'active',
     stage: 'customer',
     source: 'all',
+    age: 'all',
+    intent: 'all',
+    duplicateOnly: false,
     sort: 'updated_desc',
     query: '',
     page: 1,
@@ -108,6 +147,9 @@
     audioContext: null,
     pendingDelete: null,
     previousFocus: null,
+    settings: { trashRetentionDays: 0 },
+    currentReminder: null,
+    detailTab: 'conversation',
   };
 
   const elements = {};
@@ -120,22 +162,27 @@
     const ids = [
       'lead-metrics', 'leads-page-summary', 'lead-count-customer', 'lead-count-attention',
       'lead-count-active', 'lead-count-qualified', 'lead-count-waiting', 'lead-count-closed',
-      'lead-search-input', 'lead-source-filter', 'lead-sort-filter', 'lead-refresh-btn',
+      'lead-customer-caption', 'lead-active-caption', 'lead-qualified-caption', 'lead-waiting-caption', 'lead-closed-caption',
+      'lead-search-input', 'lead-source-filter', 'lead-age-filter', 'lead-intent-filter', 'lead-sort-filter', 'lead-refresh-btn',
       'lead-export-btn', 'lead-trash-view-btn', 'lead-trash-count', 'lead-delete-all-btn',
       'lead-bulk-bar', 'lead-selected-count', 'lead-select-all-results', 'lead-bulk-stage',
-      'lead-bulk-apply', 'lead-bulk-delete', 'lead-bulk-restore', 'lead-table-shell',
+      'lead-bulk-apply', 'lead-bulk-delete', 'lead-bulk-merge', 'lead-bulk-restore', 'lead-bulk-permanent', 'lead-table-shell',
       'lead-table-loading', 'lead-table', 'lead-table-body', 'lead-empty-state',
       'lead-select-page', 'lead-results-summary', 'lead-page-size', 'lead-page-prev',
       'lead-page-next', 'lead-page-label', 'lead-modal', 'lead-modal-close',
       'modal-lead-avatar', 'modal-lead-name', 'modal-lead-number', 'modal-lead-statusline',
       'modal-actions', 'modal-lead-updated', 'modal-lead-summary', 'modal-lead-facts',
       'modal-lead-stage', 'modal-lead-tag', 'modal-lead-agenda', 'lead-reminder-save',
-      'lead-reminder-complete', 'modal-chat', 'lead-delete-modal', 'lead-delete-title',
+      'lead-reminder-complete', 'lead-reminder-resume', 'lead-reminder-status', 'modal-chat',
+      'modal-timeline', 'lead-conversation-tab', 'lead-timeline-tab', 'modal-lead-note-input',
+      'lead-note-save', 'modal-lead-notes', 'lead-delete-modal', 'lead-delete-title',
       'lead-delete-description', 'lead-delete-phrase-wrap', 'lead-delete-phrase',
-      'lead-delete-cancel', 'lead-delete-confirm', 'lead-notification-trigger',
+      'lead-delete-required-phrase', 'lead-delete-warning', 'lead-delete-cancel', 'lead-delete-confirm', 'lead-notification-trigger',
       'lead-notification-count', 'lead-notification-panel', 'lead-notification-clear',
       'lead-sound-toggle', 'lead-browser-notification-btn', 'lead-notification-list',
-      'lead-live-region',
+      'lead-live-region', 'lead-health-strip', 'lead-count-duplicates', 'lead-count-overdue',
+      'lead-count-returned', 'lead-duplicates-label', 'lead-returned-label', 'lead-duplicate-filter-btn', 'lead-trash-panel', 'lead-trash-retention',
+      'lead-empty-trash-btn', 'lead-table-context-heading', 'lead-reclassify-btn',
     ];
     for (const id of ids) elements[id] = byId(id);
   }
@@ -169,7 +216,7 @@
       cache: 'no-store',
       headers: { Accept: 'application/json' },
     });
-    if (!response.ok) throw new Error('Nao foi possivel iniciar a Central de Leads.');
+    if (!response.ok) throw new Error('N\u00e3o foi poss\u00edvel iniciar a Central de Leads.');
     const session = await response.json();
     state.sessionToken = String(session.token || '');
     return state.sessionToken;
@@ -188,7 +235,7 @@
       return api(path, options, false);
     }
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Falha na operacao (${response.status}).`);
+    if (!response.ok) throw new Error(payload.error || `Falha na opera\u00e7\u00e3o (${response.status}).`);
     return payload;
   }
 
@@ -214,6 +261,25 @@
     if (!lead?.hasCustomerMessage && lead?.source === 'campaign') return 'Sem resposta do cliente';
     if (!intent) return 'Inten\u00e7\u00e3o ainda n\u00e3o definida';
     return String(intent).replaceAll('_', ' ');
+  }
+
+  function deleteReasonLabel(reason) {
+    const labels = {
+      archive_all: 'Limpeza geral',
+      customer_returned: 'Contato retornou',
+      manual_delete: 'Exclus\u00e3o manual',
+      retention_expired: 'Prazo da lixeira',
+    };
+    return labels[reason] || 'Exclus\u00e3o manual';
+  }
+
+  function waitingLabel(minutes) {
+    const value = Number(minutes);
+    if (!Number.isFinite(value) || value < 0) return '';
+    if (value < 60) return `${value} min`;
+    const hours = Math.floor(value / 60);
+    if (hours < 24) return `${hours} h`;
+    return `${Math.floor(hours / 24)} d`;
   }
 
   function formatPhone(value) {
@@ -254,6 +320,27 @@
     return state.view === 'trash' ? state.trash : state.leads;
   }
 
+  function matchesIntentFilter(lead) {
+    if (state.intent === 'all') return true;
+    const intent = String(lead.lastIntent || '');
+    if (state.intent === 'undefined') return !intent || intent === 'general_question' || intent === 'greeting';
+    if (state.intent === 'critical') return CRITICAL_INTENTS.has(intent) || lead.pipelineStage === 'attention';
+    if (state.intent === 'assistance') return ASSISTANCE_INTENTS.has(intent);
+    if (state.intent === 'billing') return BILLING_INTENTS.has(intent);
+    if (state.intent === 'sales') return SALES_INTENTS.has(intent);
+    return true;
+  }
+
+  function matchesAgeFilter(lead) {
+    if (state.age === 'all') return true;
+    const value = state.view === 'trash' ? lead.deletedAt : lead.updatedAt;
+    const timestamp = new Date(value || 0).getTime();
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return false;
+    if (state.age === 'today') return new Date(timestamp).toDateString() === new Date().toDateString();
+    const days = Math.floor((Date.now() - timestamp) / 86400000);
+    return days >= Number(state.age || 0);
+  }
+
   function filteredLeads() {
     const query = normalizeSearch(state.query);
     let list = currentDataset().filter((lead) => {
@@ -262,10 +349,12 @@
         if (state.stage !== 'customer' && state.stage !== 'all' && lead.pipelineStage !== state.stage) return false;
       }
       if (state.source !== 'all' && lead.source !== state.source) return false;
+      if (state.duplicateOnly && !lead.hasDuplicate) return false;
+      if (!matchesAgeFilter(lead) || !matchesIntentFilter(lead)) return false;
       if (!query) return true;
       const haystack = normalizeSearch([
-        lead.name, lead.phone, lead.number, lead.plate, lead.model, lead.summary,
-        lead.lastCustomerMessage, lead.lastIntent, statusLabel(lead.status), stageLabel(lead.pipelineStage),
+        lead.name, lead.phone, lead.number, lead.plate, lead.model, lead.subject, lead.summary,
+        lead.lastCustomerMessage, lead.lastIntent, lead.deleteReason, statusLabel(lead.status), stageLabel(lead.pipelineStage),
       ].filter(Boolean).join(' '));
       return haystack.includes(query);
     });
@@ -300,6 +389,7 @@
       counts: { ...(state.overview?.counts || {}), ...(overview.counts || {}) },
       trashCount: overview.trashCount ?? previousTrash,
     };
+    if (overview.settings) state.settings = { ...state.settings, ...overview.settings };
   }
 
   function quantityLabel(value, singular, plural) {
@@ -316,7 +406,18 @@
     setText('lead-count-qualified', counts.qualified || 0);
     setText('lead-count-waiting', counts.waiting || 0);
     setText('lead-count-closed', counts.closed || 0);
+    setText('lead-customer-caption', Number(counts.customerConversations) === 1 ? 'contato que respondeu' : 'contatos que responderam');
+    setText('lead-active-caption', Number(counts.active) === 1 ? 'atendimento em andamento' : 'atendimentos em andamento');
+    setText('lead-qualified-caption', Number(counts.qualified) === 1 ? 'pronta para continuidade' : 'prontas para continuidade');
+    setText('lead-waiting-caption', Number(counts.waiting) === 1 ? 'disparo sem retorno' : 'disparos sem retorno');
+    setText('lead-closed-caption', Number(counts.closed) === 1 ? 'resolvido ou sem continuidade' : 'resolvidos ou sem continuidade');
+    setText('lead-count-duplicates', counts.duplicateGroups || 0);
+    setText('lead-count-overdue', counts.overdueAttention || 0);
+    setText('lead-count-returned', counts.returnedFromTrash || 0);
+    setText('lead-duplicates-label', Number(counts.duplicateGroups) === 1 ? 'grupo duplicado' : 'grupos duplicados');
+    setText('lead-returned-label', Number(counts.returnedFromTrash) === 1 ? 'retornou da lixeira' : 'retornaram da lixeira');
     setText('lead-trash-count', state.overview.trashCount || 0);
+    elements['lead-duplicate-filter-btn']?.classList.toggle('is-active', state.duplicateOnly);
 
     if (state.view === 'trash') {
       setText(
@@ -334,6 +435,7 @@
       window.updateBadge('leads', counts.attention > 0 ? counts.attention : null);
     }
     if (elements['lead-delete-all-btn']) elements['lead-delete-all-btn'].disabled = !counts.total;
+    if (elements['lead-empty-trash-btn']) elements['lead-empty-trash-btn'].disabled = !state.overview.trashCount;
   }
 
   function makeIcon(name) {
@@ -373,6 +475,13 @@
     const name = document.createElement('span');
     name.className = 'lead-contact-name';
     name.textContent = lead.name || 'Contato sem nome';
+    if (lead.hasDuplicate) {
+      const duplicate = document.createElement('span');
+      duplicate.className = 'lead-inline-alert';
+      duplicate.title = `${lead.duplicateCount} registros com o mesmo telefone`;
+      duplicate.append(makeIcon('copy'));
+      name.append(duplicate);
+    }
     const phone = document.createElement('span');
     phone.className = 'lead-contact-phone';
     phone.textContent = formatPhone(lead.phone);
@@ -386,11 +495,18 @@
     stage.textContent = stageLabel(lead.pipelineStage);
     stage.title = statusLabel(lead.status);
     stageCell.append(stage);
+    if (lead.attentionOverdue) {
+      const overdue = document.createElement('span');
+      overdue.className = 'lead-overdue-label';
+      overdue.textContent = `Aguardando ${waitingLabel(lead.attentionWaitingMinutes)}`;
+      stageCell.append(overdue);
+      row.classList.add('is-overdue');
+    }
 
     const summaryCell = createCell();
     const intent = document.createElement('span');
     intent.className = 'lead-intent';
-    intent.textContent = intentLabel(lead);
+    intent.textContent = lead.subject || intentLabel(lead);
     const summary = document.createElement('span');
     summary.className = 'lead-summary';
     summary.textContent = lead.summary || lead.lastCustomerMessage || statusLabel(lead.status);
@@ -399,9 +515,20 @@
     const sourceCell = createCell();
     const source = document.createElement('span');
     source.className = 'lead-source-pill';
-    source.append(makeIcon(lead.source === 'campaign' ? 'megaphone' : 'message-circle'));
-    source.append(document.createTextNode(lead.source === 'campaign' ? 'Campanha' : 'Espontaneo'));
+    if (state.view === 'trash') {
+      source.append(makeIcon('archive'));
+      source.append(document.createTextNode(deleteReasonLabel(lead.deleteReason)));
+    } else {
+      source.append(makeIcon(lead.source === 'campaign' ? 'megaphone' : 'message-circle'));
+      source.append(document.createTextNode(lead.source === 'campaign' ? 'Campanha' : 'Espont\u00e2neo'));
+    }
     sourceCell.append(source);
+    if (state.view === 'trash' && lead.reminderPaused) {
+      const reminder = document.createElement('span');
+      reminder.className = 'lead-context-note';
+      reminder.textContent = lead.reminderReviewRequired ? 'Retorno aguardando revis\u00e3o' : 'Retorno pausado';
+      sourceCell.append(reminder);
+    }
 
     const timeCell = createCell();
     const time = document.createElement('span');
@@ -411,15 +538,24 @@
 
     const actionCell = createCell();
     actionCell.className = 'lead-actions-cell';
-    const action = document.createElement('button');
-    action.type = 'button';
-    action.className = 'lead-icon-btn lead-row-action';
-    action.dataset.leadAction = state.view === 'trash' ? 'restore' : 'open';
-    action.dataset.leadId = lead.number;
-    action.title = state.view === 'trash' ? 'Restaurar lead' : 'Abrir detalhes';
-    action.setAttribute('aria-label', action.title);
-    action.append(makeIcon(state.view === 'trash' ? 'rotate-ccw' : 'arrow-up-right'));
-    actionCell.append(action);
+    const appendRowAction = (actionName, title, iconName, className = '') => {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = `lead-icon-btn lead-row-action ${className}`.trim();
+      action.dataset.leadAction = actionName;
+      action.dataset.leadId = lead.number;
+      action.title = title;
+      action.setAttribute('aria-label', title);
+      action.append(makeIcon(iconName));
+      actionCell.append(action);
+    };
+    if (state.view === 'trash') {
+      appendRowAction('open-trash', 'Abrir detalhes', 'eye');
+      appendRowAction('restore', 'Restaurar lead', 'rotate-ccw');
+      appendRowAction('permanent', 'Excluir definitivamente', 'trash-2', 'is-danger');
+    } else {
+      appendRowAction('open', 'Abrir detalhes', 'arrow-up-right');
+    }
 
     row.append(checkCell, contactCell, stageCell, summaryCell, sourceCell, timeCell, actionCell);
     return row;
@@ -462,7 +598,7 @@
 
     const selectionLink = elements['lead-select-all-results'];
     if (selectedCount > 0 && selectedCount === filtered.length) {
-      selectionLink.textContent = 'Limpar selecao';
+      selectionLink.textContent = 'Limpar sele\u00e7\u00e3o';
       selectionLink.dataset.mode = 'clear';
       selectionLink.classList.remove('hidden');
     } else if (pageIds.length > 0 && pageSelected === pageIds.length && filtered.length > pageIds.length) {
@@ -478,6 +614,11 @@
     elements['lead-bulk-apply'].classList.toggle('hidden', trashMode);
     elements['lead-bulk-delete'].classList.toggle('hidden', trashMode);
     elements['lead-bulk-restore'].classList.toggle('hidden', !trashMode);
+    elements['lead-bulk-permanent'].classList.toggle('hidden', !trashMode);
+    const selectedLeads = state.leads.filter((lead) => state.selected.has(lead.number));
+    const selectedPhones = new Set(selectedLeads.map((lead) => lead.phone).filter(Boolean));
+    const canMerge = !trashMode && selectedCount >= 2 && selectedPhones.size === 1 && selectedLeads.every((lead) => lead.phoneResolved);
+    elements['lead-bulk-merge'].classList.toggle('hidden', !canMerge);
     const moveLabel = document.querySelector('.lead-bulk-move-label');
     moveLabel?.classList.toggle('hidden', trashMode);
   }
@@ -485,13 +626,26 @@
   function renderViewState() {
     const trashMode = state.view === 'trash';
     elements['lead-metrics'].classList.toggle('hidden', trashMode);
+    elements['lead-health-strip'].classList.toggle('hidden', trashMode);
+    elements['lead-trash-panel'].classList.toggle('hidden', !trashMode);
     elements['lead-delete-all-btn'].classList.toggle('hidden', trashMode);
+    elements['lead-reclassify-btn'].classList.toggle('hidden', trashMode);
     const trashButtonLabel = elements['lead-trash-view-btn']?.querySelector('span:not(.lead-toolbar-count)');
     if (trashButtonLabel) trashButtonLabel.textContent = trashMode ? 'Voltar aos leads' : 'Lixeira';
     elements['lead-trash-view-btn']?.classList.toggle('is-active', trashMode);
     elements['lead-source-filter'].value = state.source;
+    elements['lead-age-filter'].value = state.age;
+    elements['lead-intent-filter'].value = state.intent;
     elements['lead-sort-filter'].value = state.sort;
     elements['lead-page-size'].value = String(state.pageSize);
+    elements['lead-trash-retention'].value = String(state.settings.trashRetentionDays || 0);
+    setText('lead-table-context-heading', trashMode ? 'Motivo' : 'Origem');
+    const emptyTitle = elements['lead-empty-state']?.querySelector('h2');
+    const emptyCopy = elements['lead-empty-state']?.querySelector('p');
+    if (emptyTitle) emptyTitle.textContent = trashMode ? 'A lixeira est\u00e1 vazia' : 'Nenhum lead encontrado';
+    if (emptyCopy) emptyCopy.textContent = trashMode
+      ? 'Os leads arquivados aparecer\u00e3o aqui.'
+      : 'Ajuste os filtros ou aguarde uma nova conversa.';
     document.querySelectorAll('[data-lead-stage]').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.leadStage === state.stage);
     });
@@ -544,7 +698,7 @@
       if (!quiet) announce('Lista de leads atualizada.');
     } catch (error) {
       console.error('[Leads] Refresh failed:', error);
-      if (!quiet) notifyToast('Nao foi possivel atualizar os leads.', 'error');
+      if (!quiet) notifyToast('N\u00e3o foi poss\u00edvel atualizar os leads.', 'error');
     } finally {
       if (!quiet) setLoading(false);
     }
@@ -557,7 +711,7 @@
       state.overview = { ...(state.overview || {}), trashCount: state.trash.length };
       renderViewState();
     } catch (error) {
-      notifyToast('Nao foi possivel abrir a lixeira.', 'error');
+      notifyToast('N\u00e3o foi poss\u00edvel abrir a lixeira.', 'error');
     } finally {
       setLoading(false);
     }
@@ -568,6 +722,7 @@
     state.page = 1;
     if (state.view === 'active') {
       state.view = 'trash';
+      state.duplicateOnly = false;
       await loadTrash();
     } else {
       state.view = 'active';
@@ -637,6 +792,14 @@
   }
 
   function alertCopy(kind, count) {
+    if (kind === 'returned_from_trash') {
+      return {
+        title: count > 1 ? `${count} contatos retornaram da lixeira` : 'Contato retornou da lixeira',
+        message: 'O lead foi restaurado e voltou para A\u00e7\u00e3o imediata.',
+        icon: 'archive-restore',
+        priority: 'high',
+      };
+    }
     if (kind === 'attention_required') {
       return {
         title: count > 1 ? `${count} atendimentos precisam de a\u00e7\u00e3o` : 'Atendimento precisa de a\u00e7\u00e3o',
@@ -783,7 +946,7 @@
       || lead.leadSummary?.caseSummary
       || lead.leadSummary?.reason
       || [...(Array.isArray(lead.history) ? lead.history : [])].reverse().find((entry) => entry?.role === 'user')?.content
-      || 'Sem resumo disponivel.',
+      || 'Sem resumo dispon\u00edvel.',
     );
   }
 
@@ -792,7 +955,7 @@
     const term = document.createElement('dt');
     term.textContent = label;
     const description = document.createElement('dd');
-    description.textContent = value || 'Nao informado';
+    description.textContent = value || 'N\u00e3o informado';
     wrapper.append(term, description);
     list.append(wrapper);
   }
@@ -815,6 +978,15 @@
   function renderLeadActions(lead) {
     const container = elements['modal-actions'];
     container.replaceChildren();
+    if (lead.isTrash) {
+      appendActionButton(container, {
+        label: 'Restaurar', icon: 'rotate-ccw', className: 'btn btn-primary btn-sm', action: 'restore',
+      });
+      appendActionButton(container, {
+        label: 'Excluir definitivamente', icon: 'trash-2', action: 'permanent', className: 'btn btn-outline btn-sm lead-danger-btn',
+      });
+      return;
+    }
     const target = whatsappTarget(lead);
     if (target) {
       appendActionButton(container, {
@@ -841,7 +1013,7 @@
     if (history.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'lead-notification-empty';
-      empty.textContent = 'Sem historico de conversa.';
+      empty.textContent = 'Sem hist\u00f3rico de conversa.';
       chat.append(empty);
       return;
     }
@@ -860,7 +1032,7 @@
       if (!isUser && message.deliveryStatus && !['confirmed', 'sent'].includes(message.deliveryStatus)) {
         const delivery = document.createElement('div');
         delivery.className = 'chat-ts';
-        delivery.textContent = message.deliveryStatus === 'failed' ? 'Falha no envio' : 'Envio sem confirmacao';
+        delivery.textContent = message.deliveryStatus === 'failed' ? 'Falha no envio' : 'Envio sem confirma\u00e7\u00e3o';
         wrapper.append(delivery);
       }
       chat.append(wrapper);
@@ -868,21 +1040,135 @@
     window.setTimeout(() => { chat.scrollTop = chat.scrollHeight; }, 20);
   }
 
+  function renderInternalNotes(lead) {
+    const list = elements['modal-lead-notes'];
+    list.replaceChildren();
+    const notes = Array.isArray(lead.internalNotes) ? [...lead.internalNotes].reverse() : [];
+    if (notes.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'lead-notification-empty';
+      empty.textContent = 'Nenhuma observa\u00e7\u00e3o interna.';
+      list.append(empty);
+      return;
+    }
+    for (const note of notes) {
+      const row = document.createElement('article');
+      row.className = 'lead-note-item';
+      const copy = document.createElement('p');
+      copy.textContent = note.text;
+      const meta = document.createElement('div');
+      const author = document.createElement('span');
+      author.textContent = `${note.author || 'Consultor'} - ${note.createdAt ? new Date(note.createdAt).toLocaleString('pt-BR') : ''}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'lead-icon-btn';
+      remove.dataset.noteDelete = note.id;
+      remove.title = 'Excluir observa\u00e7\u00e3o';
+      remove.setAttribute('aria-label', 'Excluir observa\u00e7\u00e3o');
+      remove.append(makeIcon('x'));
+      meta.append(author, remove);
+      row.append(copy, meta);
+      list.append(row);
+    }
+  }
+
+  function activityLabel(item) {
+    if (item.kind === 'message') return item.role === 'user' ? 'Mensagem do cliente' : 'Resposta do robô';
+    return ACTIVITY_LABELS[item.type] || String(item.type || 'Atividade registrada').replaceAll('_', ' ');
+  }
+
+  function activityDescription(item) {
+    if (item.kind === 'message') return String(item.content || '').slice(0, 240);
+    const changes = item.details?.changes;
+    if (changes && typeof changes === 'object') {
+      return Object.entries(changes).map(([field, values]) => `${field}: ${values?.from || '-'} -> ${values?.to || '-'}`).join(' | ');
+    }
+    if (item.details?.reason) return String(item.details.reason).replaceAll('_', ' ');
+    return '';
+  }
+
+  function renderTimeline(items = []) {
+    const timeline = elements['modal-timeline'];
+    timeline.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement('p');
+      empty.className = 'lead-notification-empty';
+      empty.textContent = 'Nenhuma atividade adicional registrada.';
+      timeline.append(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement('article');
+      row.className = `lead-timeline-item lead-timeline-${item.kind || 'activity'}`;
+      const marker = document.createElement('span');
+      marker.className = 'lead-timeline-marker';
+      marker.append(makeIcon(item.kind === 'message' ? 'message-circle' : 'history'));
+      const copy = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = activityLabel(item);
+      const description = activityDescription(item);
+      const paragraph = document.createElement('p');
+      paragraph.textContent = description;
+      paragraph.classList.toggle('hidden', !description);
+      const time = document.createElement('time');
+      time.dateTime = item.at || '';
+      time.textContent = item.at ? new Date(item.at).toLocaleString('pt-BR') : 'Sem data';
+      copy.append(title, paragraph, time);
+      row.append(marker, copy);
+      timeline.append(row);
+    }
+    renderIcons();
+  }
+
+  async function loadTimeline(number) {
+    try {
+      const timeline = await api(`/api/leads/${encodeURIComponent(number)}/timeline`);
+      if (state.currentLead?.number === number) renderTimeline(timeline);
+    } catch {
+      if (state.currentLead?.number === number) renderTimeline([]);
+    }
+  }
+
+  function switchDetailTab(tab) {
+    state.detailTab = tab === 'timeline' ? 'timeline' : 'conversation';
+    document.querySelectorAll('[data-lead-detail-tab]').forEach((button) => {
+      const active = button.dataset.leadDetailTab === state.detailTab;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-lead-detail-panel]').forEach((panel) => {
+      panel.classList.toggle('hidden', panel.dataset.leadDetailPanel !== state.detailTab);
+    });
+  }
+
   async function loadReminder(number) {
     elements['modal-lead-agenda'].value = '';
+    state.currentReminder = null;
+    setText('lead-reminder-status', 'Nenhum retorno agendado.');
+    elements['lead-reminder-resume'].classList.add('hidden');
     try {
       const response = await fetch(`/api/reminders/${encodeURIComponent(number)}`, { cache: 'no-store' });
       if (!response.ok) return;
       const reminder = await response.json();
       if (!reminder?.due_at || state.currentLead?.number !== number) return;
+      state.currentReminder = reminder;
       const date = new Date(reminder.due_at);
       const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
       elements['modal-lead-agenda'].value = local;
+      if (reminder.paused) {
+        setText('lead-reminder-status', reminder.review_required
+          ? 'Pausado: revise a data antes de reativar.'
+          : 'Pausado enquanto o lead esta arquivado.');
+        elements['lead-reminder-resume'].classList.toggle('hidden', !!state.currentLead?.isTrash);
+      } else {
+        setText('lead-reminder-status', `Agendado para ${date.toLocaleString('pt-BR')}.`);
+      }
     } catch {}
   }
 
   function renderLeadDetail(lead) {
     state.currentLead = lead;
+    state.detailTab = 'conversation';
     setText('modal-lead-avatar', initials(lead.name));
     setText('modal-lead-name', lead.name || 'Contato sem nome');
     setText('modal-lead-number', formatPhone(lead.phone || lead.displayNumber));
@@ -908,31 +1194,46 @@
 
     const facts = elements['modal-lead-facts'];
     facts.replaceChildren();
-    addFact(facts, 'Intencao', intentLabel({ ...lead, hasCustomerMessage: true }));
-    addFact(facts, 'Veiculo', [lead.model, lead.year].filter(Boolean).join(' '));
+    addFact(facts, 'Inten\u00e7\u00e3o', intentLabel({ ...lead, hasCustomerMessage: true }));
+    addFact(facts, 'Ve\u00edculo', [lead.model, lead.year].filter(Boolean).join(' '));
     addFact(facts, 'Placa', lead.plate);
-    addFact(facts, 'Origem', lead.source === 'campaign' || lead.campaignSentAt ? 'Campanha' : 'Contato espontaneo');
+    addFact(facts, 'Origem', lead.source === 'campaign' || lead.campaignSentAt ? 'Campanha' : 'Contato espont\u00e2neo');
     addFact(facts, 'Estado da IA', lead.automationPaused ? 'Pausada' : statusLabel(lead.status));
-    addFact(facts, 'Risco', lead.riskLevel || 'Nao classificado');
-    addFact(facts, 'Criado em', lead.createdAt ? new Date(lead.createdAt).toLocaleString('pt-BR') : 'Nao informado');
+    addFact(facts, 'Risco', lead.riskLevel || 'N\u00e3o classificado');
+    addFact(facts, 'Criado em', lead.createdAt ? new Date(lead.createdAt).toLocaleString('pt-BR') : 'N\u00e3o informado');
     addFact(facts, 'Consultor', lead.transferredToName || 'Consultor principal');
+    if (lead.autoRestoredAt) addFact(facts, 'Retorno da lixeira', new Date(lead.autoRestoredAt).toLocaleString('pt-BR'));
+    if (lead.isTrash) addFact(facts, 'Exclu\u00eddo em', lead.deletedAt ? new Date(lead.deletedAt).toLocaleString('pt-BR') : 'N\u00e3o informado');
 
     elements['modal-lead-stage'].value = pipelineStage;
     elements['modal-lead-tag'].value = lead.tag || '';
+    elements['modal-lead-stage'].disabled = !!lead.isTrash;
+    elements['modal-lead-tag'].disabled = !!lead.isTrash;
+    elements['modal-lead-agenda'].disabled = !!lead.isTrash;
+    elements['lead-reminder-save'].disabled = !!lead.isTrash;
+    elements['lead-note-save'].disabled = !!lead.isTrash;
+    elements['modal-lead-note-input'].disabled = !!lead.isTrash;
     renderLeadActions({ ...lead, pipelineStage });
     renderChat(lead);
+    renderInternalNotes(lead);
+    renderTimeline([]);
+    switchDetailTab('conversation');
     renderIcons();
     loadReminder(lead.number);
+    loadTimeline(lead.number);
   }
 
-  async function openLead(number) {
-    if (!number || state.view === 'trash') return;
+  async function openLead(number, { trash = false } = {}) {
+    if (!number) return;
     try {
-      const lead = await api(`/api/leads/${encodeURIComponent(number)}`);
-      const summary = state.leads.find((item) => item.number === number);
+      const lead = await api(trash
+        ? `/api/leads/trash/${encodeURIComponent(number)}`
+        : `/api/leads/${encodeURIComponent(number)}`);
+      const summary = (trash ? state.trash : state.leads).find((item) => item.number === number);
       const detail = {
         ...(summary || {}),
         ...lead,
+        isTrash: trash,
         pipelineStage: lead.pipelineStage || summary?.pipelineStage,
         automationPaused: summary?.automationPaused ?? AUTOMATION_PAUSED_STATUSES.has(lead.status),
       };
@@ -942,7 +1243,7 @@
       document.body.classList.add('modal-open');
       elements['lead-modal-close'].focus();
     } catch (error) {
-      notifyToast('Nao foi possivel abrir esse lead.', 'error');
+      notifyToast('N\u00e3o foi poss\u00edvel abrir esse lead.', 'error');
     }
   }
 
@@ -950,6 +1251,7 @@
     elements['lead-modal']?.classList.add('hidden');
     document.body.classList.remove('modal-open');
     state.currentLead = null;
+    state.currentReminder = null;
     state.previousFocus?.focus?.();
   }
 
@@ -961,11 +1263,12 @@
         method: 'PATCH',
         body: JSON.stringify(updates),
       });
-      renderLeadDetail(lead);
       await refresh({ quiet: true });
+      const summary = state.leads.find((item) => item.number === number);
+      renderLeadDetail({ ...summary, ...lead, pipelineStage: summary?.pipelineStage });
       if (message) notifyToast(message, 'success');
     } catch (error) {
-      notifyToast(error.message || 'Nao foi possivel atualizar o lead.', 'error');
+      notifyToast(error.message || 'N\u00e3o foi poss\u00edvel atualizar o lead.', 'error');
     }
   }
 
@@ -984,9 +1287,10 @@
         }),
       });
       if (!response.ok) throw new Error();
+      await loadReminder(lead.number);
       notifyToast('Retorno agendado.', 'success');
     } catch {
-      notifyToast('Nao foi possivel agendar o retorno.', 'error');
+      notifyToast('N\u00e3o foi poss\u00edvel agendar o retorno.', 'error');
     }
   }
 
@@ -997,38 +1301,137 @@
       const response = await fetch(`/api/reminders/${encodeURIComponent(lead.number)}/complete`, { method: 'POST' });
       if (!response.ok) throw new Error();
       elements['modal-lead-agenda'].value = '';
+      state.currentReminder = null;
+      setText('lead-reminder-status', 'Nenhum retorno agendado.');
+      elements['lead-reminder-resume'].classList.add('hidden');
       notifyToast('Retorno concluido.', 'success');
     } catch {
-      notifyToast('Nao foi possivel concluir o retorno.', 'error');
+      notifyToast('N\u00e3o foi poss\u00edvel concluir o retorno.', 'error');
     }
   }
 
-  function openDeleteDialog(mode, numbers) {
+  async function resumeReminder() {
+    const lead = state.currentLead;
+    if (!lead || lead.isTrash) return;
+    try {
+      const response = await fetch(`/api/reminders/${encodeURIComponent(lead.number)}/resume`, { method: 'POST' });
+      if (!response.ok) throw new Error();
+      await loadReminder(lead.number);
+      notifyToast('Retorno reativado. Confira se a data ainda est\u00e1 correta.', 'success');
+    } catch {
+      notifyToast('N\u00e3o foi poss\u00edvel reativar o retorno.', 'error');
+    }
+  }
+
+  async function saveInternalNote() {
+    const lead = state.currentLead;
+    const text = elements['modal-lead-note-input'].value.trim();
+    if (!lead || lead.isTrash || !text) return notifyToast('Escreva uma observa\u00e7\u00e3o antes de adicionar.', 'warning');
+    try {
+      await api(`/api/leads/${encodeURIComponent(lead.number)}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+      });
+      elements['modal-lead-note-input'].value = '';
+      const refreshed = await api(`/api/leads/${encodeURIComponent(lead.number)}`);
+      const summary = state.leads.find((item) => item.number === lead.number);
+      renderLeadDetail({ ...summary, ...refreshed, pipelineStage: summary?.pipelineStage });
+      notifyToast('Observa\u00e7\u00e3o adicionada.', 'success');
+    } catch (error) {
+      notifyToast(error.message || 'N\u00e3o foi poss\u00edvel adicionar a observa\u00e7\u00e3o.', 'error');
+    }
+  }
+
+  async function deleteInternalNote(noteId) {
+    const lead = state.currentLead;
+    if (!lead || lead.isTrash || !noteId) return;
+    try {
+      await api(`/api/leads/${encodeURIComponent(lead.number)}/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
+      lead.internalNotes = (lead.internalNotes || []).filter((note) => note.id !== noteId);
+      renderInternalNotes(lead);
+      renderIcons();
+      notifyToast('Observa\u00e7\u00e3o exclu\u00edda.', 'success');
+    } catch (error) {
+      notifyToast(error.message || 'N\u00e3o foi poss\u00edvel excluir a observa\u00e7\u00e3o.', 'error');
+    }
+  }
+
+  async function openDeleteDialog(mode, numbers) {
     const unique = [...new Set((numbers || []).filter(Boolean))];
-    if (mode !== 'all' && unique.length === 0) return;
-    const count = mode === 'all' ? Number(state.overview?.counts?.total || state.leads.length) : unique.length;
-    state.pendingDelete = { mode, numbers: unique, count };
     const all = mode === 'all';
-    const single = mode === 'single';
-    setText(
-      'lead-delete-title',
-      all ? 'Excluir todos os leads?' : single ? 'Excluir este lead?' : `Excluir ${count} ${count === 1 ? 'lead' : 'leads'}?`,
-    );
-    setText(
-      'lead-delete-description',
-      all
-        ? `${count} registros serao movidos para a lixeira. Novos leads que chegarem depois desta confirmacao nao serao apagados.`
-        : count === 1
-          ? 'O registro sera movido para a lixeira e podera ser restaurado.'
-          : 'Os registros serao movidos para a lixeira e poderao ser restaurados.',
-    );
-    elements['lead-delete-phrase-wrap'].classList.toggle('hidden', !all);
+    const empty = mode === 'empty';
+    const reclassify = mode === 'reclassify';
+    if (!all && !empty && !reclassify && unique.length === 0) return;
+    const count = all
+      ? Number(state.overview?.counts?.total || state.leads.length)
+      : empty
+        ? Number(state.overview?.trashCount || state.trash.length)
+        : reclassify
+          ? Number(state.overview?.counts?.customerConversations || 0)
+          : unique.length;
+    if (!count && !reclassify) return;
+    const permanent = mode.startsWith('permanent') || empty;
+    const merge = mode === 'merge';
+    const single = mode === 'single' || mode === 'permanent-single';
+    const requiredPhrase = empty
+      ? 'ESVAZIAR LIXEIRA'
+      : permanent
+        ? 'EXCLUIR DEFINITIVAMENTE'
+        : all
+          ? 'EXCLUIR TUDO'
+          : '';
+    const titles = {
+      all: 'Mover todos os leads para a lixeira?',
+      empty: 'Esvaziar a lixeira?',
+      merge: `Mesclar ${count} registros duplicados?`,
+      reclassify: 'Revisar a classifica\u00e7\u00e3o dos leads antigos?',
+    };
+    const title = titles[mode]
+      || (permanent
+        ? (single ? 'Excluir este lead definitivamente?' : `Excluir ${count} leads definitivamente?`)
+        : (single || count === 1 ? 'Mover este lead para a lixeira?' : `Mover ${count} leads para a lixeira?`));
+    const description = reclassify
+      ? 'As conversas existentes ser\u00e3o analisadas novamente pelas regras atuais, sem enviar mensagens aos contatos.'
+      : merge
+        ? 'O hist\u00f3rico, as observa\u00e7\u00f5es e os retornos ser\u00e3o reunidos em um \u00fanico registro.'
+        : permanent
+          ? 'Esta a\u00e7\u00e3o remove o registro, o hist\u00f3rico, os retornos e os dados auxiliares. Ela n\u00e3o pode ser desfeita pelo painel.'
+          : all
+            ? `${count} registros ser\u00e3o arquivados. Novos leads recebidos depois desta confirma\u00e7\u00e3o n\u00e3o ser\u00e3o afetados.`
+            : count === 1
+              ? 'O registro ser\u00e1 arquivado e poder\u00e1 ser restaurado. Se o contato escrever, ele voltar\u00e1 automaticamente.'
+              : 'Os registros ser\u00e3o arquivados e poder\u00e3o ser restaurados.';
+    const pending = { mode, numbers: unique, count, requiredPhrase };
+    state.pendingDelete = pending;
+    setText('lead-delete-title', title);
+    setText('lead-delete-description', description);
+    setText('lead-delete-required-phrase', requiredPhrase);
+    setText('lead-delete-confirm', reclassify ? 'Revisar classifica\u00e7\u00e3o' : merge ? 'Mesclar registros' : permanent ? 'Excluir definitivamente' : 'Mover para a lixeira');
+    elements['lead-delete-warning'].classList.toggle('hidden', !permanent);
+    setText('lead-delete-warning', permanent ? 'Um backup interno ser\u00e1 criado antes da exclus\u00e3o definitiva.' : '');
+    elements['lead-delete-phrase-wrap'].classList.toggle('hidden', !requiredPhrase);
     elements['lead-delete-phrase'].value = '';
-    elements['lead-delete-confirm'].disabled = all;
+    elements['lead-delete-confirm'].disabled = !!requiredPhrase;
     state.previousFocus = document.activeElement;
     elements['lead-delete-modal'].classList.remove('hidden');
-    if (all) elements['lead-delete-phrase'].focus();
+    renderIcons();
+    if (requiredPhrase) elements['lead-delete-phrase'].focus();
     else elements['lead-delete-confirm'].focus();
+
+    if (!permanent && !merge && !reclassify) {
+      try {
+        const preview = await api('/api/leads/delete-preview', {
+          method: 'POST',
+          body: JSON.stringify(all ? { all: true } : { numbers: unique }),
+        });
+        if (state.pendingDelete !== pending || !preview.reminderCount) return;
+        elements['lead-delete-warning'].classList.remove('hidden');
+        setText(
+          'lead-delete-warning',
+          `${preview.reminderCount} retorno${preview.reminderCount === 1 ? '' : 's'} ${preview.reminderCount === 1 ? 'ser\u00e1' : 'ser\u00e3o'} pausado${preview.reminderCount === 1 ? '' : 's'} e ${preview.reminderCount === 1 ? 'ficar\u00e1' : 'ficar\u00e3o'} aguardando revis\u00e3o ao restaurar.`,
+        );
+      } catch {}
+    }
   }
 
   function closeDeleteDialog() {
@@ -1042,18 +1445,19 @@
     if (!pending) return;
     elements['lead-delete-confirm'].disabled = true;
     try {
+      let result = null;
       if (pending.mode === 'all') {
-        await api('/api/leads/clear', {
+        result = await api('/api/leads/clear', {
           method: 'POST',
           body: JSON.stringify({ confirmation: 'EXCLUIR TUDO', expectedCount: pending.count }),
         });
       } else if (pending.mode === 'single') {
-        await api(`/api/leads/${encodeURIComponent(pending.numbers[0])}`, {
+        result = await api(`/api/leads/${encodeURIComponent(pending.numbers[0])}`, {
           method: 'DELETE',
           body: JSON.stringify({ confirmation: 'delete_one' }),
         });
-      } else {
-        await api('/api/leads/bulk', {
+      } else if (pending.mode === 'selected') {
+        result = await api('/api/leads/bulk', {
           method: 'DELETE',
           body: JSON.stringify({
             numbers: pending.numbers,
@@ -1061,16 +1465,86 @@
             expectedCount: pending.count,
           }),
         });
+      } else if (pending.mode === 'permanent-single' || pending.mode === 'permanent-selected') {
+        result = await api('/api/leads/trash/permanent', {
+          method: 'DELETE',
+          body: JSON.stringify({
+            numbers: pending.numbers,
+            confirmation: 'EXCLUIR DEFINITIVAMENTE',
+            expectedCount: pending.count,
+          }),
+        });
+      } else if (pending.mode === 'empty') {
+        result = await api('/api/leads/trash', {
+          method: 'DELETE',
+          body: JSON.stringify({ confirmation: 'ESVAZIAR LIXEIRA', expectedCount: pending.count }),
+        });
+      } else if (pending.mode === 'merge') {
+        result = await api('/api/leads/merge', {
+          method: 'POST',
+          body: JSON.stringify({
+            numbers: pending.numbers,
+            confirmation: 'merge_duplicates',
+            expectedCount: pending.count,
+          }),
+        });
+      } else if (pending.mode === 'reclassify') {
+        result = await api('/api/leads/reclassify', {
+          method: 'POST',
+          body: JSON.stringify({ confirmation: 'reclassify_leads' }),
+        });
       }
       closeDeleteDialog();
       closeLeadModal();
       state.selected.clear();
-      await refresh();
-      notifyToast(`${pending.count} lead${pending.count === 1 ? '' : 's'} movido${pending.count === 1 ? '' : 's'} para a lixeira.`, 'success');
+      if (pending.mode === 'merge') state.duplicateOnly = false;
+      await refresh({ quiet: true });
+      if (state.view === 'trash') await loadTrash();
+      if (['all', 'single', 'selected'].includes(pending.mode)) {
+        const archived = result?.numbers || pending.numbers;
+        showUndoToast(archived, Number(result?.reminderCount || 0));
+      } else if (pending.mode === 'merge') {
+        notifyToast(`${result?.merged || pending.count} registros foram reunidos em um \u00fanico lead.`, 'success');
+      } else if (pending.mode === 'reclassify') {
+        notifyToast(`${result?.updated || 0} leads tiveram a classifica\u00e7\u00e3o atualizada.`, 'success');
+      } else {
+        notifyToast(`${result?.permanentlyDeleted || pending.count} lead${pending.count === 1 ? '' : 's'} exclu\u00eddo${pending.count === 1 ? '' : 's'} definitivamente.`, 'success');
+      }
     } catch (error) {
       elements['lead-delete-confirm'].disabled = false;
       notifyToast(error.message, 'error');
     }
+  }
+
+  function showUndoToast(numbers, reminderCount = 0) {
+    const restorable = [...new Set((numbers || []).filter(Boolean))];
+    if (!restorable.length) return;
+    const container = byId('toast-container');
+    if (!container) return notifyToast('Leads movidos para a lixeira.', 'success');
+    const toast = document.createElement('div');
+    toast.className = 'toast success lead-undo-toast';
+    const body = document.createElement('div');
+    body.className = 'toast-body';
+    const title = document.createElement('strong');
+    title.textContent = `${restorable.length} lead${restorable.length === 1 ? '' : 's'} movido${restorable.length === 1 ? '' : 's'} para a lixeira`;
+    const message = document.createElement('span');
+    message.className = 'toast-msg';
+    message.textContent = reminderCount > 0
+      ? `${reminderCount} retorno${reminderCount === 1 ? '' : 's'} agendado${reminderCount === 1 ? '' : 's'} ${reminderCount === 1 ? 'foi' : 'foram'} pausado${reminderCount === 1 ? '' : 's'}.`
+      : 'O hist\u00f3rico foi preservado e pode ser restaurado.';
+    body.append(title, message);
+    const undo = document.createElement('button');
+    undo.type = 'button';
+    undo.className = 'lead-toast-open';
+    undo.textContent = 'Desfazer';
+    undo.addEventListener('click', async () => {
+      undo.disabled = true;
+      await restoreSelected(restorable);
+      toast.remove();
+    });
+    toast.append(body, undo);
+    container.append(toast);
+    window.setTimeout(() => toast.remove(), 12000);
   }
 
   async function bulkMove() {
@@ -1100,7 +1574,9 @@
       });
       state.selected.clear();
       await Promise.all([loadTrash(), refresh({ quiet: true })]);
-      notifyToast(`${result.restored} lead${result.restored === 1 ? '' : 's'} restaurado${result.restored === 1 ? '' : 's'}.`, 'success');
+      const restoredCount = Number(result.restored || 0) + Number(result.merged || 0);
+      const mergeNote = result.merged ? ` ${result.merged} conflito${result.merged === 1 ? '' : 's'} foi${result.merged === 1 ? '' : 'ram'} mesclado${result.merged === 1 ? '' : 's'}.` : '';
+      notifyToast(`${restoredCount} lead${restoredCount === 1 ? '' : 's'} restaurado${restoredCount === 1 ? '' : 's'}.${mergeNote}`, 'success');
     } catch (error) {
       notifyToast(error.message, 'error');
     }
@@ -1127,6 +1603,8 @@
     const button = event.target.closest('[data-lead-action]');
     if (!button) return;
     if (button.dataset.leadAction === 'restore') restoreSelected([button.dataset.leadId]);
+    else if (button.dataset.leadAction === 'open-trash') openLead(button.dataset.leadId, { trash: true });
+    else if (button.dataset.leadAction === 'permanent') openDeleteDialog('permanent-single', [button.dataset.leadId]);
     else openLead(button.dataset.leadId);
   }
 
@@ -1139,7 +1617,7 @@
 
   function trapFocus(event, container) {
     if (event.key !== 'Tab' || !container || container.classList.contains('hidden')) return;
-    const focusable = [...container.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled)')]
+    const focusable = [...container.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')]
       .filter((element) => !element.classList.contains('hidden'));
     if (!focusable.length) return;
     const first = focusable[0];
@@ -1157,6 +1635,7 @@
     document.querySelectorAll('[data-lead-stage]').forEach((button) => {
       button.addEventListener('click', () => {
         state.stage = button.dataset.leadStage;
+        state.duplicateOnly = false;
         state.page = 1;
         state.selected.clear();
         renderViewState();
@@ -1169,6 +1648,18 @@
     });
     elements['lead-source-filter'].addEventListener('change', (event) => {
       state.source = event.target.value;
+      state.page = 1;
+      state.selected.clear();
+      renderTable();
+    });
+    elements['lead-age-filter'].addEventListener('change', (event) => {
+      state.age = event.target.value;
+      state.page = 1;
+      state.selected.clear();
+      renderTable();
+    });
+    elements['lead-intent-filter'].addEventListener('change', (event) => {
+      state.intent = event.target.value;
       state.page = 1;
       state.selected.clear();
       renderTable();
@@ -1199,9 +1690,40 @@
     });
     elements['lead-trash-view-btn'].addEventListener('click', toggleTrashView);
     elements['lead-delete-all-btn'].addEventListener('click', () => openDeleteDialog('all', []));
+    elements['lead-empty-trash-btn'].addEventListener('click', () => openDeleteDialog('empty', []));
+    elements['lead-reclassify-btn'].addEventListener('click', () => openDeleteDialog('reclassify', []));
+    elements['lead-duplicate-filter-btn'].addEventListener('click', () => {
+      state.duplicateOnly = !state.duplicateOnly;
+      state.stage = 'all';
+      state.page = 1;
+      state.selected.clear();
+      renderViewState();
+    });
+    elements['lead-trash-retention'].addEventListener('change', async (event) => {
+      const previous = state.settings.trashRetentionDays || 0;
+      const trashRetentionDays = Number(event.target.value);
+      event.target.disabled = true;
+      try {
+        const result = await api('/api/leads/settings', {
+          method: 'PATCH',
+          body: JSON.stringify({ trashRetentionDays }),
+        });
+        state.settings = result.settings;
+        await loadTrash();
+        notifyToast(trashRetentionDays ? `Itens com mais de ${trashRetentionDays} dias ser\u00e3o apagados definitivamente.` : 'A exclus\u00e3o autom\u00e1tica da lixeira foi desativada.', 'success');
+      } catch (error) {
+        state.settings.trashRetentionDays = previous;
+        event.target.value = String(previous);
+        notifyToast(error.message, 'error');
+      } finally {
+        event.target.disabled = false;
+      }
+    });
     elements['lead-bulk-apply'].addEventListener('click', bulkMove);
     elements['lead-bulk-delete'].addEventListener('click', () => openDeleteDialog('selected', [...state.selected]));
+    elements['lead-bulk-merge'].addEventListener('click', () => openDeleteDialog('merge', [...state.selected]));
     elements['lead-bulk-restore'].addEventListener('click', () => restoreSelected());
+    elements['lead-bulk-permanent'].addEventListener('click', () => openDeleteDialog('permanent-selected', [...state.selected]));
 
     elements['lead-modal-close'].addEventListener('click', closeLeadModal);
     elements['lead-modal'].addEventListener('click', (event) => {
@@ -1218,6 +1740,10 @@
         updateCurrentLead({ status: 'blocked', stage: 'blocked', operationalStatus: 'blocked' }, 'IA pausada para este contato.');
       } else if (button.dataset.detailAction === 'delete') {
         openDeleteDialog('single', [state.currentLead.number]);
+      } else if (button.dataset.detailAction === 'restore') {
+        restoreSelected([state.currentLead.number]).then(closeLeadModal);
+      } else if (button.dataset.detailAction === 'permanent') {
+        openDeleteDialog('permanent-single', [state.currentLead.number]);
       }
     });
     elements['modal-lead-stage'].addEventListener('change', (event) => {
@@ -1228,13 +1754,23 @@
     });
     elements['lead-reminder-save'].addEventListener('click', saveReminder);
     elements['lead-reminder-complete'].addEventListener('click', completeReminder);
+    elements['lead-reminder-resume'].addEventListener('click', resumeReminder);
+    elements['lead-note-save'].addEventListener('click', saveInternalNote);
+    elements['modal-lead-notes'].addEventListener('click', (event) => {
+      const button = event.target.closest('[data-note-delete]');
+      if (button) deleteInternalNote(button.dataset.noteDelete);
+    });
+    document.querySelectorAll('[data-lead-detail-tab]').forEach((button) => {
+      button.addEventListener('click', () => switchDetailTab(button.dataset.leadDetailTab));
+    });
 
     elements['lead-delete-cancel'].addEventListener('click', closeDeleteDialog);
     elements['lead-delete-modal'].addEventListener('click', (event) => {
       if (event.target === elements['lead-delete-modal']) closeDeleteDialog();
     });
     elements['lead-delete-phrase'].addEventListener('input', (event) => {
-      elements['lead-delete-confirm'].disabled = event.target.value.trim() !== 'EXCLUIR TUDO';
+      const required = state.pendingDelete?.requiredPhrase || '';
+      elements['lead-delete-confirm'].disabled = !!required && event.target.value.trim() !== required;
     });
     elements['lead-delete-confirm'].addEventListener('click', confirmDelete);
 

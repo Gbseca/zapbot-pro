@@ -125,6 +125,107 @@ test('summary and CSV exports are compact and correctly escaped', () => {
   assert.match(manager.exportLeadsCSV(), /Cliente ""Teste""/);
 });
 
+test('automatically restores a trashed contact without duplicating the lead', () => {
+  resetStorage();
+  const events = [];
+  const unsubscribe = manager.subscribeLeadEvents((event) => events.push(event));
+  manager.saveLead('5511987651234', {
+    phone: '5511987651234',
+    status: 'blocked',
+    crmStage: 'closed',
+    history: [{ role: 'user', content: 'conversa antiga', ts: 10 }],
+  });
+  manager.deleteLead('5511987651234', { origin: 'dashboard', reason: 'manual_delete' });
+  events.length = 0;
+
+  const recovered = manager.recoverDeletedLeadForIncoming({
+    preferredKey: '5511987651234',
+    identifiers: ['5511987651234', '5511987651234@s.whatsapp.net'],
+  });
+
+  assert.equal(recovered.key, '5511987651234');
+  assert.equal(manager.getDeletedLeads().length, 0);
+  assert.equal(manager.getAllLeads().length, 1);
+  assert.equal(recovered.lead.status, 'new');
+  assert.equal(recovered.lead.crmStage, 'attention');
+  assert.equal(recovered.lead.history[0].content, 'conversa antiga');
+  assert.equal(recovered.lead.returnedFromTrashCount, 1);
+  assert.equal(events.at(-1).notification.kind, 'returned_from_trash');
+  unsubscribe();
+});
+
+test('restoring over an active duplicate merges history into one phone record', () => {
+  resetStorage();
+  manager.saveLead('legacy-lid', {
+    phone: '5511977711111',
+    status: 'cold',
+    history: [{ role: 'user', content: 'registro antigo', ts: 1 }],
+  });
+  manager.deleteLead('legacy-lid', { origin: 'dashboard' });
+  manager.saveLead('5511977711111', {
+    phone: '5511977711111',
+    status: 'talking',
+    history: [{ role: 'user', content: 'registro atual', ts: 2 }],
+  });
+
+  const result = manager.restoreDeletedLeads(['legacy-lid'], { origin: 'dashboard' });
+  const active = manager.getLead('5511977711111');
+  assert.equal(result.merged, 1);
+  assert.equal(manager.getAllLeads().length, 1);
+  assert.equal(manager.getDeletedLeads().length, 0);
+  assert.deepEqual(active.history.map((item) => item.content), ['registro antigo', 'registro atual']);
+  assert.deepEqual(result.referenceMoves, [{ from: 'legacy-lid', to: '5511977711111' }]);
+});
+
+test('detects and manually merges duplicate phone records', () => {
+  resetStorage();
+  manager.saveLead('first', { phone: '5511966611111', name: 'Primeiro', history: [{ role: 'user', content: 'um', ts: 1 }] });
+  manager.saveLead('second', { phone: '5511966611111', name: 'Segundo', history: [{ role: 'user', content: 'dois', ts: 2 }] });
+  assert.equal(manager.getDuplicateLeadGroups().length, 1);
+
+  const result = manager.mergeActiveLeads(['first', 'second'], { targetNumber: 'first', origin: 'dashboard' });
+  assert.equal(result.merged, 2);
+  assert.equal(manager.getAllLeads().length, 1);
+  assert.equal(manager.getLead('first').history.length, 2);
+  assert.equal(manager.getDuplicateLeadGroups().length, 0);
+});
+
+test('supports permanent deletion, retention and internal notes', () => {
+  resetStorage();
+  manager.updateLeadSettings({ trashRetentionDays: 30 });
+  manager.saveLead('one', { phone: '5511955511111', history: [] });
+  const note = manager.addInternalNote('one', 'Cliente prefere retorno pela manha.');
+  assert.equal(manager.getLead('one').internalNotes[0].id, note.id);
+  assert.equal(manager.deleteInternalNote('one', note.id), true);
+  manager.deleteLead('one', { origin: 'dashboard' });
+  assert.ok(manager.getDeletedLead('one').trashExpiresAt);
+  const result = manager.permanentlyDeleteLeads(['one'], { origin: 'dashboard' });
+  assert.equal(result.permanentlyDeleted, 1);
+  assert.equal(manager.getDeletedLeads().length, 0);
+});
+
+test('internal notes do not reset the waiting time of an urgent lead', () => {
+  resetStorage();
+  const waitingSince = new Date(Date.now() - 40 * 60000).toISOString();
+  fs.writeFileSync(path.join(dataDir, 'leads.json'), JSON.stringify({
+    legacy: {
+      number: 'legacy',
+      phone: '5511911111111',
+      status: 'human_requested',
+      lastInteraction: waitingSince,
+      updatedAt: waitingSince,
+      history: [{ role: 'user', content: 'preciso de ajuda', ts: Date.now() - 40 * 60000 }],
+    },
+  }));
+
+  assert.equal(manager.getAllLeads({ summary: true })[0].attentionOverdue, true);
+  manager.addInternalNote('legacy', 'Consultor acompanhando o atendimento.');
+  const summary = manager.getAllLeads({ summary: true })[0];
+  assert.equal(summary.attentionOverdue, true);
+  assert.ok(summary.attentionWaitingMinutes >= 39);
+  assert.equal(manager.getLead('legacy').attentionStartedAt, waitingSince);
+});
+
 test.after(() => {
   fs.rmSync(storageRoot, { recursive: true, force: true });
 });
