@@ -1424,7 +1424,7 @@ function renderSystemStatus() {
     eyebrow: 'Conexao',
     title: 'WhatsApp',
     summary: (section) => section.reachoutTimeLock?.isActive
-      ? `Conectado, mas com envios por dispositivos vinculados bloqueados ate ${formatStatusDate(section.reachoutTimeLock.timeEnforcementEnds)}.`
+      ? `Estado atual: ${section.status || 'desconhecido'}. A sessao automatizada reportou um limite de alcance ate ${formatStatusDate(section.reachoutTimeLock.timeEnforcementEnds)}.`
       : `Estado atual: ${section.status || 'desconhecido'}.`,
     metrics: (section) => [
       statusMetric('Estado', section.status || '--'),
@@ -1437,10 +1437,10 @@ function renderSystemStatus() {
       statusDetail('Ultimo erro', section.lastDisconnect?.message || 'Nenhum'),
       statusDetail('Ultima rota', section.lastInboundRoute?.addressingMode || '--'),
       statusDetail(
-        'Envios vinculados',
+        'Limite de alcance',
         section.reachoutTimeLock?.isActive
-          ? `Bloqueados ate ${formatStatusDate(section.reachoutTimeLock.timeEnforcementEnds)}`
-          : 'Liberados',
+          ? `Reportado ate ${formatStatusDate(section.reachoutTimeLock.timeEnforcementEnds)}`
+          : 'Nao reportado',
       ),
     ],
     extra: (section) => `

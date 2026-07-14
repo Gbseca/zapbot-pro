@@ -87,13 +87,12 @@ test('an authoritative inbound LID is sent only once when confirmation is delaye
   assert.equal(sends[0].target, lidJid);
 });
 
-test('does not retry an account-level WhatsApp restriction', async () => {
+test('does not retry an error explicitly marked as non-retryable', async () => {
   let sends = 0;
   const wa = {
     async sendMessage() {
       sends += 1;
       const error = new Error('Envio temporariamente bloqueado');
-      error.code = 'WA_REACHOUT_RESTRICTED';
       error.retryable = false;
       throw error;
     },

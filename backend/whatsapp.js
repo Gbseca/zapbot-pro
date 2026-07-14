@@ -270,29 +270,6 @@ class WhatsAppManager extends EventEmitter {
         return this._reachoutTimeLock;
     }
 
-    _getActiveReachoutTimeLock() {
-        if (!this._reachoutTimeLock?.isActive) return null;
-        const enforcementEnd = Date.parse(this._reachoutTimeLock.timeEnforcementEnds || '');
-        if (Number.isFinite(enforcementEnd) && enforcementEnd <= Date.now()) {
-            this._reachoutTimeLock = { ...this._reachoutTimeLock, isActive: false };
-            return null;
-        }
-        return this._reachoutTimeLock;
-    }
-
-    _createReachoutRestrictedError() {
-        const restriction = this._getActiveReachoutTimeLock();
-        if (!restriction) return null;
-        const suffix = restriction.timeEnforcementEnds
-            ? ` ate ${restriction.timeEnforcementEnds}`
-            : '';
-        const error = new Error(`WhatsApp bloqueou temporariamente envios por dispositivos vinculados${suffix}`);
-        error.code = 'WA_REACHOUT_RESTRICTED';
-        error.retryable = false;
-        error.restriction = restriction;
-        return error;
-    }
-
     _broadcastStatus(status = this.status) {
         this.emit('status-change', this.getStatus());
         this.broadcast({ type: 'status', status, details: this.lastDisconnect });
@@ -1149,7 +1126,7 @@ class WhatsAppManager extends EventEmitter {
                     this.fetchReachoutTimeLock()
                         .then((restriction) => {
                             if (restriction?.isActive) {
-                                console.warn(`[WhatsApp] Outbound companion restriction active until ${restriction.timeEnforcementEnds || 'unknown'}`);
+                                console.warn(`[WhatsApp] Reachout timelock reported for this session until ${restriction.timeEnforcementEnds || 'unknown'}; sends will still be attempted and tracked individually`);
                                 this._broadcastStatus('connected');
                             }
                         })
@@ -1244,8 +1221,6 @@ class WhatsAppManager extends EventEmitter {
         if (!this.sock || this.status !== 'connected') {
             throw new Error('WhatsApp nao esta conectado');
         }
-        const reachoutError = this._createReachoutRestrictedError();
-        if (reachoutError) throw reachoutError;
 
         const targetInfo = this.resolveOutboundTarget(target, options);
         const sendMeta = {
@@ -1426,7 +1401,6 @@ class WhatsAppManager extends EventEmitter {
 
     async sendTyping(number, duration = 2500, options = {}) {
         if (!this.sock || this.status !== 'connected') return null;
-        if (this._getActiveReachoutTimeLock()) return null;
 
         let targetInfo;
         try {
