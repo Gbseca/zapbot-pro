@@ -12,7 +12,7 @@
     "verify:ad-research": "node scripts/verify-ad-research.mjs"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
+    "@google/genai": "2.11.0",
     "@supabase/supabase-js": "2.109.0",
     "@whiskeysockets/baileys": "7.0.0-rc13",
     "cors": "^2.8.5",

@@ -200,6 +200,22 @@ function buildOperationalExtraLines(lead = {}) {
   return lines;
 }
 
+function getAgentHandoffSummary(lead = {}) {
+  const summary = lead.handoffSummary
+    || lead.aiMemory?.customerGoal
+    || lead.caseSummary
+    || '';
+  return String(summary)
+    .replace(/\bseguradoras?\b/gi, 'associacao')
+    .replace(/\bseguros?\b/gi, 'protecao veicular')
+    .replace(/\bap[oó]lices?\b/gi, 'proposta de adesao')
+    .replace(/\bsinistros?\b/gi, 'eventos')
+    .replace(/\bpr[eê]mios?\b/gi, 'mensalidade')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 700);
+}
+
 function resolveOperationalHandoff(event = {}, lead = {}) {
   const type = getEventType(event, lead);
   const map = {
@@ -237,6 +253,8 @@ function buildOperationalConsultantMessage(lead, event, handoff) {
   ];
 
   if (!contact.phone && contact.internalId) lines.push(`*ID interno:* ${contact.internalId}`);
+  const agentSummary = getAgentHandoffSummary(lead);
+  if (agentSummary) lines.push(`*Resumo do atendimento:* ${agentSummary}`);
   if (recentSummary && recentSummary !== latestMessage) lines.push(`*Contexto recente:* ${recentSummary}`);
   lines.push(...buildOperationalExtraLines(lead));
   lines.push(`*Acao:* ${handoff.action}`);
@@ -349,17 +367,22 @@ export async function executeFinancialHandoff(wa, lead, config, event = {}) {
 
 function buildSalesConsultantMessage(lead = {}) {
   const contact = buildContact(lead);
-  return [
+  const lines = [
     '*COTACAO SOLICITADA*',
     `*Cliente:* ${lead.name || 'Nao informado'}`,
     `*WhatsApp:* ${contact.phoneLabel}`,
-    '*Intencao:* cotacao de protecao veicular',
+    `*Intencao:* ${lead.aiMemory?.customerGoal || 'cotacao de protecao veicular'}`,
     `*Veiculo:* ${lead.model || 'Nao informado'}`,
     `*Ano:* ${lead.year || 'Nao informado'}`,
     `*Placa:* ${lead.plate || (lead.plateUnavailable ? 'veiculo sem placa' : lead.plateWithheld ? 'cliente preferiu nao informar nesta etapa' : 'Nao informada')}`,
-    '*Acao:* preparar a cotacao real e continuar o atendimento',
-    contact.waLink ? `*Abrir conversa:* https://wa.me/${contact.waLink}` : '*Abrir conversa:* pelo painel/conversa atual',
-  ].join('\n');
+  ];
+  const agentSummary = getAgentHandoffSummary(lead);
+  if (agentSummary && agentSummary !== lead.aiMemory?.customerGoal) {
+    lines.push(`*Resumo do atendimento:* ${agentSummary}`);
+  }
+  lines.push('*Acao:* preparar a cotacao real e continuar o atendimento');
+  lines.push(contact.waLink ? `*Abrir conversa:* https://wa.me/${contact.waLink}` : '*Abrir conversa:* pelo painel/conversa atual');
+  return lines.join('\n');
 }
 
 export async function executeHandoff(wa, lead, config, options = {}) {

@@ -82,7 +82,7 @@ Hospedagem: até 2 diárias de R$100 por diária
 Táxi emergencial: até R$100
 
 ━━━━━━━━━━ COBERTURA DE VIDROS ━━━━━━━━━━
-Participação: 40% do valor do item substituído
+Participação paga pelo associado: 40% do valor do item substituído
 Limite: 1 item por acionamento, 1 acionamento por 12 meses
 Itens: para-brisa, faróis, lanternas, vidro traseiro, retrovisor
 

@@ -4,7 +4,7 @@ import path from 'path';
 import { CONFIG_FILE } from '../storage/paths.js';
 
 const DEFAULT_AI_MODELS = {
-  groq: 'llama-3.3-70b-versatile',
+  groq: 'openai/gpt-oss-120b',
   gemini: 'gemini-2.5-flash',
 };
 
@@ -16,6 +16,7 @@ export function getDefaultModel(provider = 'groq') {
 
 const defaultConfig = {
   aiEnabled: false,
+  customerAgentV2Enabled: true,
   aiProvider: 'groq',           // 'groq' (recommended) | 'gemini'
   aiModel: DEFAULT_AI_MODELS.groq,
   qualificationModel: '',

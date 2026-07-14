@@ -2149,7 +2149,7 @@ function getAdResearchEmptyStateMessage() {
 let aiConfig = {};
 let consultorCount = 0;
 const AI_PROVIDER_DEFAULTS = {
-  groq: 'llama-3.3-70b-versatile',
+  groq: 'openai/gpt-oss-120b',
   gemini: 'gemini-2.5-flash',
 };
 
