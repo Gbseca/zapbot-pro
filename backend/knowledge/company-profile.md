@@ -3,7 +3,7 @@
 A Moove é uma associação civil sem fins lucrativos de proteção veicular baseada em mutualismo e rateio de despesas entre os seus associados.
 
 ## Pontos Importantes para o Agente:
-1. **Associação, não Seguradora:** A Moove é uma associação civil, operando no modelo de socorro mútuo (mutualismo). Nunca deve ser tratada como seguradora e não possui fins lucrativos.
+1. **Natureza da associação:** A Moove é uma associação civil sem fins lucrativos, operando no modelo de socorro mútuo (mutualismo) e proteção veicular.
 2. **Rateio e Mutualismo:** Os custos decorrentes dos eventos com os veículos dos associados são divididos (rateados) de forma proporcional entre todos eles, conforme o regulamento da associação.
 3. **Programa de Benefícios:** A Moove oferece um programa de benefícios para proteção veicular, e não "seguros".
 4. **Benefícios Possíveis:** 

@@ -14,6 +14,14 @@ const STATIC_JSON_FILES = [
   'coverage-rules.json',
   'operational-rules.json',
 ];
+const STATIC_ITEM_PRIORITIES = {
+  'coverage-rules.what_is_covered': 16,
+  'coverage-rules.what_is_not_covered': 2,
+  'coverage-rules.glass_coverage': 4,
+  'knowledge-base.o-que-cobre': 14,
+  'knowledge-base.o-que-nao-cobre': 2,
+  'knowledge-base.cobertura-de-vidros': 2,
+};
 const DYNAMIC_FAQ_CACHE_MS = 30_000;
 let dynamicFaqCache = { expiresAt: 0, items: [] };
 
@@ -25,7 +33,14 @@ const STOP_WORDS = new Set([
   'apenas', 'funciona', 'funcionar', 'queria', 'quero',
   'gostaria', 'preciso', 'pode', 'podem', 'saber', 'antes', 'mas', 'cotar',
   'cotacao', 'orcamento', 'qro', 'qnt', 'quanto', 'fica', 'tbm', 'vcs', 'oi',
-  'ola', 'entender', 'conhecer', 'explicar',
+  'ola', 'oq', 'pq', 'qual', 'quais', 'significa', 'significado', 'significar',
+  'entender', 'conhecer', 'explicar', 'algum', 'alguma', 'regra', 'serve',
+  'servir', 'isso', 'ta', 'to', 'depois', 'entrar', 'usar', 'ajudar', 'todo',
+  'tudo', 'rua', 'quando', 'ficar', 'chamar', 'ainda', 'dentro', 'rapido',
+  'rapidinho', 'longe',
+  'ha', 'quantos', 'existir', 'nao', 'sim', 'sei', 'realmente', 'mesmo',
+  'algo', 'coisa', 'gosto', 'gostei', 'acho', 'parece', 'demais', 'fala',
+  'falar', 'manda', 'mandar', 'escrito', 'olhar', 'ver',
 ]);
 
 const STEM_SUFFIXES = [
@@ -40,6 +55,13 @@ function normalizeText(value = '') {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bchuva\s+de\s+pedra\b/g, 'granizo')
+    .replace(/\b(?:ha|faz)\s+quantos?\s+anos?\b(?:\s+(?:vcs|voces|a\s+moove|a\s+empresa))?(?:\s+(?:existem?|atua|funciona))?/g, 'tempomercado')
+    .replace(/\btempo\s+de\s+mercado\b/g, 'tempomercado')
+    .replace(/\b(?:no|em)\s+meu\s+nome\b/g, 'titularidade')
+    .replace(/\b(?:mais\s+de\s+um|varios|diversos)\s+(?:carros?|veiculos?)\b/g, 'multiplo veiculo')
+    .replace(/\b(?:entrar|aderir|fazer\s+parte)\s+(?:pra|para|na|da)\s+(?:a\s+)?moove\b/g, 'adesao moove')
+    .replace(/\b(?:duas|2)\s+(?:protecoes|associacoes|empresas)\b/g, 'protecao concomitante')
     .replace(/\bpara[\s-]?brisas?\b/g, 'parabrisa')
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -65,22 +87,64 @@ function stemToken(value = '') {
 
 function canonicalToken(token = '') {
   if (/^(?:dirig|condu|condutor|motorist)/.test(token)) return 'condutor';
+  if (/^(?:filh|espos|marid|namor|parent)/.test(token)) return 'condutor';
+  if (/^vans?$/.test(token)) return 'van';
   if (/^(?:carr|automov|veicul)/.test(token)) return 'veiculo';
   if (/^(?:guinch|reboq)/.test(token)) return 'reboque';
-  if (/^(?:parabris|vidr)/.test(token)) return 'vidro';
-  if (/^cobr/.test(token)) return 'cobertura';
+  if (/^(?:parabris|vidr|farol|faroi|lantern|retrovisor)/.test(token)) return 'vidro';
+  if (/^(?:cobr|cover)/.test(token)) return 'cobertura';
   if (/^(?:aceit|peg)/.test(token)) return 'aceita';
   if (/^quebr/.test(token)) return 'quebra';
   if (/^(?:consert|repar|manuten)/.test(token)) return 'manutencao';
+  if (/^(?:motor|mecan)/.test(token)) return 'mecanica';
+  if (/^(?:pag|custe|ressarc)/.test(token)) return 'cobertura';
+  if (/^bateri/.test(token)) return 'bateria';
+  if (/^bat/.test(token)) return 'colisao';
+  if (/^roub/.test(token)) return 'roubo';
+  if (/^furt/.test(token)) return 'furto';
+  if (/^(?:fogo|incendi)/.test(token)) return 'incendio';
+  if (/^(?:alcool|bebid|embriag)/.test(token)) return 'alcool';
+  if (/^chav/.test(token)) return 'chaveiro';
+  if (/^(?:gasolin|combust|seca)/.test(token)) return 'pane_seca';
+  if (/^(?:acion|frequen|vez)/.test(token)) return 'frequencia';
+  if (/^(?:concomit|simultan)/.test(token)) return 'concomitante';
+  if (/^(?:confi|golpe|furad)/.test(token)) return 'confianca';
+  if (/^(?:acontec|event|ocorr)/.test(token)) return 'evento';
+  if (/^(?:indeniz|ressarc|reembols|compens)/.test(token)) return 'indenizacao';
+  if (/^(?:cota|franqu|particip)/.test(token)) return 'participacao';
+  if (/^carenc/.test(token)) return 'carencia';
+  if (/^regulament/.test(token)) return 'regulamento';
+  if (/^burocr/.test(token)) return 'processo';
+  if (/^(?:coli|batid|bateu|bater)/.test(token)) return 'colisao';
+  if (/^incendi/.test(token)) return 'incendio';
+  if (/^(?:graniz|chuva.*pedra)/.test(token)) return 'granizo';
+  if (/^terceir/.test(token)) return 'terceiro';
+  if (/^(?:multipl|varios|diversos)/.test(token)) return 'multiplo';
   return token;
 }
+
+const STOP_WORD_STEMS = new Set([...STOP_WORDS].map((word) => stemToken(word)));
+const GENERIC_EVIDENCE_TOKENS = new Set([
+  'ano', 'associacao', 'beneficio', 'cobertura', 'dia', 'empresa', 'mes', 'moove',
+  'evento', 'protecao', 'valor', 'veiculo',
+]);
 
 function tokenize(value = '') {
   return normalizeText(value)
     .split(' ')
+    .filter((token) => token.length >= 2 && !STOP_WORDS.has(token))
     .map(stemToken)
+    .filter((token) => token.length >= 2 && !STOP_WORD_STEMS.has(token))
     .map(canonicalToken)
     .filter((token) => token.length >= 2 && !STOP_WORDS.has(token));
+}
+
+function buildTokenBigrams(tokens = []) {
+  const bigrams = [];
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    if (tokens[index] !== tokens[index + 1]) bigrams.push(`${tokens[index]} ${tokens[index + 1]}`);
+  }
+  return [...new Set(bigrams)];
 }
 
 function tokenTrigrams(token = '') {
@@ -162,14 +226,18 @@ function parseKnowledgeBaseSections() {
   }
   if (current?.content.length) sections.push(current);
 
-  return sections.map((section) => makeItem({
-    id: `knowledge-base.${slugify(section.heading)}`,
-    title: section.heading,
-    category: 'regulamento resumido',
-    content: section.content.join('\n'),
-    keywords: tokenize(section.heading),
-    source: 'knowledge-base.js',
-  })).filter(Boolean);
+  return sections.map((section) => {
+    const id = `knowledge-base.${slugify(section.heading)}`;
+    return makeItem({
+      id,
+      title: section.heading,
+      category: 'regulamento resumido',
+      content: section.content.join('\n'),
+      keywords: tokenize(section.heading),
+      source: 'knowledge-base.js',
+      priority: STATIC_ITEM_PRIORITIES[id] || 0,
+    });
+  }).filter(Boolean);
 }
 
 export function buildStaticKnowledgeCatalog() {
@@ -180,32 +248,30 @@ export function buildStaticKnowledgeCatalog() {
       id: 'company-profile.overview',
       title: 'Perfil institucional da Moove',
       category: 'institucional',
-      content: 'A Moove é uma associação civil sem fins lucrativos de proteção veicular, baseada em mutualismo e rateio de despesas entre os associados. Não é uma seguradora.',
-      keywords: ['moove', 'associacao', 'mutualismo', 'rateio', 'protecao veicular'],
+      content: 'A Moove é uma associação civil sem fins lucrativos de proteção veicular, baseada em mutualismo e rateio de despesas entre os associados.',
+      keywords: [
+        'moove', 'associacao', 'mutualismo', 'rateio', 'protecao veicular',
+        'confianca', 'regulamento',
+      ],
       source: 'company-profile.md',
       priority: 10,
     }));
-    items.push(makeItem({
-      id: 'company-profile.agent-details',
-      title: 'Detalhes institucionais e orientações da Moove',
-      category: 'institucional',
-      content: profile,
-      keywords: ['beneficios', 'vistoria', 'adesao', 'regulamento', 'mutualismo'],
-      source: 'company-profile.md',
-    }));
+    items.push(...parseCompanyProfileItems(profile));
   }
 
   for (const fileName of STATIC_JSON_FILES) {
     const data = readJsonObject(fileName);
     const sourceName = fileName.replace(/\.json$/i, '');
     for (const [key, content] of Object.entries(data)) {
+      const id = `${sourceName}.${key}`;
       items.push(makeItem({
-        id: `${sourceName}.${key}`,
+        id,
         title: humanizeKey(key),
         category: humanizeKey(sourceName),
         content,
         keywords: [...tokenize(key), ...tokenize(humanizeKey(key))],
         source: fileName,
+        priority: STATIC_ITEM_PRIORITIES[id] || 0,
       }));
     }
   }
@@ -259,14 +325,21 @@ function buildDocumentFrequency(catalog = []) {
   return frequency;
 }
 
-function scoreKnowledgeItem(item, query, queryTokens, documentFrequency, catalogSize) {
+function scoreKnowledgeItem(item, query, queryTokens, queryBigrams, documentFrequency, catalogSize) {
   const title = normalizeText(item.title);
+  const category = normalizeText(item.category);
   const keywords = normalizeText(item.keywords.join(' '));
   const content = normalizeText(item.content);
-  const fullText = `${title} ${keywords} ${content}`;
-  const documentTokens = new Set(tokenize(fullText));
+  const fullText = `${title} ${category} ${keywords} ${content}`;
+  const orderedDocumentTokens = tokenize(fullText);
+  const documentTokens = new Set(orderedDocumentTokens);
+  const metadataTokens = new Set(tokenize(`${title} ${category} ${keywords}`));
+  const documentBigrams = new Set(buildTokenBigrams(orderedDocumentTokens));
   let score = 0;
   let matchedTokens = 0;
+  let metadataMatches = 0;
+  let matchedBigrams = 0;
+  let distinctiveExactMatches = 0;
   let exactMatch = false;
 
   if (query.length >= 5 && fullText.includes(query)) {
@@ -280,9 +353,14 @@ function scoreKnowledgeItem(item, query, queryTokens, documentFrequency, catalog
     if (documentTokens.has(token)) {
       score += 5 * idf;
       tokenMatched = true;
+      if (!/^\d+$/.test(token) && !GENERIC_EVIDENCE_TOKENS.has(token)) {
+        distinctiveExactMatches += 1;
+      }
     }
-    if (title.includes(token)) score += 5;
-    if (keywords.includes(token)) score += 7;
+    if (metadataTokens.has(token)) {
+      score += keywords.includes(token) ? 7 : 5;
+      metadataMatches += 1;
+    }
 
     let bestSimilarity = 0;
     for (const documentToken of documentTokens) {
@@ -296,31 +374,126 @@ function scoreKnowledgeItem(item, query, queryTokens, documentFrequency, catalog
     if (tokenMatched) matchedTokens += 1;
   }
 
+  for (const bigram of queryBigrams) {
+    if (!documentBigrams.has(bigram)) continue;
+    score += 8;
+    matchedBigrams += 1;
+  }
+
   if (exactMatch || matchedTokens > 0) score += Number(item.priority) || 0;
 
   return {
     score,
     matchedRatio: queryTokens.length > 0 ? matchedTokens / queryTokens.length : 0,
+    metadataRatio: queryTokens.length > 0 ? metadataMatches / queryTokens.length : 0,
+    matchedBigramRatio: queryBigrams.length > 0 ? matchedBigrams / queryBigrams.length : 0,
+    distinctiveExactMatches,
+    hasUnmatchedNumeric: queryTokens.some((token) => /^\d+$/.test(token) && !documentTokens.has(token)),
+    hasUnmatchedSpecific: queryTokens.some((token) => (
+      !/^\d+$/.test(token)
+      && !GENERIC_EVIDENCE_TOKENS.has(token)
+      && !documentFrequency.has(token)
+    )),
   };
 }
 
-function isBaselineItem(item = {}) {
-  return item.id === 'company-profile.overview';
+function parseCompanyProfileItems(profile = '') {
+  const sections = [];
+  let current = null;
+  for (const rawLine of String(profile || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const heading = line.match(/^\d+\.\s+\*\*(.+?):\*\*\s*(.*)$/);
+    if (heading) {
+      if (current) sections.push(current);
+      current = { title: heading[1].trim(), content: [heading[2].trim()].filter(Boolean) };
+      continue;
+    }
+    if (current && line && !line.startsWith('#')) current.content.push(line.replace(/^[-*]\s+/, ''));
+  }
+  if (current) sections.push(current);
+
+  return sections.map((section) => {
+    const id = `company-profile.${slugify(section.title)}`;
+    return makeItem({
+      id,
+      title: section.title,
+      category: 'institucional',
+      content: section.content.join(' '),
+      keywords: tokenize(section.title),
+      source: 'company-profile.md',
+      priority: /associa|rateio|mutualismo|regulamento|an[aá]lise|promessa/i.test(section.title) ? 6 : 2,
+    });
+  }).filter(Boolean);
+}
+
+function makeKnowledgePromptSafe(value = '') {
+  return String(value || '')
+    .replace(/Associa[cç][aã]o,?\s+n[aã]o\s+Seguradora:?/gi, 'Natureza associativa:')
+    .replace(/Nunca\s+deve\s+ser\s+tratada\s+como\s+seguradora/gi, 'Deve ser apresentada como associação de proteção veicular')
+    .replace(/N[aã]o,?\s+(?:a\s+Moove\s+)?n[aã]o\s+[eé]\s+(?:uma\s+)?seguradora\.?\s*(?:Somos\s+)?/gi, 'A Moove é ')
+    .replace(/(?:A\s+Moove\s+)?n[aã]o\s+[eé]\s+(?:uma\s+)?seguradora/gi, 'A Moove é uma associação de proteção veicular')
+    .replace(/n[aã]o\s+possui\s+seguro/gi, 'oferece proteção veicular')
+    .replace(/e\s+n[aã]o\s+["“]?seguros?["”]?/gi, 'e oferece proteção veicular')
+    .replace(/\bseguradoras?\b/gi, 'associação')
+    .replace(/\bsegurados?\b/gi, 'associados')
+    .replace(/\bseguros?\b/gi, 'proteção veicular')
+    .replace(/\bap[oó]lices?\b/gi, 'proposta de adesão')
+    .replace(/\bsinistros?\b/gi, 'eventos')
+    .replace(/\bpr[eê]mios?\b/gi, 'mensalidade')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function retrieveKnowledge(query, catalog = [], {
-  maxItems = 6,
-  maxChars = 5500,
+  maxItems = 2,
+  maxChars = 4200,
   minimumScore = 2.5,
 } = {}) {
-  const normalizedQuery = normalizeText(query);
-  const queryTokens = [...new Set(tokenize(normalizedQuery))];
+  let normalizedQuery = normalizeText(query);
+  if (/^(?:me )?(?:explica|explique|fala|fale)(?: ai)? como funciona(?: isso)?$/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} moove associacao mutualismo rateio protecao veicular`;
+  }
+  if (/\bregulamento\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} regulamento oficial associacao analise tecnica`;
+  }
+  if (/\badesao\b|\b(?:aderir|associar|contratar)\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} vistoria proposta ativacao`;
+  }
+  if (/\bmoove\b/.test(normalizedQuery)
+    && /\b(?:explica|explicar|resume|resumo|rapidinho|fala|falar)\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} associacao mutualismo rateio`;
+  }
+  if (/\b(?:escolher|escolheria|diferencial|vantagem|vale a pena)\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} associacao mutualismo cobertura assistencia beneficios`;
+  }
+  if (/\b(?:parabrisa|vidro|farol|farois|lanterna|retrovisor)\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} beneficio cobertura vidros participacao acionamento`;
+  }
+  if (/\b(?:guincho|reboque)\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} assistencia 24h reboque raio distancia`;
+  }
+  if (/\b(?:uber|taxi|aplicativo)\b/.test(normalizedQuery)
+    && /\b(?:carro|veiculo|moto|roda|trabalha|uso)\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} veiculos aceitos uso aplicativo profissional`;
+  }
+  if (/\b(?:bater|bati|batida|colisao|capotamento|roubo|furto|incendio|fogo|granizo|parabrisa|vidro|farol|lanterna|retrovisor)\b/.test(normalizedQuery)
+    && !/\b(?:cobre|cobertura|inclui|entra)\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} cobertura`;
+  }
+  if (/\b(?:paga|pagam|receb|ressarc|indeniz)\w*\b/.test(normalizedQuery)
+    && /\b(?:acontec|evento|ocorr|colisao|roubo|furto|incendio)\w*\b/.test(normalizedQuery)) {
+    normalizedQuery = `${normalizedQuery} indenizacao regulamento analise`;
+  }
+  const orderedQueryTokens = tokenize(normalizedQuery);
+  const queryTokens = [...new Set(orderedQueryTokens)];
+  const queryBigrams = buildTokenBigrams(orderedQueryTokens);
   const documentFrequency = buildDocumentFrequency(catalog);
   const ranked = catalog
     .map((item) => ({ item, ...scoreKnowledgeItem(
       item,
       normalizedQuery,
       queryTokens,
+      queryBigrams,
       documentFrequency,
       catalog.length,
     ) }))
@@ -339,20 +512,47 @@ export function retrieveKnowledge(query, catalog = [], {
     usedChars += serializedLength;
   };
 
-  for (const entry of ranked.filter(({ item }) => isBaselineItem(item)).slice(0, 2)) addItem(entry);
   for (const entry of ranked) {
     if (selected.length >= maxItems) break;
-    if (entry.score < minimumScore && !isBaselineItem(entry.item)) continue;
+    if (entry.score < minimumScore) continue;
+    const supportsSpecificQuestion = !entry.hasUnmatchedSpecific || entry.distinctiveExactMatches >= 1;
+    const hasEnoughTopicalEvidence = supportsSpecificQuestion && (entry.matchedRatio >= 0.6
+      || (entry.matchedRatio >= 0.5
+        && (entry.metadataRatio >= 0.34 || entry.matchedBigramRatio > 0))
+      || (queryTokens.length <= 2
+        && entry.matchedRatio >= 0.5
+        && (entry.distinctiveExactMatches >= 1
+          || (queryTokens.length === 1 && !entry.hasUnmatchedSpecific)))
+      || (entry.distinctiveExactMatches >= 1
+        && entry.matchedRatio >= 0.2
+        && (!entry.hasUnmatchedNumeric || entry.distinctiveExactMatches >= 2)));
+    if (!hasEnoughTopicalEvidence) continue;
     addItem(entry);
   }
 
-  const bestTopical = ranked.find(({ item }) => !isBaselineItem(item)) || { score: 0, matchedRatio: 0 };
+  const bestTopical = ranked[0] || { score: 0, matchedRatio: 0 };
   const bestTopicalScore = bestTopical.score;
+  const bestSupportsSpecificQuestion = !bestTopical.hasUnmatchedSpecific
+    || bestTopical.distinctiveExactMatches >= 1;
+  const hasStrongCoverage = bestSupportsSpecificQuestion && (bestTopical.matchedRatio >= 0.75
+    || (bestTopical.matchedRatio >= 0.6
+      && (bestTopical.metadataRatio >= 0.34 || bestTopical.matchedBigramRatio > 0))
+    || bestTopical.distinctiveExactMatches >= 2);
+  const hasUsableCoverage = bestSupportsSpecificQuestion && (bestTopical.matchedRatio >= 0.6
+    || (bestTopical.matchedRatio >= 0.5
+      && (bestTopical.metadataRatio >= 0.34 || bestTopical.matchedBigramRatio > 0))
+    || (queryTokens.length <= 2
+      && bestTopical.matchedRatio >= 0.5
+      && (bestTopical.distinctiveExactMatches >= 1
+        || (queryTokens.length === 1 && !bestTopical.hasUnmatchedSpecific)))
+    || (bestTopical.distinctiveExactMatches >= 1
+      && bestTopical.matchedRatio >= 0.2
+      && (!bestTopical.hasUnmatchedNumeric || bestTopical.distinctiveExactMatches >= 2)));
   const items = selected.map(({ item, score }) => ({ ...item, score: Number(score.toFixed(2)) }));
   const text = items.map((item) => [
     `[FONTE ${item.id}]`,
     `Titulo: ${item.title}`,
-    `Conteudo: ${item.content}`,
+    `Conteudo: ${makeKnowledgePromptSafe(item.content)}`,
   ].join('\n')).join('\n\n');
 
   return {
@@ -360,14 +560,15 @@ export function retrieveKnowledge(query, catalog = [], {
     items,
     text,
     ids: items.map((item) => item.id),
-    confidence: bestTopicalScore >= 10 && bestTopical.matchedRatio >= 0.5
+    confidence: bestTopicalScore >= 10 && hasStrongCoverage
       ? 'high'
-      : bestTopicalScore >= minimumScore
-        && (bestTopical.matchedRatio >= 0.34 || queryTokens.length <= 2)
+      : bestTopicalScore >= minimumScore && hasUsableCoverage
         ? 'medium'
         : 'low',
     topScore: Number(bestTopicalScore.toFixed(2)),
     matchedRatio: Number(bestTopical.matchedRatio.toFixed(2)),
+    metadataRatio: Number((bestTopical.metadataRatio || 0).toFixed(2)),
+    matchedBigramRatio: Number((bestTopical.matchedBigramRatio || 0).toFixed(2)),
   };
 }
 

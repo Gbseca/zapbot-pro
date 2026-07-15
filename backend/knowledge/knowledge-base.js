@@ -4,7 +4,7 @@
 
 export const KNOWLEDGE_BASE = `
 ━━━━━━━━━━ O QUE É A MOOVE ━━━━━━━━━━
-A Moove Proteção Veicular é uma associação civil SEM fins lucrativos. NÃO é seguradora.
+A Moove Proteção Veicular é uma associação civil sem fins lucrativos baseada em mutualismo e rateio.
 Funciona pelo princípio do mutualismo: todos os associados rateiam os custos dos eventos entre si.
 Site: www.mooveprotecao.com.br | Telefone/0800: 0800 1001120
 
@@ -23,14 +23,14 @@ Site: www.mooveprotecao.com.br | Telefone/0800: 0800 1001120
 
 ━━━━━━━━━━ O QUE NÃO COBRE ━━━━━━━━━━
 ❌ Danos mecânicos, desgaste natural, falta de manutenção
-❌ Pneus, vidros, rodas, baterias danificados ISOLADAMENTE (só em sinistro geral)
+❌ Pneus, rodas e baterias danificados isoladamente. Vidros isolados dependem da contratação do benefício opcional de vidros
 ❌ Carga transportada
 ❌ Acessórios não originais
 ❌ Condução por pessoa sem habilitação válida
-❌ Veículo filho em concorrência fora do Brasil
+❌ Veículo em circulação fora do Brasil
 ❌ Dirigindo embriagado ou sob efeito de tóxicos
 ❌ Rachas, competições, velocidade incompatível
-❌ Veículo em outro plano/seguro concomitante
+❌ Veículo com proteção concomitante em outra empresa
 ❌ Furto simples por facilidade (ex: chave dentro do carro)
 ❌ Apropriação indébita
 
@@ -43,7 +43,7 @@ Caminhões pesados: 6% da FIPE, mínimo R$5.000
 Importados: 10% da FIPE, mínimo R$5.000
 Motos até R$5k: R$800 | até R$10k: R$1.000 | até R$16k: R$1.600 | acima: 10%
 ⚠️ Cota DOBRADA nos primeiros 30 dias (carros) ou 90 dias (taxi/vans/caminhões)
-⚠️ Cota dobrada novamente se tiver mais de 1 sinistro em 12 meses (carros de passeio)
+⚠️ Cota dobrada novamente se tiver mais de 1 evento em 12 meses (carros de passeio)
 
 ━━━━━━━━━━ MENSALIDADE ━━━━━━━━━━
 Calculada com base no valor FIPE do veículo
@@ -82,12 +82,13 @@ Hospedagem: até 2 diárias de R$100 por diária
 Táxi emergencial: até R$100
 
 ━━━━━━━━━━ COBERTURA DE VIDROS ━━━━━━━━━━
+Benefício opcional, conforme contratação
 Participação paga pelo associado: 40% do valor do item substituído
 Limite: 1 item por acionamento, 1 acionamento por 12 meses
 Itens: para-brisa, faróis, lanternas, vidro traseiro, retrovisor
 
 ━━━━━━━━━━ CARRO RESERVA ━━━━━━━━━━
-Disponível em sinistros de colisão com autorização de reparo
+Disponível em eventos de colisão com autorização de reparo
 Requisitos: CNH com 2+ anos, sem restrição SPC/Serasa, caução no cartão
 Só carro básico multimarca. Não vale para pane mecânica/elétrica
 

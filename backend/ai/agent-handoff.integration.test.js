@@ -246,7 +246,7 @@ test('does not claim a transfer when no consultant is configured', async () => {
 
   assert.equal(wa.messages.length, 1);
   assert.equal(wa.messages[0].target, phone);
-  assert.match(wa.messages[0].message, /nao consegui avisar o consultor/i);
+  assert.match(wa.messages[0].message, /n[aã]o consegui avisar o consultor/i);
   assert.doesNotMatch(wa.messages[0].message, /encaminhei|a caminho/i);
   const lead = getLead(phone);
   assert.ok(lead);
@@ -262,7 +262,7 @@ test('persists a delivery failure and gives the client a truthful response', asy
 
   assert.equal(wa.messages.length, 1);
   assert.equal(wa.messages[0].target, phone);
-  assert.match(wa.messages[0].message, /nao consegui avisar o consultor/i);
+  assert.match(wa.messages[0].message, /n[aã]o consegui avisar o consultor/i);
   const lead = getLead(phone);
   assert.ok(lead);
   assert.equal(lead.status, 'handoff_failed');
@@ -279,7 +279,7 @@ test('does not claim a handoff when the consultant send is accepted without deli
   assert.equal(wa.messages.length, 2);
   assert.equal(wa.messages[0].target, consultant.phone);
   assert.equal(wa.messages[1].target, phone);
-  assert.match(wa.messages[1].message, /nao consegui avisar o consultor/i);
+  assert.match(wa.messages[1].message, /n[aã]o consegui avisar o consultor/i);
   assert.doesNotMatch(wa.messages[1].message, /encaminhei/i);
   const lead = getLead(phone);
   assert.ok(lead);
