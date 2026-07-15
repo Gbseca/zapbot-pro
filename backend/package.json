@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "eval:ai": "node ai/customer-agent-eval.js",
-    "test": "node --test ai/conversation-regression.test.js ai/agent-handoff.integration.test.js ai/agent-v2.integration.test.js ai/customer-agent.test.js ai/gemini.test.js ai/humanizer.test.js knowledge/knowledge-service.test.js whatsapp-lid-routing.test.js data/leads-manager.test.js data/lead-lifecycle-service.test.js security/leads-access-guard.test.js"
+    "test": "node --test ai/conversation-regression.test.js ai/agent-handoff.integration.test.js ai/agent-v2.integration.test.js ai/customer-agent.test.js ai/customer-agent-eval.test.js ai/gemini.test.js ai/humanizer.test.js knowledge/knowledge-service.test.js whatsapp-lid-routing.test.js data/leads-manager.test.js data/lead-lifecycle-service.test.js security/leads-access-guard.test.js"
   },
   "dependencies": {
     "@google/genai": "2.11.0",

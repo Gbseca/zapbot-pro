@@ -25,19 +25,19 @@ const SUPPORT_COMPATIBILITY_INTENTS = new Set([
 const TOPIC_LABELS = {
   angry_customer: 'atendimento humano',
   app_blocked: 'acesso ao aplicativo',
-  assistance_request: 'reboque ou assistencia',
-  billing_disputed: 'cobranca contestada',
+  assistance_request: 'reboque ou assistência',
+  billing_disputed: 'cobrança contestada',
   boleto_request: 'boleto ou forma de pagamento',
   cancel_request: 'cancelamento',
-  event_report: 'evento com o veiculo',
+  event_report: 'evento com o veículo',
   general_question: 'seu caso',
   human_requested: 'atendimento humano',
   inspection_pending: 'vistoria ou revistoria',
   payment_claimed: 'pagamento informado',
-  reactivation_request: 'reativacao',
+  reactivation_request: 'reativação',
   receipt_available: 'comprovante',
   receipt_received: 'comprovante informado',
-  regularization_request: 'regularizacao de pendencia',
+  regularization_request: 'regularização de pendência',
   system_check_request: 'consulta do cadastro',
 };
 
@@ -64,25 +64,25 @@ function buildClientReply(intent, phoneResolved, collectionsContext = null) {
 
   if (intent === 'general_question' && collectionsContext) {
     return phoneResolved
-      ? 'Oi! Voce esta falando com a equipe da Moove Protecao Veicular. Vou encaminhar seu atendimento para um consultor continuar por aqui.'
-      : 'Oi! Voce esta falando com a equipe da Moove Protecao Veicular. Para encaminhar seu atendimento ao consultor, me confirma seu WhatsApp com DDD?';
+      ? 'Oi! Você está falando com o atendimento da Moove Proteção Veicular. Vou encaminhar sua mensagem para um consultor continuar por aqui.'
+      : 'Oi! Você está falando com o atendimento da Moove Proteção Veicular. Para encaminhar sua mensagem ao consultor, me confirma seu WhatsApp com DDD?';
   }
 
   if (phoneResolved) {
     if (intent === 'assistance_request') {
-      return 'Entendi o pedido de reboque ou assistencia. Encaminhei seu atendimento para um consultor continuar por aqui.';
+      return 'Entendi que você precisa de reboque ou assistência. Encaminhei sua mensagem para um consultor continuar por aqui.';
     }
     if (intent === 'event_report') {
-      return 'Entendi o que aconteceu com o veiculo. Encaminhei seu atendimento para um consultor continuar por aqui.';
+      return 'Entendi o que aconteceu com o veículo. Encaminhei sua mensagem para um consultor continuar por aqui.';
     }
-    return `Entendi. Encaminhei seu atendimento sobre ${topic} para um consultor continuar por aqui.`;
+    return `Entendi. Encaminhei sua mensagem sobre ${topic} para um consultor continuar por aqui.`;
   }
 
   if (intent === 'assistance_request') {
-    return 'Entendi o pedido de reboque ou assistencia. Para encaminhar ao consultor, me confirma seu WhatsApp com DDD?';
+    return 'Entendi que você precisa de reboque ou assistência. Para encaminhar ao consultor, me confirma seu WhatsApp com DDD?';
   }
   if (intent === 'event_report') {
-    return 'Entendi o que aconteceu com o veiculo. Para encaminhar ao consultor, me confirma seu WhatsApp com DDD?';
+    return 'Entendi o que aconteceu com o veículo. Para encaminhar ao consultor, me confirma seu WhatsApp com DDD?';
   }
   return `Entendi. Para encaminhar seu atendimento sobre ${topic} ao consultor, me confirma seu WhatsApp com DDD?`;
 }

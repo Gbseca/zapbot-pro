@@ -57,6 +57,35 @@ const VEHICLE_STOP_WORDS = new Set([
   'tenho',
   'possuo',
   'tipo',
+  'familia',
+  'familiar',
+  'pai',
+  'mae',
+  'esposo',
+  'esposa',
+  'marido',
+  'mulher',
+  'filho',
+  'filha',
+  'trabalho',
+  'empresa',
+  'passeio',
+  'particular',
+  'pessoal',
+  'uso',
+  'diario',
+  'popular',
+  'novo',
+  'nova',
+  'usado',
+  'usada',
+  'financiado',
+  'financiada',
+  'hatch',
+  'sedan',
+  'suv',
+  'pickup',
+  'picape',
   'duvida',
   'duvidas',
   'questao',
@@ -384,7 +413,11 @@ function cleanModelCandidate(value = '') {
 }
 
 function extractModelFromLine(line = '') {
-  if (!line || isCoverageLikeText(line) || isMultiVehicleText(line) || isOperationalLikeText(line)) {
+  if (!line
+    || /\b(?:cpf|cnpj|documento|rg)\b/i.test(line)
+    || isCoverageLikeText(line)
+    || isMultiVehicleText(line)
+    || isOperationalLikeText(line)) {
     return null;
   }
 
@@ -462,6 +495,14 @@ export function extractDeterministicFacts(text = '') {
 export function applyDeterministicFactsToLead(lead, text = '', options = {}) {
   if (!lead) return {};
   const facts = extractDeterministicFacts(text);
+  const latestLine = String(text || '')
+    .split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .pop() || '';
+  const explicitVehicleCorrection = /\b(?:corrigindo|correcao|na verdade|quer dizer)\b/i.test(
+    normalizeText(latestLine),
+  );
 
   if (facts.plate) lead.plate = facts.plate;
   if (facts.plate) lead.plateUnavailable = false;
@@ -472,7 +513,7 @@ export function applyDeterministicFactsToLead(lead, text = '', options = {}) {
     lead.phoneResolved = true;
   }
   if (facts.year) lead.year = facts.year;
-  if (facts.model && (!lead.model || options.overwriteModel)) lead.model = facts.model;
+  if (facts.model && (!lead.model || options.overwriteModel || explicitVehicleCorrection)) lead.model = facts.model;
   if (facts.vehicleType) lead.vehicleType = facts.vehicleType;
   if (facts.vehiclePower) lead.vehiclePower = facts.vehiclePower;
   if (facts.plateUnavailable) lead.plateUnavailable = true;

@@ -27,6 +27,7 @@ import { getRelevantKnowledge } from './knowledge-retriever.js';
 import {
   applyCustomerAgentTurnToLead,
   customerAgentTurnToDecision,
+  redactSensitiveText,
   runCustomerAgent,
 } from './customer-agent.js';
 import { getNextSalesStep } from './sales-playbook.js';
@@ -142,7 +143,7 @@ const ASK_PHONE_FOR_HANDOFF_REPLY = 'Para anexar seu contato certinho no encamin
 const ASK_PHONE_FOR_HANDOFF_FORMAT_REPLY = 'Para eu encaminhar corretamente para o consultor, preciso do WhatsApp com DDD. Pode me enviar nesse formato? Exemplo: 21999999999.';
 const HANDOFF_RECOVERY_REPLY = 'Recebi seus dados, mas tive uma falha ao confirmar o encaminhamento por aqui. Para anexar seu contato certinho, me confirma seu WhatsApp com DDD?';
 const OPERATIONAL_CONTACT_RECEIVED_REPLY = 'Perfeito, recebi seu contato. Encaminhei seu atendimento para um consultor continuar por aqui.';
-const OPERATIONAL_HANDOFF_FAILED_REPLY = 'Entendi seu pedido, mas nao consegui avisar o consultor agora. Seu atendimento ficou registrado para acompanhamento manual.';
+const OPERATIONAL_HANDOFF_FAILED_REPLY = 'Entendi seu pedido, mas não consegui avisar o consultor agora. Seu atendimento ficou registrado para acompanhamento manual.';
 const OPERATIONAL_PENDING_DATA_STATUS = 'awaiting_operational_data';
 const OPERATIONAL_PENDING_CONTACT_STATUS = 'awaiting_contact_for_handoff';
 
@@ -370,7 +371,7 @@ function buildOperationalPhoneRequest(lead = {}, event = {}) {
   const type = getOperationalEventType(event);
   const prefix = lead.plate ? `Recebi a placa ${lead.plate}. ` : '';
   if (type === 'receipt_received') {
-    return `${prefix}Entendi que voce informou o envio do comprovante. Para encaminhar ao consultor, me confirma seu WhatsApp com DDD?`;
+    return `${prefix}Entendi que você informou o envio do comprovante. Para encaminhar ao consultor, me confirma seu WhatsApp com DDD?`;
   }
   return `${prefix}${ASK_PHONE_FOR_HANDOFF_REPLY}`;
 }
@@ -383,18 +384,18 @@ function buildOperationalContactRequest(lead = {}, event = {}, config = {}) {
 function buildOperationalReply(event = {}, lead = {}) {
   const type = getOperationalEventType(event);
   if (event.clientReply || event.reply) return event.clientReply || event.reply;
-  if (type === 'assistance_request') return 'Entendi o pedido de reboque ou assistencia. Encaminhei seu atendimento para um consultor continuar por aqui.';
-  if (type === 'event_report') return 'Entendi o que aconteceu com o veiculo. Encaminhei seu atendimento para um consultor continuar por aqui.';
+  if (type === 'assistance_request') return 'Entendi que você precisa de reboque ou assistência. Encaminhei sua mensagem para um consultor continuar por aqui.';
+  if (type === 'event_report') return 'Entendi o que aconteceu com o veículo. Encaminhei sua mensagem para um consultor continuar por aqui.';
   return 'Entendi. Encaminhei seu atendimento para um consultor continuar por aqui.';
 }
 
 function buildOperationalContactReceivedReply(event = {}) {
   const type = getOperationalEventType(event);
-  if (type === 'assistance_request') return 'Perfeito, recebi seu contato. Encaminhei o pedido de reboque ou assistencia para um consultor continuar por aqui.';
-  if (type === 'event_report') return 'Perfeito, recebi seu contato. Encaminhei o atendimento sobre o veiculo para um consultor continuar por aqui.';
+  if (type === 'assistance_request') return 'Perfeito, recebi seu contato. Encaminhei o pedido de reboque ou assistência para um consultor continuar por aqui.';
+  if (type === 'event_report') return 'Perfeito, recebi seu contato. Encaminhei o atendimento sobre o veículo para um consultor continuar por aqui.';
   if (type === 'reactivation_request') return OPERATIONAL_CONTACT_RECEIVED_REPLY;
   if (type === 'boleto_request') return 'Perfeito, recebi seu contato. Encaminhei o pedido de boleto para um consultor continuar por aqui.';
-  if (type === 'regularization_request') return 'Perfeito, recebi seu contato. Encaminhei seu pedido de regularizacao para um consultor continuar por aqui.';
+  if (type === 'regularization_request') return 'Perfeito, recebi seu contato. Encaminhei seu pedido de regularização para um consultor continuar por aqui.';
   return OPERATIONAL_CONTACT_RECEIVED_REPLY;
 }
 
@@ -1234,6 +1235,171 @@ async function handlePendingOperationalHandoff(wa, leadId, lead, route, config, 
   return handleOperationalEventAction(wa, leadId, lead, route, config, event, content);
 }
 
+function buildUnavailableCustomerAgentTurn(lead = {}, message = '') {
+  const normalized = normalizeCustomerText(message);
+  const deterministic = classifyDeterministicIntent(message, {
+    contextText: buildRecentUserText(lead, message, 8),
+  });
+  const previousMemory = lead.aiMemory || {};
+  const model = String(lead.model || '').trim();
+  const year = String(lead.year || '').trim();
+  const safeRequest = redactSensitiveText(message)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 320);
+  const isGreeting = /^(?:oi|ola|opa|bom dia|boa tarde|boa noite)(?: tudo bem| tudo bom| beleza)?$/.test(normalized);
+  const isThanks = /^(?:obg|obrigado|obrigada|valeu)(?: viu| mesmo)?$/.test(normalized);
+  const isMistake = /\b(?:foi mal|desculpa|desculpe|mandei errado|mensagem errada|foi engano)\b/.test(normalized);
+  const asksIdentity = /\b(?:voce|vc) (?:e|eh) (?:um |uma )?(?:robo|bot|ia|assistente)\b|\bquem (?:e|eh) voce\b/.test(normalized);
+  const isOperational = deterministic.mode === 'operational' && deterministic.explicit;
+  const isNoInterest = deterministic.mode === 'sales' && deterministic.intent === 'no_interest';
+  const currentSalesIntent = ['sales_quote', 'sales_price_request', 'sales_consultant_requested']
+    .includes(deterministic.intent)
+    ? deterministic.intent
+    : null;
+  const hasSalesContext = !!currentSalesIntent
+    || ['sales_quote', 'sales_price_request', 'sales_consultant_requested'].includes(lead.lastIntent)
+    || ['qualification', 'ready_for_quote'].includes(previousMemory.salesStage);
+
+  let primaryIntent = 'unknown';
+  let mode = 'sales';
+  let action = 'respond';
+  let reply = '';
+  let answerStatus = 'not_applicable';
+  let handoffReason = '';
+  let handoffSummary = '';
+  let pendingQuestion = '';
+  let lastQuestionAsked = '';
+  let salesStage = previousMemory.salesStage || 'opening';
+  let currentTopic = previousMemory.currentTopic || '';
+  let primaryNeed = previousMemory.primaryNeed || '';
+  let customerGoal = previousMemory.customerGoal || '';
+
+  if (isOperational) {
+    const operationalIntent = deterministic.intent === 'angry_customer'
+      ? 'human_requested'
+      : deterministic.intent;
+    const topic = {
+      assistance_request: 'pedido de assistência',
+      event_report: 'evento com o veículo',
+      boleto_request: 'boleto ou pagamento',
+      regularization_request: 'regularização de pendência',
+      payment_claimed: 'confirmação de pagamento',
+      receipt_available: 'comprovante de pagamento',
+      receipt_received: 'comprovante enviado',
+      app_blocked: 'acesso ao aplicativo',
+      inspection_pending: 'vistoria ou revistoria',
+      cancel_request: 'cancelamento',
+      reactivation_request: 'reativação',
+      billing_disputed: 'contestação de cobrança',
+      system_check_request: 'consulta de cadastro',
+      human_requested: 'atendimento humano',
+    }[operationalIntent] || 'atendimento solicitado';
+    primaryIntent = operationalIntent;
+    mode = 'operational';
+    action = 'handoff_operational';
+    reply = `Entendi seu pedido sobre ${topic}. Encaminhei a mensagem para um consultor continuar por aqui.`;
+    handoffReason = `Cliente precisa de ${topic}; os provedores de IA estavam temporariamente indisponíveis.`;
+    handoffSummary = `Assunto: ${topic}. Pedido atual: ${safeRequest || 'atendimento solicitado pelo cliente'}.`;
+    salesStage = 'operational';
+    currentTopic = topic;
+    primaryNeed = topic;
+    customerGoal = topic;
+  } else if (isGreeting) {
+    primaryIntent = 'greeting';
+    reply = 'Oi! Tudo bem por aqui. Como posso te ajudar?';
+    currentTopic = 'início do atendimento';
+  } else if (isThanks) {
+    primaryIntent = 'thanks';
+    reply = 'Por nada! Quando precisar, estou por aqui.';
+  } else if (isMistake) {
+    primaryIntent = 'other';
+    reply = 'Sem problema. Quando precisar, é só chamar.';
+  } else if (asksIdentity) {
+    primaryIntent = 'assistant_identity';
+    reply = 'Sou a assistente virtual da Moove. Posso ajudar com proteção veicular, dúvidas e encaminhamentos.';
+    answerStatus = 'answered';
+  } else if (isNoInterest) {
+    primaryIntent = 'no_interest';
+    action = 'stop';
+    reply = 'Tudo bem, sem problema. Não vou insistir. Se precisar, é só chamar.';
+    salesStage = 'closed';
+  } else if (hasSalesContext && currentSalesIntent !== 'sales_consultant_requested' && (!model || !year)) {
+    primaryIntent = currentSalesIntent || lead.lastIntent || 'sales_quote';
+    action = 'ask_model_year';
+    salesStage = 'qualification';
+    currentTopic = 'cotação de proteção veicular';
+    primaryNeed = 'receber uma cotação';
+    customerGoal = 'fazer uma cotação';
+    if (!model && !year) {
+      reply = 'Para eu adiantar sua cotação, qual é o modelo e o ano do veículo?';
+      pendingQuestion = 'modelo e ano do veículo';
+    } else if (!model) {
+      reply = 'Para eu adiantar sua cotação, qual é o modelo do veículo?';
+      pendingQuestion = 'modelo do veículo';
+    } else {
+      reply = 'Para eu adiantar sua cotação, qual é o ano do veículo?';
+      pendingQuestion = 'ano do veículo';
+    }
+    lastQuestionAsked = reply;
+  } else {
+    primaryIntent = currentSalesIntent || 'unknown';
+    action = 'handoff_sales';
+    salesStage = 'handoff';
+    currentTopic = currentSalesIntent ? 'cotação de proteção veicular' : 'dúvida do cliente';
+    primaryNeed = currentSalesIntent ? 'concluir uma cotação' : 'receber uma resposta segura';
+    customerGoal = primaryNeed;
+    reply = currentSalesIntent
+      ? 'Recebi seus dados e encaminhei seu pedido para um consultor continuar a cotação por aqui.'
+      : 'Tive uma instabilidade para consultar essa informação. Encaminhei sua mensagem para um consultor continuar por aqui.';
+    handoffReason = 'Os provedores de IA estavam temporariamente indisponíveis e a mensagem exige atendimento seguro.';
+    handoffSummary = [
+      `Assunto: ${currentSalesIntent ? 'cotação de proteção veicular' : 'dúvida encaminhada por indisponibilidade temporária'}.`,
+      `Pedido atual: ${safeRequest || 'atendimento solicitado pelo cliente'}.`,
+      model || year ? `Veículo: ${[model, year].filter(Boolean).join(' ')}.` : '',
+    ].filter(Boolean).join(' ');
+  }
+
+  const shouldHandoff = action === 'handoff_sales' || action === 'handoff_operational';
+  return {
+    reply,
+    primaryIntent,
+    secondaryIntent: 'none',
+    mode,
+    action,
+    confidence: 0,
+    emotion: deterministic.emotion || 'neutral',
+    answerStatus,
+    knowledgeIds: [],
+    reasoningSummary: 'Provedores de IA temporariamente indisponíveis; fallback seguro aplicado.',
+    handoffReason,
+    handoffSummary,
+    memory: {
+      customerGoal,
+      currentTopic,
+      customerType: previousMemory.customerType || 'unknown',
+      salesStage,
+      primaryNeed,
+      pendingQuestion,
+      lastQuestionAsked,
+      objections: Array.isArray(previousMemory.objections) ? previousMemory.objections : [],
+      decisionFactors: Array.isArray(previousMemory.decisionFactors) ? previousMemory.decisionFactors : [],
+      answeredTopics: Array.isArray(previousMemory.answeredTopics) ? previousMemory.answeredTopics : [],
+    },
+    extractedFacts: {
+      vehicleModel: model,
+      vehicleYear: year,
+    },
+    plateWithheld: !!lead.plateWithheld,
+    shouldHandoff,
+    shouldAskPhone: shouldHandoff && !getLeadRealPhone(lead),
+    shouldStopAutomation: shouldHandoff || action === 'stop',
+    provider: 'fallback',
+    model: 'deterministic-provider-outage',
+    architecture: 'customer-agent-v2',
+  };
+}
+
 async function processCustomerAgentV2(wa, {
   leadId,
   lead,
@@ -1242,19 +1408,32 @@ async function processCustomerAgentV2(wa, {
   message,
 } = {}) {
   let turn;
-  try {
-    turn = await runCustomerAgent({ config, lead, message });
-  } catch (error) {
-    console.warn(`[Agent] Customer agent v2 failed for ${leadId}; using legacy fallback: ${error.message}`);
-    void recordEvent({
-      leadKey: leadId,
-      eventType: 'customer_agent_v2_failed',
-      payload: { error: error.message },
-    });
-    return false;
+  if (!config?.hasEffectiveKey) {
+    console.warn(`[Agent] Customer agent v2 has no configured provider for ${leadId}; using immediate safe fallback.`);
+    lead.aiLastError = 'Nenhuma chave de IA configurada.';
+    lead.aiProviderUnavailableAt = new Date().toISOString();
+    turn = buildUnavailableCustomerAgentTurn(lead, message);
+  } else {
+    try {
+      turn = await runCustomerAgent({ config, lead, message });
+    } catch (error) {
+      console.warn(`[Agent] Customer agent v2 failed for ${leadId}; using immediate safe fallback: ${error.message}`);
+      void recordEvent({
+        leadKey: leadId,
+        eventType: 'customer_agent_v2_failed',
+        payload: { error: error.message },
+      });
+      lead.aiLastError = String(error.message || error).slice(0, 500);
+      lead.aiProviderUnavailableAt = new Date().toISOString();
+      turn = buildUnavailableCustomerAgentTurn(lead, message);
+    }
   }
 
   applyCustomerAgentTurnToLead(lead, turn);
+  if (turn.provider !== 'fallback') {
+    delete lead.aiLastError;
+    delete lead.aiProviderUnavailableAt;
+  }
   const decision = customerAgentTurnToDecision(turn, lead);
   decision.type = turn.primaryIntent;
   decision.reply = turn.reply;
@@ -1800,7 +1979,7 @@ async function processConversation(wa, fullJid, leadId, jidId, displayNum, texts
     lead.stage = lead.stage || 'engaged';
   }
 
-  if (config.customerAgentV2Enabled !== false && config.hasEffectiveKey) {
+  if (config.customerAgentV2Enabled !== false) {
     const handled = await processCustomerAgentV2(wa, {
       leadId,
       lead,

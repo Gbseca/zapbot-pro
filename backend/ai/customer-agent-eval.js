@@ -1,8 +1,11 @@
+import fs from 'fs';
+import path from 'path';
 import { pathToFileURL } from 'url';
 
 import { getDefaultModel, loadConfig, resolveEffectiveAIConfig } from '../data/config-manager.js';
 import { applyDeterministicFactsToLead } from './deterministic-facts.js';
 import { applyCustomerAgentTurnToLead, runCustomerAgent } from './customer-agent.js';
+import { CUSTOMER_AGENT_QUALITY_SCENARIOS } from './customer-agent-quality-cases.js';
 
 const FORBIDDEN_TERMS = /\b(?:seguro|seguradora|ap[oó]lice|sinistro|pr[eê]mio)s?\b/i;
 const IMPOSSIBLE_PROMISES = [
@@ -11,6 +14,29 @@ const IMPOSSIBLE_PROMISES = [
   /(?:app|aplicativo).{0,35}(?:liberado|desbloqueado)/i,
   /(?:consultei|verifiquei|conferi).{0,30}(?:sistema|cadastro|fipe)/i,
 ];
+const SEPARATE_TEAM_CLAIM = /(?:setor|equipe|time)\s+(?:financeir|de\s+suporte|do\s+suporte)|(?:encaminh\w*|direcion\w*).{0,20}(?:financeiro|suporte)|\b(?:ao|para o|pro)\s+suporte\b/i;
+const SALES_PITCH = /\b(?:cota[cç][aã]o|or[cç]amento|modelo\s+e\s+ano|contrat|ades[aã]o|fechar)\b/i;
+const UNSUPPORTED_DELIVERY_OFFER = /(?:posso|vou|consigo|quer que eu)\s+(?:te\s+)?(?:enviar|mandar|encaminhar|anexar).{0,60}\b(?:documento|regulamento|arquivo|pdf|link|foto)\b/i;
+const UNSUPPORTED_SALES_FLATTERY = /(?:[oó]tima|excelente|boa)\s+(?:escolha|iniciativa)|muito\s+popular|(?:carro|ve[ií]culo|modelo)\s+(?:excelente|incr[ií]vel|[oó]timo)|economia\s+significativa|(?:mais|muito)\s+(?:barat|econ[oô]mic)|superior\s+(?:a|[àa]s?)|an[aá]lise\s+(?:[eé]|fica)\s+(?:um\s+pouco\s+)?diferente/i;
+const PRESSURE_TACTIC = /\b(?:[uú]ltima\s+chance|agora\s+ou\s+nunca|vai\s+perder|precisa\s+fechar\s+hoje|n[aã]o\s+pode\s+deixar\s+passar)\b/i;
+const UNSUPPORTED_COMMERCIAL_CLAIM = /(?:buscamos|procuramos|nosso\s+foco\s+[eé]|focamos\s+em)\s+(?:oferecer\s+)?[^.!?]{0,100}(?:qualidade|transpar[eê]ncia|complet[ao]|seguran[cç]a|agilidade)|processo\s+(?:[eé]|fica|foi\s+estruturado\s+para)\s+(?:muito\s+)?(?:simples|r[aá]pido|[aá]gil|garantir\s+(?:a\s+)?seguran[cç]a)|seguran[cç]a\s+e\s+agilidade|(?:esse|o)\s+per[ií]odo\s+[eé]\s+necess[aá]rio|(?:prote[cç][aã]o|valores?)\s+(?:s[aã]o\s+|[eé]\s+)?personalizad[oa]s?|valores?.{0,60}\b(?:perfil|plano)\b|garant\w*.{0,35}\b(?:prote[cç][aã]o|cobertura|pagamento|indeniza[cç][aã]o)\b/i;
+const GENERIC_SALES_PIVOT = /\b(?:interesse\s+em\s+(?:uma\s+)?cota[cç][aã]o|gostaria\s+de\s+(?:fazer|receber)\s+(?:uma\s+)?cota[cç][aã]o|ve[ií]culo\s+que\s+(?:deseja|quer)\s+proteger|conhecer\s+mais\s+sobre\s+(?:a\s+)?prote[cç][aã]o|j[aá]\s+tem\s+(?:um\s+)?ve[ií]culo\s+em\s+mente\s+para\s+(?:cotar|proteger)|o\s+que\s+(?:voc[eê]\s+)?busca\s+para\s+(?:o\s+)?seu\s+ve[ií]culo)\b/i;
+const UNSUPPORTED_VALUE_PROMISE = /\bproposta\s+(?:justa|ideal|vantajosa)\b/i;
+const GENERIC_PROCESS_PIVOT = /\bgostaria\s+de\s+(?:saber|conhecer)\s+mais\s+sobre\s+como\s+funciona\s+(?:o\s+processo|(?:a\s+|nossa\s+|a\s+nossa\s+)?prote[cç][aã]o|(?:o\s+nosso\s+|nosso\s+)?(?:sistema\s+de\s+(?:mutualismo|prote[cç][aã]o)|mutualismo|associa[cç][aã]o))\b/i;
+const GENERIC_OBJECTION_FOLLOWUP = /\b(?:gostaria\s+de\s+conhecer\s+mais\s+sobre\s+(?:a\s+|nossa\s+)?estrutura|(?:existe\s+)?alguma?\s+outra\s+d[uú]vida[^?]{0,80}\bfuncionamento|existe\s+algum\s+outro\s+ponto[^?]{0,80}\besclarecer|para\s+que\s+(?:eu\s+possa|voc[eê])[^?]{0,120}\bgostaria)\b/i;
+const GENERIC_FACTUAL_FOLLOWUP = /\b(?:gostaria\s+de\s+saber(?:\s+mais)?|posso\s+te\s+ajudar|como\s+posso\s+te\s+ajudar|precisa\s+de\s+ajuda)\b[^?]{0,100}\b(?:outros?\s+benef[ií]cios?|outras?\s+d[uú]vidas?|mais\s+alguma\s+d[uú]vida|outras?\s+informa[cç][oõ]es?|o\s+que\s+est[aá]\s+inclu[ií]do|nossas?\s+coberturas?|algo\s+mais)\b/i;
+const UNSUPPORTED_PERIOD_RATIONALE = /(?:esse|o)\s+per[ií]odo[^.!?]{0,45}\s+[eé]\s+necess[aá]rio/i;
+const UNSUPPORTED_PROCESS_NECESSITY = /\bprocesso[^.!?]{0,60}\s+(?:[eé]|parece)\s+(?:essencial|necess[aá]rio|indispens[aá]vel)\b/i;
+const IRRELEVANT_VEHICLE_PIVOT = /\b(?:ve[ií]culo|carro|moto|uso\s+profissional|passeio)\b[^.!?]*\?/i;
+const UNREQUESTED_VEHICLE_DATA_REQUEST = /\b(?:informe|informar|me passe|pode passar|diga|envie)\b[^.!?]{0,100}\bmodelo\b[^.!?]{0,50}\bano\b/i;
+const ARTIFICIAL_ADDRESS = /\b(?:senhor|senhora)\s*\(a\)/i;
+const DUPLICATE_PUNCTUATION = /[.!?]\s*[,.]+/;
+const UNSUPPORTED_OBJECTION_RATIONALE = /\b(?:cota[cç][aã]o\s+[eé]\s+personalizada|sem\s+compromisso|(?:prezamos|valorizamos|priorizamos)\s+(?:pela|a)\s+(?:transpar[eê]ncia|seguran[cç]a|qualidade)|(?:cota\s+de\s+participa[cç][aã]o|car[eê]ncia|regra|processo)[^.!?]{0,90}(?:equil[ií]brio|sustentabilidade)|visando\s+(?:a\s+)?(?:seguran[cç]a|agilidade|transpar[eê]ncia))\b/i;
+const UNSUPPORTED_COTA_PURPOSE = /\bcota\s+de\s+participa[cç][aã]o[^.!?]{0,100}\b(?:fundamental|garant\w*|suporte)\b/i;
+const COMPOUND_QUESTION = /(?:(?:posso|quer\s+que\s+eu|gostaria\s+que\s+eu|voc[eê]\s+gostaria)[^?]{0,160}\s+ou\s+(?:voc[eê]\s+)?(?:prefere|quer|gostaria)|(?:ficou|est[aá])[^?]{0,100}\s+ou\s+(?:voc[eê]\s+)?(?:gostaria|quer|prefere)|(?:gostaria\s+de\s+(?:entender|saber|esclarecer))[^?]{0,130}\s+ou\s+(?:voc[eê]\s+)?(?:prefere|quer|gostaria)|(?:o\s+que|qual|como)[^?]{0,130}\s+ou\s+(?:existe|tem|h[aá]|gostaria))[^?]*\?/i;
+const COMPOUND_NEXT_STEP = /\bou,?\s+se\s+preferir,?\s+posso[^.!?]{0,160}\bconsultor\b/i;
+const UNREQUESTED_COVERAGE_EXPANSION = /(?:^|[.!?]\s+)(?:al[eé]m\s+(?:disso|dele|dela),?\s+(?:tamb[eé]m\s+)?(?:cobrimos|oferecemos|inclu[ií]mos)|esse\s+benef[ií]cio[^.!?]{0,100}\btamb[eé]m\s+conta\s+com)/i;
+const UNBOUNDED_ASSISTANCE_CLAIM = /\b(?:sempre que precisar|quantas vezes quiser|sem limite)\b/i;
 
 export const CUSTOMER_AGENT_EVAL_SCENARIOS = [
   { name: 'saudacao', turns: [{ message: 'bom dia td bem?', intents: ['greeting'], actions: ['respond'] }] },
@@ -102,7 +128,30 @@ function countQuestions(value = '') {
   return (String(value).match(/\?/g) || []).length;
 }
 
-function validateTurn(turn, expected, previousReplies) {
+function hasRepeatedSentence(value = '') {
+  const sentences = String(value || '')
+    .split(/[.!?]+/)
+    .map((sentence) => sentence.toLowerCase().replace(/[^a-z0-9áéíóúâêôãõç\s]/gi, '').replace(/\s+/g, ' ').trim())
+    .filter((sentence) => sentence.length >= 18);
+  return new Set(sentences).size !== sentences.length;
+}
+
+function isBareObjectionAcknowledgement(turn = {}) {
+  if (turn.primaryIntent !== 'objection' || !['respond', 'clarify'].includes(turn.action)) return false;
+  const words = String(turn.reply || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .match(/[a-z0-9]+/g) || [];
+  const acknowledgementWords = new Set([
+    'a', 'ao', 'com', 'compreendo', 'entendo', 'essa', 'esse', 'faz', 'imagino', 'o',
+    'preocupacao', 'que', 'sentido', 'sua', 'voce',
+  ]);
+  return words.filter((word) => !acknowledgementWords.has(word)).length <= 1
+    && !String(turn.reply || '').includes('?');
+}
+
+export function validateEvaluationTurn(turn, expected = {}, previousReplies = new Set(), lead = {}) {
   const failures = [];
   const detected = [turn.primaryIntent, turn.secondaryIntent].filter((intent) => intent && intent !== 'none');
   if (expected.intents && !expected.intents.some((intent) => detected.includes(intent))) {
@@ -117,9 +166,66 @@ function validateTurn(turn, expected, previousReplies) {
   if (expected.mode && turn.mode !== expected.mode) failures.push(`modo ${turn.mode}; esperado ${expected.mode}`);
   if (expected.replyPattern && !expected.replyPattern.test(turn.reply)) failures.push('resposta nao tratou a duvida principal');
   if (expected.forbiddenReplyPattern && expected.forbiddenReplyPattern.test(turn.reply)) failures.push('resposta atribuiu a regra a parte errada');
+  for (const pattern of expected.requiredReplyPatterns || []) {
+    if (!pattern.test(turn.reply)) failures.push(`resposta sem requisito ${pattern}`);
+  }
+  for (const pattern of expected.forbiddenReplyPatterns || []) {
+    if (pattern.test(turn.reply)) failures.push(`resposta contem trecho proibido ${pattern}`);
+  }
   if (countQuestions(turn.reply) > 1) failures.push('mais de uma pergunta');
+  if (expected.mustAskExactlyOne && countQuestions(turn.reply) !== 1) failures.push('deveria fazer exatamente uma pergunta');
+  if (expected.questionUnlessHandoff
+    && !['handoff_sales', 'handoff_operational'].includes(turn.action)
+    && countQuestions(turn.reply) !== 1) {
+    failures.push('objecao ficou sem uma pergunta util');
+  }
+  if (expected.mustNotAsk && countQuestions(turn.reply) > 0) failures.push('fez pergunta quando deveria apenas responder');
   if (FORBIDDEN_TERMS.test(turn.reply)) failures.push('termo proibido');
   if (IMPOSSIBLE_PROMISES.some((pattern) => pattern.test(turn.reply))) failures.push('promessa operacional impossivel');
+  if (SEPARATE_TEAM_CLAIM.test(turn.reply)) failures.push('inventou equipe separada de atendimento');
+  if (UNSUPPORTED_DELIVERY_OFFER.test(turn.reply)) failures.push('ofereceu envio que o atendimento nao executa');
+  if (UNSUPPORTED_SALES_FLATTERY.test(turn.reply)) failures.push('usou elogio comercial artificial sem fonte');
+  if (PRESSURE_TACTIC.test(turn.reply)) failures.push('usou pressao ou urgencia artificial');
+  if (UNSUPPORTED_COMMERCIAL_CLAIM.test(turn.reply)) failures.push('inventou justificativa ou vantagem comercial');
+  if (UNSUPPORTED_VALUE_PROMISE.test(turn.reply)) failures.push('prometeu uma proposta favoravel sem fonte');
+  if (UNSUPPORTED_PERIOD_RATIONALE.test(turn.reply)) failures.push('inventou justificativa para o prazo');
+  if (UNSUPPORTED_PROCESS_NECESSITY.test(turn.reply)) failures.push('inventou necessidade do processo');
+  if (UNSUPPORTED_OBJECTION_RATIONALE.test(turn.reply)) failures.push('inventou justificativa para contornar a objecao');
+  if (UNSUPPORTED_COTA_PURPOSE.test(turn.reply)) failures.push('inventou finalidade para a cota de participacao');
+  if (UNBOUNDED_ASSISTANCE_CLAIM.test(turn.reply)) failures.push('prometeu uso de assistencia sem respeitar o limite');
+  if (COMPOUND_QUESTION.test(turn.reply)) failures.push('juntou duas perguntas em uma frase');
+  if (COMPOUND_NEXT_STEP.test(turn.reply)) failures.push('ofereceu dois proximos passos na mesma frase');
+  if (isBareObjectionAcknowledgement(turn)) failures.push('resposta apenas reconheceu a objecao sem trata-la');
+  if (expected.noGenericSalesPivot && (GENERIC_SALES_PIVOT.test(turn.reply) || GENERIC_PROCESS_PIVOT.test(turn.reply) || GENERIC_OBJECTION_FOLLOWUP.test(turn.reply) || GENERIC_FACTUAL_FOLLOWUP.test(turn.reply))) failures.push('desviou a resposta para uma pergunta comercial generica');
+  if (expected.noGenericSalesPivot && IRRELEVANT_VEHICLE_PIVOT.test(turn.reply)) failures.push('desviou a objecao para qualificacao de veiculo');
+  if (turn.action !== 'ask_model_year' && UNREQUESTED_VEHICLE_DATA_REQUEST.test(turn.reply)) failures.push('pediu modelo e ano fora da acao de qualificacao');
+  if (ARTIFICIAL_ADDRESS.test(turn.reply)) failures.push('usou tratamento artificial com genero entre parenteses');
+  if (DUPLICATE_PUNCTUATION.test(turn.reply)) failures.push('resposta com pontuacao duplicada');
+  if (/\p{Extended_Pictographic}/u.test(turn.reply)) failures.push('resposta com emoji desnecessario');
+  if (expected.noSalesPitch && SALES_PITCH.test(turn.reply)) failures.push('tentou vender em atendimento operacional');
+  if (expected.noUnrequestedCoverageList && UNREQUESTED_COVERAGE_EXPANSION.test(turn.reply)) failures.push('listou coberturas que nao foram perguntadas');
+  if (turn.reply.length > (expected.maxLength || 520)) failures.push('resposta longa demais');
+  if (/^[a-záéíóúâêôãõç]/.test(turn.reply)) failures.push('resposta inicia com minuscula');
+  if (/[.!?]\s+[a-záéíóúâêôãõç]/.test(turn.reply)) failures.push('frase apos pontuacao inicia com minuscula');
+  if (/R\$\s*\d+\.\s+\d{3}\b/.test(turn.reply)) failures.push('valor com formatacao quebrada');
+  if (hasRepeatedSentence(turn.reply)) failures.push('repetiu frase na mesma resposta');
+  if (turn.action === 'ask_model_year') {
+    const modelKnown = !!(lead.model || turn.extractedFacts?.vehicleModel);
+    const yearKnown = !!(lead.year || turn.extractedFacts?.vehicleYear);
+    const questionText = (turn.reply.match(/[^.!?]*\?/g) || []).join(' ');
+    if (!modelKnown && !/modelo/i.test(questionText)) failures.push('nao pediu o modelo que falta');
+    if (!yearKnown && !/ano/i.test(questionText)) failures.push('nao pediu o ano que falta');
+    if (modelKnown && /modelo/i.test(questionText)) failures.push('repetiu pedido de modelo ja respondido');
+    if (yearKnown && /ano/i.test(questionText)) failures.push('repetiu pedido de ano ja respondido');
+    if (countQuestions(turn.reply) !== 1) failures.push('coleta de modelo e ano sem uma pergunta unica');
+  }
+  if (['handoff_sales', 'handoff_operational'].includes(turn.action)) {
+    if (/\?/.test(turn.reply)) failures.push('encaminhamento perguntou em vez de confirmar');
+    if (!/(?:encaminh(?:ei|ado|ada)|passei|direcionei|consultor\s+(?:j[aá]\s+)?(?:recebeu|continuar[aá]|segue))/i.test(turn.reply)) failures.push('encaminhamento sem confirmacao clara ao cliente');
+    if (!String(turn.handoffSummary || '').trim()) failures.push('encaminhamento sem resumo para o consultor');
+  } else if (/encaminh(?:ei|ado)|consultor\s+(?:vai|continuar)/i.test(turn.reply)) {
+    failures.push('afirmou encaminhamento sem acao de handoff');
+  }
   if (['answered', 'partial'].includes(turn.answerStatus)
     && ['company_question', 'coverage_question', 'eligibility_question', 'sales_price_request'].includes(turn.primaryIntent)
     && turn.knowledgeIds.length === 0) {
@@ -136,11 +242,12 @@ function sleep(milliseconds) {
 function loadEvaluationConfig() {
   const saved = loadConfig();
   const forcedProvider = String(process.env.AI_EVAL_PROVIDER || '').trim().toLowerCase();
+  const forcedModel = String(process.env.AI_EVAL_MODEL || '').trim();
   if (!['gemini', 'groq'].includes(forcedProvider)) return resolveEffectiveAIConfig(saved);
   return resolveEffectiveAIConfig({
     ...saved,
     aiProvider: forcedProvider,
-    aiModel: getDefaultModel(forcedProvider),
+    aiModel: forcedModel || getDefaultModel(forcedProvider),
     geminiFallbackEnabled: false,
     groqKey: forcedProvider === 'gemini' ? '' : saved.groqKey,
     geminiKey: forcedProvider === 'groq' ? '' : saved.geminiKey,
@@ -149,11 +256,17 @@ function loadEvaluationConfig() {
 
 function getRateLimitDelay(error) {
   const message = String(error?.message || error || '');
-  if (!/\b429\b|rate.?limit|quota/i.test(message)) return 0;
-  const match = message.match(/try again in\s*([\d.]+)\s*(ms|s)/i);
-  if (!match) return 15_000;
-  const value = Number(match[1]);
-  return Math.ceil((match[2].toLowerCase() === 'ms' ? value : value * 1000) + 750);
+  const retryable = /\b429\b|rate.?limit|quota|resource_exhausted|\b503\b|high demand|unavailable|overloaded/i.test(message);
+  if (!retryable) return 0;
+  const maxWaitMs = Math.min(300_000, Math.max(1_000, Number(process.env.AI_EVAL_MAX_RETRY_WAIT_MS) || 60_000));
+  const compound = message.match(/try again in\s*(?:(\d+(?:\.\d+)?)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?/i);
+  if (compound && (compound[1] || compound[2])) {
+    const milliseconds = ((Number(compound[1]) || 0) * 60_000) + ((Number(compound[2]) || 0) * 1000);
+    return Math.min(maxWaitMs, Math.ceil(milliseconds + 750));
+  }
+  const milliseconds = message.match(/try again in\s*([\d.]+)\s*ms/i);
+  if (milliseconds) return Math.min(maxWaitMs, Math.ceil(Number(milliseconds[1]) + 750));
+  return Math.min(maxWaitMs, /\b503\b|high demand|unavailable|overloaded/i.test(message) ? 5_000 : 30_000);
 }
 
 async function runTurnWithRetry(args, print) {
@@ -181,7 +294,11 @@ export async function runCustomerAgentEvaluation({
   print = console.log,
 } = {}) {
   if (!config.hasEffectiveKey) throw new Error('Nenhuma chave de IA configurada para executar a avaliacao.');
-  const selected = scenarios.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(1, limit));
+  const nameFilter = String(process.env.AI_EVAL_FILTER || '').trim();
+  const filteredScenarios = nameFilter
+    ? scenarios.filter((scenario) => scenario.name.includes(nameFilter))
+    : scenarios;
+  const selected = filteredScenarios.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(1, limit));
   const results = [];
   const providerCounts = {};
 
@@ -197,7 +314,8 @@ export async function runCustomerAgentEvaluation({
     };
     lead.history = [...(scenario.lead?.history || [])];
     const previousReplies = new Set();
-    for (const expected of scenario.turns) {
+    for (let turnIndex = 0; turnIndex < scenario.turns.length; turnIndex += 1) {
+      const expected = scenario.turns[turnIndex];
       lead.history.push({ role: 'user', content: expected.message, ts: Date.now() });
       const userHistory = lead.history
         .filter((entry) => entry.role === 'user')
@@ -207,13 +325,14 @@ export async function runCustomerAgentEvaluation({
       const startedAt = Date.now();
       try {
         const turn = await runTurnWithRetry({ config, lead, message: expected.message }, print);
-        const failures = validateTurn(turn, expected, previousReplies);
+        const failures = validateEvaluationTurn(turn, expected, previousReplies, lead);
         applyCustomerAgentTurnToLead(lead, turn);
         lead.history.push({ role: 'assistant', content: turn.reply, ts: Date.now() });
         previousReplies.add(turn.reply.toLowerCase());
         providerCounts[turn.provider] = (providerCounts[turn.provider] || 0) + 1;
         const result = {
           scenario: scenario.name,
+          turnIndex,
           message: expected.message,
           reply: turn.reply,
           intent: turn.primaryIntent,
@@ -222,6 +341,9 @@ export async function runCustomerAgentEvaluation({
           mode: turn.mode,
           answerStatus: turn.answerStatus,
           knowledgeIds: turn.knowledgeIds,
+          extractedFacts: turn.extractedFacts,
+          handoffSummary: turn.handoffSummary,
+          memory: turn.memory,
           provider: turn.provider,
           model: turn.model,
           durationMs: Date.now() - startedAt,
@@ -241,12 +363,18 @@ export async function runCustomerAgentEvaluation({
         });
         print(`FAIL ${scenario.name}: erro do provedor - ${error.message}`);
       }
+      writeReport(buildEvaluationReport(selected, results, providerCounts, true));
       if (delayMs > 0) await sleep(delayMs);
     }
   }
 
+  return buildEvaluationReport(selected, results, providerCounts, false);
+}
+
+function buildEvaluationReport(selected = [], results = [], providerCounts = {}, inProgress = false) {
   const passed = results.filter((result) => result.passed).length;
   return {
+    inProgress,
     summary: {
       scenarios: selected.length,
       turns: results.length,
@@ -259,11 +387,27 @@ export async function runCustomerAgentEvaluation({
   };
 }
 
+function writeReport(report, reportPath = process.env.AI_EVAL_REPORT_PATH) {
+  if (!reportPath) return;
+  const absolutePath = path.resolve(reportPath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  const tempPath = `${absolutePath}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(report, null, 2)}\n`);
+  fs.renameSync(tempPath, absolutePath);
+}
+
 const invokedDirectly = process.argv[1]
   && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (invokedDirectly) {
-  const report = await runCustomerAgentEvaluation();
+  const suite = String(process.env.AI_EVAL_SUITE || 'baseline').trim().toLowerCase();
+  const scenarios = suite === 'quality'
+    ? CUSTOMER_AGENT_QUALITY_SCENARIOS
+    : suite === 'all'
+      ? [...CUSTOMER_AGENT_EVAL_SCENARIOS, ...CUSTOMER_AGENT_QUALITY_SCENARIOS]
+      : CUSTOMER_AGENT_EVAL_SCENARIOS;
+  const report = await runCustomerAgentEvaluation({ scenarios });
+  writeReport(report);
   console.log(`EVAL_SUMMARY ${JSON.stringify(report.summary)}`);
   if (process.env.AI_EVAL_FULL_REPORT === 'true') console.log(JSON.stringify(report, null, 2));
   if (report.summary.failed > 0) process.exitCode = 1;

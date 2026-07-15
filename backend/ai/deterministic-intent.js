@@ -17,10 +17,16 @@ const OPERATIONAL_INTENTS = new Set([
 ]);
 
 const INFORMATIVE_OPERATIONAL_PATTERNS = [
+  /\b(?:que|qual) dia\b.{0,25}\b(?:fecha|fechamento)\b.{0,20}\bboleto\b/,
   /\b(?:a protecao|o plano|a associacao)\b.{0,35}\b(?:tem|inclui|oferece|possui)\b.{0,25}\b(?:guincho|reboque|assistencia|chaveiro)\b/,
+  /\bassistencia\b.{0,35}\b(?:cobre|inclui|ajuda|oferece|tem)\b.{0,35}\b(?:pane seca|pane eletrica|gasolina|combustivel|pneu|chaveiro|guincho|reboque)\b/,
+  /\b(?:quantas vezes|com que frequencia|a cada quantos dias|toda semana|todo mes)\b.{0,35}\b(?:assistencia|guincho|reboque|chaveiro|socorro)\b|\b(?:posso|pode)\b.{0,25}\b(?:chamar|usar|acionar)\b.{0,25}\bassistencia\b.{0,25}\b(?:toda semana|todo mes|quantas vezes)\b/,
+  /\bquanto tempo\b.{0,35}\b(?:pagamento|indenizacao)\b.{0,25}\b(?:perda total|pt)\b/,
   /\bquantos?\s+km\b.{0,25}\b(?:guincho|reboque|assistencia)\b/,
   /\bqual (?:e |o )?(?:limite|distancia|quilometragem)\b.{0,25}\b(?:guincho|reboque|assistencia)\b/,
   /\bcomo funciona\b.{0,35}\b(?:assistencia|guincho|reboque|chaveiro|vistoria|revistoria)\b/,
+  /\b(?:zero km|veiculo novo)\b.{0,25}\b(?:precisa|exige|tem)\b.{0,20}\b(?:vistoria|revistoria)\b/,
+  /\b(?:vistoria|revistoria)\b.{0,20}\b(?:e obrigatoria|e exigida|precisa para (?:aderir|entrar))\b/,
   /\b(?:se|caso|quando) eu\b.{0,45}\b(?:bater|colidir|precisar|necessitar|for roubado|for furtado|tiver um evento)\b/,
   /\b(?:em caso de|quando acontece)\b.{0,35}\b(?:batida|colisao|roubo|furto|evento|pane)\b/,
   /\b(?:cobre|cobertura|protege)\b.{0,30}\b(?:roubo|furto|colisao|batida|alagamento|incendio)\b/,
@@ -47,7 +53,7 @@ const HUMAN_PATTERNS = [
   /\b(?:falar|chamar) com (?:um |uma )?(?:atendente|humano|pessoa|consultor|alguem)\b/,
   /\bme passa(?:r)? (?:para|pra) (?:um |uma )?(?:atendente|humano|pessoa|consultor)\b/,
   /\bnao quero (?:falar com )?(?:robo|bot)\b/,
-  /\b(?:preciso de ajuda|tenho um problema|estou com um problema|(?:quero|preciso) resolver (?:um |uma )?(?:problema|questao|situacao|caso|coisa))\b/,
+  /\b(?:tenho|estou com|quero resolver|preciso resolver) (?:um |uma )?(?:problema|questao|situacao|caso)\b.{0,20}\b(?:com voces|com vcs|na moove|no atendimento)\b/,
   /\b(?:chama|manda) alguem\b/,
 ];
 
@@ -161,6 +167,13 @@ function classifySingle(rawText = '') {
   const emotion = detectEmotion(normalized, rawText);
   if (!normalized) return makeResult('ambiguous', 'general_question', false, 'Mensagem sem texto.', emotion);
 
+  if (matchAny(normalized, [
+    /\b(?:ignore|desconsidere|esqueca)\b.{0,35}\b(?:regras?|instrucoes?|prompt|orientacoes?)\b/,
+    /\b(?:mostra|mostre|revele|envie)\b.{0,35}\b(?:instrucoes?|prompt|regras?)\b.{0,20}\b(?:internas?)?\b/,
+  ])) {
+    return makeResult('sales', 'other', true, 'Tentativa de alterar ou obter instrucoes internas.', emotion);
+  }
+
   const correctionClause = getLatestCorrectionClause(normalized);
   const correctionSalesIntent = correctionClause ? detectSalesIntent(correctionClause) : null;
   const salesIntent = detectSalesIntent(normalized);
@@ -178,6 +191,10 @@ function classifySingle(rawText = '') {
     /\b(?:boleto|pix) (?:da |de )?adesao\b/,
     /\bnao sou associado\b.{0,50}\b(?:boleto|pix|adesao)\b/,
   ]);
+  const salesConsultantRequest = matchAny(normalized, [
+    /\b(?:me passa|passa|quero falar|preciso falar|chama)\b.{0,35}\b(?:consultor|atendente|alguem|pessoa)\b.{0,35}\b(?:fechar|contratar|aderir|cotacao|orcamento)\b/,
+    /\b(?:consultor|atendente|alguem|pessoa)\b.{0,35}\b(?:fechar|contratar|aderir|cotacao|orcamento)\b/,
+  ]);
 
   if (matchAny(normalized, [
     /\bcancelar (?:a |essa |minha )?(?:cotacao|simulacao|proposta|orcamento)\b/,
@@ -190,12 +207,23 @@ function classifySingle(rawText = '') {
     return makeResult('sales', correctionSalesIntent || salesIntent || 'sales_quote', true, 'Pedido comercial explicito na mensagem mais recente.', emotion);
   }
 
+  if (salesConsultantRequest) {
+    return makeResult('sales', 'sales_consultant_requested', true, 'Cliente pediu consultor para concluir uma adesao.', emotion);
+  }
+
   if (isInformationalQuestion(normalized)) {
     return makeResult('sales', 'general_question', true, 'Pergunta informativa, sem pedido operacional atual.', emotion);
   }
 
   const active = stripNegatedOperationalMentions(normalized);
   const paymentText = active.replace(/\bnao (?:paguei|quitei|fiz (?:o )?pagamento|fiz pix)\b/g, ' ');
+
+  if (matchAny(active, [
+    /\b(?:consulta|consultar|consulte|verifica|verificar|confere|conferir|olha|checa)\b.{0,40}\b(?:cpf|cnpj|cadastro|sistema|situacao|protecao|plano)\b/,
+    /\b(?:cpf|cnpj|cadastro|sistema|situacao|protecao|plano)\b.{0,45}\b(?:consulta|consultar|consulte|verifica|verificar|confere|conferir|olha|checa)\b/,
+  ])) {
+    return makeResult('operational', 'system_check_request', true, 'Cliente pediu uma consulta de cadastro ou situacao que exige atendimento humano.', emotion);
+  }
 
   if (matchAny(active, EXPLICIT_HUMAN_PATTERNS)) {
     return makeResult('operational', 'human_requested', true, 'Cliente pediu atendimento humano.', emotion);
@@ -214,7 +242,9 @@ function classifySingle(rawText = '') {
     /\b(?:parou|quebrou) na estrada\b/,
     /\b(?:pane seca|pane na estrada|pneu furado|pneu furou|sem bateria|bateria acabou|bateria arriou)\b/,
     /\b(?:furei|furou) (?:o )?pneu\b/,
+    /\bpneu (?:estourou|estourado)\b.{0,35}\b(?:estrada|pista|parado|agora)\b/,
     /\bquebrei na estrada\b/,
+    /\b(?:to|estou|fiquei) engui[cç]ad[oa]\b/,
     /\b(?:ele|carro|moto|veiculo) (?:so )?parou\b/,
     /\b(?:tranquei|perdi) (?:a |as )?chave(?:s)?\b/,
     /\b(?:acabou|sem) (?:a )?(?:gasolina|combustivel)\b/,
@@ -277,6 +307,7 @@ function classifySingle(rawText = '') {
     /^pix(?: por favor)?$/,
     /\bmensalidade nao (?:chegou|veio|apareceu)\b/,
     /\bcancelar (?:esse |o )?boleto\b/,
+    /\b(?:trocar|alterar|mudar)\b.{0,25}\b(?:forma|meio) de pagamento\b/,
   ])) {
     return makeResult('operational', 'boleto_request', true, 'Pedido ou problema de boleto/pagamento.', emotion);
   }
@@ -288,6 +319,7 @@ function classifySingle(rawText = '') {
     /\bnao paguei(?: ainda)?\b/,
     /\b(?:quero|preciso) pagar (?:a |minha |uma )?mensalidade\b/,
     /\bcomo (?:faco para|faco pra|posso) pagar\b/,
+    /\b(?:onde|como|por onde) (?:eu )?(?:pago|pagar)\b.{0,25}\b(?:mensalidade|protecao|associacao)\b/,
   ])) {
     return makeResult('operational', 'regularization_request', true, 'Cliente quer resolver pendencia ou pagamento em aberto.', emotion);
   }

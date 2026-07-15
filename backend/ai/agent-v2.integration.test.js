@@ -11,16 +11,30 @@ process.env.APP_STORAGE_DIR = storageDir;
 process.env.SUPABASE_URL = '';
 process.env.SUPABASE_ANON_KEY = '';
 
-fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
-  aiEnabled: true,
-  customerAgentV2Enabled: true,
-  aiProvider: 'groq',
-  aiModel: 'openai/gpt-oss-120b',
-  groqKey: 'test-key',
-  businessHoursStart: '00:00',
-  businessHoursEnd: '23:59',
-  consultors: [],
-}, null, 2));
+const consultant = {
+  name: 'Consultor Chefe',
+  number: '5521999990000',
+  phone: '5521999990000',
+  active: true,
+  receive_sales: true,
+  receive_support: true,
+};
+
+function writeConfig(overrides = {}) {
+  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
+    aiEnabled: true,
+    customerAgentV2Enabled: true,
+    aiProvider: 'groq',
+    aiModel: 'openai/gpt-oss-120b',
+    groqKey: 'test-key',
+    businessHoursStart: '00:00',
+    businessHoursEnd: '23:59',
+    consultors: [],
+    ...overrides,
+  }, null, 2));
+}
+
+writeConfig();
 
 const { handleIncomingMessage } = await import('./agent.js');
 const { getLead } = await import('../data/leads-manager.js');
@@ -65,6 +79,11 @@ async function waitFor(check, timeoutMs = 8_000) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error('Tempo esgotado aguardando processamento do agente v2.');
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 after(() => {
@@ -126,5 +145,110 @@ test('uses one structured AI call and sends its grounded answer through the real
     assert.equal(lead.aiMemory.customerGoal, 'tirar dúvida sobre granizo e cotar');
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test('answers immediately with the safe path instead of retrying the legacy pipeline when every model fails', async () => {
+  const originalFetch = global.fetch;
+  let fetchCalls = 0;
+  global.fetch = async () => {
+    fetchCalls += 1;
+    throw new TypeError('fetch failed');
+  };
+
+  try {
+    const phone = '5511987654992';
+    const wa = new MockWhatsApp();
+    await handleIncomingMessage(wa, textMessage(phone, 'quero fazer uma cotacao'));
+    await waitFor(() => wa.messages.length > 0);
+
+    assert.equal(fetchCalls, 4, 'deve tentar somente os quatro modelos Groq configurados');
+    assert.equal(wa.messages.length, 1);
+    assert.match(wa.messages[0].message, /modelo e o ano do ve.culo/i);
+
+    const lead = getLead(phone);
+    assert.equal(lead.aiArchitecture, 'customer-agent-v2');
+    assert.equal(lead.aiProviderLastUsed, 'fallback');
+    assert.equal(lead.aiModelLastUsed, 'deterministic-provider-outage');
+    assert.equal(lead.lastIntent, 'sales_quote');
+    assert.equal(lead.operationalStatus, 'ask_model_year');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('keeps an urgent assistance request on the operational handoff path without depending on an AI provider', async () => {
+  const originalFetch = global.fetch;
+  let fetchCalls = 0;
+  writeConfig({ consultorDistribution: 'first', consultors: [consultant] });
+  global.fetch = async () => {
+    fetchCalls += 1;
+    throw new TypeError('fetch failed');
+  };
+
+  try {
+    const phone = '5511987654993';
+    const wa = new MockWhatsApp();
+    await handleIncomingMessage(wa, textMessage(phone, 'meu carro parou na estrada preciso de reboque'));
+    await waitFor(() => wa.messages.length >= 2);
+
+    assert.equal(fetchCalls, 0, 'a barreira crítica deve encaminhar antes de chamar qualquer modelo');
+    assert.equal(wa.messages[0].target, consultant.phone);
+    assert.match(wa.messages[0].message, /reboque|assist.ncia/i);
+    assert.equal(wa.messages[1].target, phone);
+    assert.match(wa.messages[1].message, /encaminhei/i);
+    assert.doesNotMatch(wa.messages[1].message, /a caminho|foi acionado/i);
+
+    const lead = getLead(phone);
+    assert.equal(lead.lastIntent, 'assistance_request');
+    assert.equal(lead.conversationMode, 'operational');
+    assert.equal(lead.handoffClientConfirmed, true);
+  } finally {
+    global.fetch = originalFetch;
+    writeConfig();
+  }
+});
+
+test('keeps the conversation responsive when no AI key is configured', async () => {
+  const originalFetch = global.fetch;
+  const originalGroqKey = process.env.GROQ_API_KEY;
+  const originalGroqKeyAlias = process.env.GROQ_KEY;
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+  const originalGeminiKeyAlias = process.env.GEMINI_KEY;
+  const originalGoogleKey = process.env.GOOGLE_API_KEY;
+  let fetchCalls = 0;
+  writeConfig({ groqKey: '', geminiKey: '' });
+  process.env.GROQ_API_KEY = '';
+  process.env.GROQ_KEY = '';
+  process.env.GEMINI_API_KEY = '';
+  process.env.GEMINI_KEY = '';
+  process.env.GOOGLE_API_KEY = '';
+  global.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error('network should not be called without a key');
+  };
+
+  try {
+    const phone = '5511987654994';
+    const wa = new MockWhatsApp();
+    await handleIncomingMessage(wa, textMessage(phone, 'bom dia'));
+    await waitFor(() => wa.messages.length > 0);
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(wa.messages.length, 1);
+    assert.match(wa.messages[0].message, /como posso te ajudar/i);
+    assert.equal((wa.messages[0].message.match(/\?/g) || []).length, 1);
+
+    const lead = getLead(phone);
+    assert.equal(lead.aiProviderLastUsed, 'fallback');
+    assert.equal(lead.lastIntent, 'greeting');
+  } finally {
+    global.fetch = originalFetch;
+    restoreEnv('GROQ_API_KEY', originalGroqKey);
+    restoreEnv('GROQ_KEY', originalGroqKeyAlias);
+    restoreEnv('GEMINI_API_KEY', originalGeminiKey);
+    restoreEnv('GEMINI_KEY', originalGeminiKeyAlias);
+    restoreEnv('GOOGLE_API_KEY', originalGoogleKey);
+    writeConfig();
   }
 });

@@ -59,6 +59,7 @@ test('sends a strict JSON schema to supported Groq models', async () => {
     assert.equal(requests[0].response_format.json_schema.schema.type, 'object');
     assert.equal(requests[0].response_format.json_schema.schema.additionalProperties, false);
     assert.equal(requests[0].reasoning_effort, 'low');
+    assert.equal(requests[0].max_tokens, 650);
   } finally {
     global.fetch = originalFetch;
   }
@@ -123,6 +124,34 @@ test('falls back when a Groq model cannot satisfy the strict response schema', a
   }
 });
 
+test('salvages a nearly valid strict-schema generation for the local validator', async () => {
+  const originalFetch = global.fetch;
+  const partial = '{"reply":"Posso ajudar.","primaryIntent":"other"}';
+  global.fetch = async () => response({
+    ok: false,
+    status: 400,
+    payload: {
+      error: {
+        code: 'json_validate_failed',
+        message: 'output does not match the expected schema',
+        failed_generation: partial,
+      },
+    },
+  });
+  try {
+    const result = await callAI(config(), context, {
+      purpose: 'customer_agent',
+      responseSchema: RESPONSE_SCHEMA,
+      returnMetadata: true,
+    });
+
+    assert.equal(result.text, partial);
+    assert.equal(result.model, 'openai/gpt-oss-120b');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('uses Qwen as the third free Groq layer and keeps JSON mode', async () => {
   const originalFetch = global.fetch;
   const requests = [];
@@ -149,6 +178,37 @@ test('uses Qwen as the third free Groq layer and keeps JSON mode', async () => {
     assert.equal(requests[2].response_format.type, 'json_object');
     assert.equal(requests[2].reasoning_effort, 'none');
     assert.equal(result.model, 'qwen/qwen3.6-27b');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('uses Llama 70B as the fourth free Groq layer', async () => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    if (requests.length < 4) {
+      return response({ ok: false, status: 429, payload: { error: { message: 'rate limit reached' } } });
+    }
+    return groqSuccess();
+  };
+  try {
+    const result = await callAI(config(), context, {
+      purpose: 'customer_agent',
+      responseSchema: RESPONSE_SCHEMA,
+      returnMetadata: true,
+    });
+
+    assert.deepEqual(requests.map((request) => request.model), [
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'qwen/qwen3.6-27b',
+      'llama-3.3-70b-versatile',
+    ]);
+    assert.equal(requests[3].response_format.type, 'json_object');
+    assert.equal(result.model, 'llama-3.3-70b-versatile');
   } finally {
     global.fetch = originalFetch;
   }

@@ -6,7 +6,13 @@
 import { getDefaultModel, resolveEffectiveAIConfig } from '../data/config-manager.js';
 
 const GEMINI_RATE_LIMIT_COOLDOWN_MS = 65_000;
-const GROQ_BACKUP_MODELS = ['openai/gpt-oss-20b', 'qwen/qwen3.6-27b'];
+const GROQ_BACKUP_MODELS = [
+  'openai/gpt-oss-20b',
+  'qwen/qwen3.6-27b',
+  'llama-3.3-70b-versatile',
+];
+const GEMINI_BACKUP_MODELS = ['gemini-3.1-flash-lite'];
+const AI_REQUEST_TIMEOUT_MS = Math.min(120_000, Math.max(5_000, Number(process.env.AI_REQUEST_TIMEOUT_MS) || 30_000));
 let geminiCooldownUntil = 0;
 
 function shortProviderError(error) {
@@ -19,7 +25,14 @@ function isRateLimitError(error) {
 
 function shouldTryGroqBackup(error) {
   return isRateLimitError(error)
-    || /model.{0,80}(?:not found|decommission|deprecated|permission|unavailable)|json_validate_failed|does not match the expected schema|failed_generation|\b404\b|\b403\b/i.test(String(error?.message || error || ''));
+    || /model.{0,80}(?:not found|decommission|deprecated|permission|unavailable)|json_validate_failed|does not match the expected schema|failed_generation|timeout|timed out|abort(?:ed|error)?|fetch failed|\b404\b|\b403\b/i.test(String(error?.message || error || ''));
+}
+
+function shouldTryGeminiBackup(error) {
+  return isRateLimitError(error)
+    || /\b(?:404|500|502|503|504)\b|not found|no longer available|unavailable|high demand|overloaded|resource_exhausted|internal error|timeout|timed out|abort(?:ed|error)?/i.test(
+      String(error?.message || error || ''),
+    );
 }
 
 function resolveModel(config, purpose = 'reply') {
@@ -50,7 +63,7 @@ function resolveGenerationSettings(options = {}) {
       jsonMode: true,
       temperature: purpose === 'customer_agent' ? 0.35 : 0.15,
       topP: purpose === 'customer_agent' ? 0.7 : 0.4,
-      maxTokens: purpose === 'customer_agent' ? 750 : purpose === 'decision' ? 512 : 300,
+      maxTokens: purpose === 'customer_agent' ? 650 : purpose === 'decision' ? 512 : 300,
     };
   }
 
@@ -143,10 +156,24 @@ async function callGroq(apiKey, { systemPrompt, history = [], userMessage }, opt
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(AI_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
+    let errorPayload = null;
+    try {
+      errorPayload = JSON.parse(errorText);
+    } catch {
+      errorPayload = null;
+    }
+    const failedGeneration = errorPayload?.error?.failed_generation;
+    if (response.status === 400
+      && errorPayload?.error?.code === 'json_validate_failed'
+      && typeof failedGeneration === 'string'
+      && /^\s*\{/.test(failedGeneration)) {
+      return failedGeneration.trim();
+    }
     const retryAfter = response.headers.get('retry-after');
     throw new Error(`Groq ${response.status}: ${errorText}${retryAfter ? ` Retry after ${retryAfter}s.` : ''}`);
   }
@@ -183,6 +210,7 @@ async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
         messages: [{ role: 'user', content: 'Responda apenas: OK' }],
         max_tokens: 10,
       }),
+      signal: AbortSignal.timeout(AI_REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -201,12 +229,22 @@ async function testGroqKey(apiKey, model = getDefaultModel('groq')) {
 async function callGemini(apiKey, { systemPrompt, history = [], userMessage }, options = {}) {
   const { GoogleGenAI } = await import('@google/genai');
   const settings = resolveGenerationSettings(options);
+  const model = String(options.model || '');
   const generationConfig = {
     temperature: settings.temperature,
     topP: settings.topP,
-    maxOutputTokens: settings.maxTokens,
+    maxOutputTokens: options.purpose === 'customer_agent'
+      ? Math.max(settings.maxTokens, 1200)
+      : settings.maxTokens,
     systemInstruction: systemPrompt,
+    httpOptions: { timeout: AI_REQUEST_TIMEOUT_MS },
   };
+
+  if (options.purpose === 'customer_agent') {
+    generationConfig.thinkingConfig = /^gemini-3/i.test(model)
+      ? { thinkingLevel: 'MINIMAL', includeThoughts: false }
+      : { thinkingBudget: 0, includeThoughts: false };
+  }
 
   if (settings.jsonMode) {
     generationConfig.responseMimeType = 'application/json';
@@ -222,11 +260,29 @@ async function callGemini(apiKey, { systemPrompt, history = [], userMessage }, o
     { role: 'user', parts: [{ text: userMessage }] },
   ];
   const response = await ai.models.generateContent({
-    model: options.model,
+    model,
     contents,
     config: generationConfig,
   });
   return String(response.text || '').trim();
+}
+
+async function callGeminiResilient(apiKey, context, options = {}) {
+  const models = [...new Set([options.model, ...GEMINI_BACKUP_MODELS].filter(Boolean))];
+  let lastError = null;
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+    try {
+      const text = await callGemini(apiKey, context, { ...options, model });
+      return { text, model };
+    } catch (error) {
+      lastError = error;
+      const nextModel = models[index + 1];
+      if (!nextModel || !shouldTryGeminiBackup(error)) throw error;
+      console.warn(`[AI] Gemini model ${model} unavailable; using ${nextModel}: ${shortProviderError(error)}`);
+    }
+  }
+  throw lastError;
 }
 
 async function testGeminiKey(apiKey, model = getDefaultModel('gemini')) {
@@ -236,7 +292,7 @@ async function testGeminiKey(apiKey, model = getDefaultModel('gemini')) {
     const response = await ai.models.generateContent({
       model,
       contents: 'Responda so com: OK',
-      config: { maxOutputTokens: 10, temperature: 0 },
+      config: { maxOutputTokens: 10, temperature: 0, httpOptions: { timeout: AI_REQUEST_TIMEOUT_MS } },
     });
     return { ok: true, message: `Gemini OK - ${model} ativo! (${String(response.text || '').trim()})` };
   } catch (error) {
@@ -268,8 +324,12 @@ export async function callAI(config, context, options = {}) {
     }
 
     try {
-      const text = await callGemini(effective.effectiveGeminiKey, context, { ...options, model, purpose });
-      return formatCallResult(text, 'gemini', model, options);
+      const result = await callGeminiResilient(
+        effective.effectiveGeminiKey,
+        context,
+        { ...options, model, purpose },
+      );
+      return formatCallResult(result.text, 'gemini', result.model, options);
     } catch (error) {
       if (!effective.effectiveGroqKey) throw error;
 
@@ -295,12 +355,12 @@ export async function callAI(config, context, options = {}) {
     if (effective.geminiFallbackEnabled && effective.effectiveGeminiKey) {
       console.warn(`[AI] Groq failed for ${purpose}; using Gemini fallback: ${error.message}`);
       const fallbackModel = getDefaultModel('gemini');
-      const text = await callGemini(effective.effectiveGeminiKey, context, {
+      const result = await callGeminiResilient(effective.effectiveGeminiKey, context, {
         ...options,
         model: fallbackModel,
         purpose,
       });
-      return formatCallResult(text, 'gemini', fallbackModel, options);
+      return formatCallResult(result.text, 'gemini', result.model, options);
     }
     throw error;
   }
