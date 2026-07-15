@@ -10,7 +10,15 @@ import MessageQueue from './queue.js';
 import { handleIncomingMessage } from './ai/agent.js';
 import { startFollowUpCron } from './ai/follow-up.js';
 import { startDailyReportCron } from './ai/daily-report.js';
-import { loadConfig, saveConfig, resolveEffectiveAIConfig, maskSecret } from './data/config-manager.js';
+import {
+  getAIModelCatalog,
+  isSupportedAIModel,
+  loadConfig,
+  maskSecret,
+  resolveEffectiveAIConfig,
+  sanitizeAIConfigUpdates,
+  saveConfig,
+} from './data/config-manager.js';
 import {
   addInternalNote,
   bulkUpdateLeads,
@@ -107,6 +115,7 @@ function buildSafeAIConfig() {
     effectiveProvider: effective.effectiveProvider,
     effectiveAiModel: effective.effectiveAiModel,
     effectiveQualificationModel: effective.effectiveQualificationModel,
+    effectiveClassificationModel: effective.effectiveClassificationModel,
     groqKeySource: effective.groqKeySource,
     geminiKeySource: effective.geminiKeySource,
     hasEffectiveGroqKey: effective.hasEffectiveGroqKey,
@@ -116,6 +125,7 @@ function buildSafeAIConfig() {
     effectiveKeyMasked: maskSecret(effective.effectiveKey),
     effectiveGroqKeyMasked: maskSecret(effective.effectiveGroqKey),
     effectiveGeminiKeyMasked: maskSecret(effective.effectiveGeminiKey),
+    modelCatalog: getAIModelCatalog(),
   };
 
   return safeConfig;
@@ -658,12 +668,15 @@ app.get('/api/ai/config', (req, res) => res.json(buildSafeAIConfig()));
 
 app.post('/api/ai/config', (req, res) => {
   try {
-    const updates = { ...req.body };
-    if (typeof updates.groqKey === 'string' && !updates.groqKey.trim()) delete updates.groqKey;
-    if (typeof updates.geminiKey === 'string' && !updates.geminiKey.trim()) delete updates.geminiKey;
+    const current = loadConfig();
+    const updates = sanitizeAIConfigUpdates(req.body, current);
+    const prospective = resolveEffectiveAIConfig({ ...current, ...updates });
+    if (prospective.aiEnabled && !prospective.hasEffectiveKey) {
+      return res.status(400).json({ error: 'Cadastre uma chave valida para o provedor principal antes de ativar o agente.' });
+    }
     saveConfig(updates);
 
-    const enabled = updates.aiEnabled ?? loadConfig().aiEnabled;
+    const enabled = prospective.aiEnabled;
     wss.clients.forEach((client) => {
       if (client.readyState === 1) {
         client.send(JSON.stringify({ type: 'ai_status', enabled }));
@@ -671,20 +684,27 @@ app.post('/api/ai/config', (req, res) => {
     });
 
     systemStatus.emitSnapshot();
-    res.json({ success: true });
+    res.json({ success: true, config: buildSafeAIConfig() });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const status = error instanceof TypeError ? 400 : 500;
+    res.status(status).json({ error: error.message });
   }
 });
 
 app.post('/api/ai/test-key', async (req, res) => {
   const { key, provider, model } = req.body || {};
   const config = loadConfig();
-  const selectedProvider = provider || config.aiProvider || 'groq';
+  const selectedProvider = String(provider || config.aiProvider || 'groq').trim();
+  if (!['groq', 'gemini'].includes(selectedProvider)) {
+    return res.status(400).json({ error: 'Provedor de IA invalido.' });
+  }
+  if (model && !isSupportedAIModel(selectedProvider, model)) {
+    return res.status(400).json({ error: 'Modelo indisponivel para o provedor selecionado.' });
+  }
   const effective = resolveEffectiveAIConfig({
     ...config,
     aiProvider: selectedProvider,
-    aiModel: model || config.aiModel,
+    aiModel: model || (selectedProvider === config.aiProvider ? config.aiModel : ''),
   });
 
   const resolvedKey = String(key || '').trim()
@@ -1091,7 +1111,7 @@ app.delete('/api/leads/:number', leadsAccess.mutation, async (req, res) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log('\n===================================');
-  console.log('       ZapBot Pro v2.0');
+  console.log('       MoOve IA');
   console.log('===================================');
   console.log(`\nAcesse: http://localhost:${PORT}`);
   console.log('Aguardando conexao WhatsApp...');

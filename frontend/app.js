@@ -1,5 +1,5 @@
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-   ZapBot Pro â€” Frontend Logic
+   MoOve IA â€” Frontend Logic
    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -83,8 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initWebSocket();
   window.renderAdResearchShell?.();
-  const groqRadioDesc = document.querySelector('#radio-groq .radio-desc');
-  if (groqRadioDesc) groqRadioDesc.textContent = 'Llama 3.3 70B - rapido e pronto para uso';
   renderEmojiGrid();
   initReactions();
   updateEstimate();
@@ -110,7 +108,7 @@ function initWebSocket() {
 
   ws.onopen = () => {
     state.wsRetry = 0;
-    appendLog('info', 'ðŸ”Œ Conectado ao servidor ZapBot Pro.');
+    appendLog('info', 'Conectado ao servidor MoOve IA.');
   };
 
   ws.onmessage = (e) => {
@@ -2147,357 +2145,504 @@ function getAdResearchEmptyStateMessage() {
 }
 
 let aiConfig = {};
-let consultorCount = 0;
+let aiConfigSnapshot = '';
+let aiConfigLoading = false;
+let aiConfigDirty = false;
+let aiSettingsInitialized = false;
+const aiPendingKeyClears = { groq: false, gemini: false };
 const AI_PROVIDER_DEFAULTS = {
   groq: 'openai/gpt-oss-120b',
   gemini: 'gemini-2.5-flash',
 };
+const AI_FALLBACK_MODEL_CATALOG = {
+  groq: [
+    { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B', description: 'Melhor qualidade para atendimento e raciocinio.' },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B', description: 'Mais rapido para tarefas simples e classificacao.' },
+    { id: 'qwen/qwen3.6-27b', label: 'Qwen 3.6 27B', description: 'Alternativa equilibrada para conversa.' },
+    { id: 'qwen/qwen3-32b', label: 'Qwen 3 32B', description: 'Alternativa com suporte a JSON.' },
+  ],
+  gemini: [
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Modelo estavel usado atualmente.' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', description: 'Mais leve para alto volume.' },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', description: 'Modelo rapido da geracao Gemini 3.' },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', description: 'Modelo Flash estavel mais recente.' },
+  ],
+};
+
+function aiElement(id) {
+  return document.getElementById(id);
+}
 
 function getProviderDefaultModel(provider = 'groq') {
   return AI_PROVIDER_DEFAULTS[provider] || AI_PROVIDER_DEFAULTS.groq;
 }
 
-function updateKeyField(inputId, statusId, hasSavedKey, maskedKey, defaultPlaceholder, effectiveInfo = {}) {
-  const input = document.getElementById(inputId);
-  const status = document.getElementById(statusId);
-  if (!input) return;
-
-  input.value = '';
-  input.placeholder = hasSavedKey && maskedKey ? maskedKey : defaultPlaceholder;
-
-  if (status) {
-    if (hasSavedKey) {
-      status.textContent = `Chave salva: ${maskedKey || 'preenchida'}. Deixe em branco para manter.`;
-      return;
-    }
-
-    if (effectiveInfo.hasEffectiveKey) {
-      const sourceLabel = effectiveInfo.keySource === 'default'
-        ? 'padrao'
-        : effectiveInfo.keySource === 'env'
-          ? 'env'
-          : effectiveInfo.keySource || 'ativa';
-      status.textContent = `Sem chave salva. Chave efetiva ativa via ${sourceLabel}.`;
-      return;
-    }
-
-    status.textContent = 'Nenhuma chave efetiva disponivel ainda.';
-  }
+function getAIProvider() {
+  return document.querySelector('input[name="ai-provider"]:checked')?.value || aiConfig.aiProvider || 'groq';
 }
 
-function updateModelFields(provider, resetValues = true) {
-  const mainInput = document.getElementById('ai-model');
-  const qualificationInput = document.getElementById('qualification-model');
-  const mainHint = document.getElementById('ai-model-hint');
-  const qualificationHint = document.getElementById('qualification-model-hint');
-  const defaultModel = getProviderDefaultModel(provider);
+function getAIModels(provider = getAIProvider()) {
+  const models = aiConfig.modelCatalog?.[provider];
+  return Array.isArray(models) && models.length ? models : AI_FALLBACK_MODEL_CATALOG[provider] || [];
+}
 
-  if (mainInput) {
-    mainInput.placeholder = defaultModel;
-    if (resetValues) mainInput.value = defaultModel;
-  }
+function sourceLabel(source = 'missing') {
+  return ({ saved: 'salva no painel', env: 'servidor', default: 'padrao interno', missing: 'ausente' })[source] || source;
+}
 
-  if (qualificationInput) {
-    qualificationInput.placeholder = 'Em branco = usar o modelo principal';
-    if (resetValues) qualificationInput.value = '';
-  }
+function showAISettingsSection(section) {
+  document.querySelectorAll('.ai-settings-nav [data-ai-section]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.aiSection === section);
+  });
+  document.querySelectorAll('.ai-settings-panel[data-ai-panel]').forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.aiPanel === section);
+  });
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
+}
 
-  if (mainHint) {
-    mainHint.textContent = `Se deixar no padrao, usamos ${defaultModel}. Voce pode informar qualquer ID valido do ${provider === 'gemini' ? 'Gemini' : 'Groq'}.`;
+function populateAIModelSelect(element, provider, selectedValue = '', inheritLabel = '') {
+  if (!element) return;
+  const options = [];
+  if (inheritLabel) options.push(`<option value="">${inheritLabel}</option>`);
+  const models = getAIModels(provider);
+  options.push(...models.map((model) => `<option value="${escapeAttr(model.id)}">${escapeHtml(model.label)} - ${escapeHtml(model.id)}</option>`));
+  if (selectedValue && !models.some((model) => model.id === selectedValue)) {
+    options.push(`<option value="${escapeAttr(selectedValue)}">Modelo atual - ${escapeHtml(selectedValue)}</option>`);
   }
+  element.innerHTML = options.join('');
+  element.value = selectedValue || '';
+  if (!element.value && !inheritLabel) element.value = getProviderDefaultModel(provider);
+}
 
-  if (qualificationHint) {
-    qualificationHint.textContent = 'Deixe em branco para reaproveitar o modelo principal. Preencha somente se quiser um modelo separado para extracao e qualificacao.';
+function updateModelFields(provider, resetValues = true, values = {}) {
+  const main = aiElement('ai-model');
+  const qualification = aiElement('qualification-model');
+  const classification = aiElement('classification-model');
+  const mainValue = resetValues ? getProviderDefaultModel(provider) : values.main ?? main?.value ?? getProviderDefaultModel(provider);
+  const qualificationValue = resetValues ? '' : values.qualification ?? qualification?.value ?? '';
+  const classificationValue = resetValues ? '' : values.classification ?? classification?.value ?? '';
+
+  populateAIModelSelect(main, provider, mainValue);
+  populateAIModelSelect(qualification, provider, qualificationValue, 'Herdar modelo principal');
+  populateAIModelSelect(classification, provider, classificationValue, 'Herdar modelo de qualificacao');
+
+  const currentModel = getAIModels(provider).find((model) => model.id === main?.value);
+  const hint = aiElement('ai-model-hint');
+  if (hint) hint.textContent = currentModel?.description || 'Modelo usado para responder ao cliente.';
+  aiElement('ai-gemini-fallback-row')?.classList.toggle('hidden', provider !== 'groq');
+  renderAIEffectiveSummary();
+}
+
+function switchAIProvider(provider, markDirty = true) {
+  const radio = document.querySelector(`input[name="ai-provider"][value="${provider}"]`);
+  if (radio) radio.checked = true;
+  updateModelFields(provider, markDirty);
+  if (markDirty) markAIConfigDirty();
+}
+
+function updateKeyField(provider) {
+  const isGroq = provider === 'groq';
+  const title = isGroq ? 'Groq' : 'Gemini';
+  const input = aiElement(isGroq ? 'ai-groq-key' : 'ai-gemini-key');
+  const status = aiElement(isGroq ? 'groq-key-status' : 'gemini-key-status');
+  const clearButton = aiElement(isGroq ? 'btn-clear-groq-key' : 'btn-clear-gemini-key');
+  const hasSavedKey = !!aiConfig[isGroq ? 'hasGroqKey' : 'hasGeminiKey'];
+  const hasEffectiveKey = !!aiConfig[isGroq ? 'hasEffectiveGroqKey' : 'hasEffectiveGeminiKey'];
+  const source = aiConfig[isGroq ? 'groqKeySource' : 'geminiKeySource'] || 'missing';
+  const masked = aiConfig[isGroq ? 'effectiveGroqKeyMasked' : 'effectiveGeminiKeyMasked'] || '';
+
+  if (input) {
+    input.value = '';
+    input.type = 'password';
+    input.placeholder = hasEffectiveKey ? masked || `${title} configurado` : isGroq ? 'gsk_...' : 'AIza...';
   }
+  if (status) {
+    status.textContent = aiPendingKeyClears[provider]
+      ? 'Remocao pendente de salvamento'
+      : hasEffectiveKey
+        ? `Ativa via ${sourceLabel(source)}${masked ? ` - ${masked}` : ''}`
+        : 'Nenhuma chave configurada';
+  }
+  if (clearButton) clearButton.disabled = !hasSavedKey || aiPendingKeyClears[provider];
 }
 
 function renderAIEffectiveSummary() {
-  const box = document.getElementById('ai-effective-summary');
+  const box = aiElement('ai-effective-summary');
   if (!box) return;
+  const provider = getAIProvider();
+  const model = aiElement('ai-model')?.value || getProviderDefaultModel(provider);
+  const isPersistedProvider = provider === (aiConfig.aiProvider || 'groq');
+  const source = isPersistedProvider ? aiConfig.effectiveKeySource || 'missing' : aiConfig[provider === 'groq' ? 'groqKeySource' : 'geminiKeySource'] || 'missing';
+  const hasKey = isPersistedProvider ? !!aiConfig.hasEffectiveKey : !!aiConfig[provider === 'groq' ? 'hasEffectiveGroqKey' : 'hasEffectiveGeminiKey'];
+  box.innerHTML = `<span>Configuracao selecionada</span><strong>${provider === 'groq' ? 'Groq' : 'Gemini'} / ${escapeHtml(model)}</strong><small>${hasKey ? `Credencial via ${escapeHtml(sourceLabel(source))}` : 'Credencial ausente'}</small>`;
+}
 
-  const aiState = state.systemStatus?.ai || {};
-  const provider = aiConfig.effectiveProvider || aiState.effectiveProvider || aiConfig.aiProvider || 'groq';
-  const model = aiConfig.effectiveAiModel || aiState.effectiveAiModel || getProviderDefaultModel(provider);
-  const keySource = aiConfig.effectiveKeySource || aiState.effectiveKeySource || 'missing';
-  const keySourceLabel = keySource === 'saved'
-    ? 'salva'
-    : keySource === 'env'
-      ? 'env'
-      : keySource === 'default'
-        ? 'padrao'
-        : 'ausente';
-  const hasEffectiveKey = aiConfig.hasEffectiveKey ?? aiState.hasEffectiveKey;
-  const keyText = hasEffectiveKey
-    ? `chave ativa (${keySourceLabel})`
-    : 'sem chave efetiva';
+function updateAIStatusUI(enabled) {
+  const toggle = aiElement('ai-enabled');
+  const text = aiElement('ai-status-text');
+  const detail = aiElement('ai-status-detail');
+  const dot = aiElement('ai-status-icon');
+  const connection = aiElement('ai-connection-state');
+  const providerState = aiElement('ai-provider-state');
+  const alert = aiElement('ai-config-alert');
+  const provider = aiConfig.effectiveProvider || aiConfig.aiProvider || 'groq';
+  const hasKey = !!aiConfig.hasEffectiveKey;
 
-  box.innerHTML = `
-    <h3>Configuracao efetiva</h3>
-    <p><strong>Provedor:</strong> ${escapeHtml(provider)} | <strong>Modelo:</strong> ${escapeHtml(model)} | <strong>Chave:</strong> ${escapeHtml(keyText)}</p>
-  `;
+  if (toggle) toggle.checked = !!enabled;
+  if (text) text.textContent = enabled ? 'Agente ativo' : 'Agente pausado';
+  if (detail) detail.textContent = enabled ? 'Respondendo novas mensagens privadas' : 'Nenhuma resposta automatica sera enviada';
+  dot?.classList.toggle('active', !!enabled && hasKey);
+  dot?.classList.toggle('warning', !!enabled && !hasKey);
+  if (connection) connection.textContent = enabled ? (hasKey ? 'Pronta' : 'Credencial ausente') : (hasKey ? 'Configurada' : 'Incompleta');
+  if (providerState) providerState.textContent = `${provider === 'groq' ? 'Groq' : 'Gemini'} - ${aiConfig.effectiveAiModel || getProviderDefaultModel(provider)}`;
+  if (alert) {
+    const fallbackMissing = aiConfig.geminiFallbackEnabled && !aiConfig.hasEffectiveGeminiKey;
+    const message = !hasKey
+      ? 'Cadastre uma chave para o provedor principal antes de ativar o agente.'
+      : fallbackMissing
+        ? 'O fallback Gemini esta ligado, mas ainda nao possui uma chave ativa.'
+        : '';
+    alert.textContent = message;
+    alert.classList.toggle('hidden', !message);
+  }
 }
 
 function resetPDFUploadArea() {
-  const area = document.getElementById('pdf-upload-area');
+  const area = aiElement('pdf-upload-area');
   if (!area) return;
-
-  area.innerHTML = `
-    <input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)">
-    <span class="upload-icon">ðŸ“„</span>
-    <p>Clique ou arraste o PDF aqui</p>
-    <span class="upload-hint">Apenas arquivos PDF Â· max. 32MB</span>
-  `;
+  area.innerHTML = '<input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)"><i data-lucide="file-up" aria-hidden="true"></i><strong>Adicionar PDF</strong><small>Arquivo de ate 32 MB</small>';
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
 }
 
 function setPDFUploadLoading(message = 'Extraindo texto...') {
-  const area = document.getElementById('pdf-upload-area');
+  const area = aiElement('pdf-upload-area');
   if (!area) return;
-  area.innerHTML = `<span class="upload-icon">â³</span><p>${message}</p>`;
+  area.innerHTML = `<span class="ai-inline-spinner" aria-hidden="true"></span><strong>${escapeHtml(message)}</strong><small>Aguarde a importacao</small>`;
 }
 
-async function loadAIConfig() {
+function setAIFieldValue(id, value) {
+  const element = aiElement(id);
+  if (element) element.value = value ?? '';
+}
+
+function setAIChecked(id, value) {
+  const element = aiElement(id);
+  if (element) element.checked = !!value;
+}
+
+async function loadAIConfig({ force = false } = {}) {
+  if (aiConfigLoading || (aiConfigDirty && !force)) return;
+  aiConfigLoading = true;
   try {
-    const r = await fetch('/api/ai/config');
-    aiConfig = await r.json();
+    const response = await fetch('/api/ai/config');
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'Nao foi possivel carregar a configuracao.');
+    aiConfig = payload;
+    aiPendingKeyClears.groq = false;
+    aiPendingKeyClears.gemini = false;
 
-    // Provider
     const provider = aiConfig.aiProvider || 'groq';
-    const radios = document.querySelectorAll('input[name="ai-provider"]');
-    radios.forEach(r => { r.checked = r.value === provider; });
-    switchAIProvider(provider, false);
-
-    // Keys
-    updateKeyField('ai-groq-key', 'groq-key-status', !!aiConfig.hasGroqKey, aiConfig.groqKeyMasked, 'gsk_...', {
-      hasEffectiveKey: !!aiConfig.hasEffectiveGroqKey,
-      keySource: aiConfig.groqKeySource,
+    const providerRadio = document.querySelector(`input[name="ai-provider"][value="${provider}"]`);
+    if (providerRadio) providerRadio.checked = true;
+    updateModelFields(provider, false, {
+      main: aiConfig.aiModel || aiConfig.effectiveAiModel || getProviderDefaultModel(provider),
+      qualification: aiConfig.qualificationModel || '',
+      classification: aiConfig.classificationModel || '',
     });
-    updateKeyField('ai-gemini-key', 'gemini-key-status', !!aiConfig.hasGeminiKey, aiConfig.geminiKeyMasked, 'AIza...', {
-      hasEffectiveKey: !!aiConfig.hasEffectiveGeminiKey,
-      keySource: aiConfig.geminiKeySource,
-    });
+    updateKeyField('groq');
+    updateKeyField('gemini');
+    setAIFieldValue('ai-agent-name', aiConfig.agentName || '');
+    setAIFieldValue('ai-company-name', aiConfig.companyName || '');
+    setAIFieldValue('ai-company-info', aiConfig.companyInfo || '');
+    setAIFieldValue('ai-consultor-dist', aiConfig.consultorDistribution || 'alternated');
+    setAIFieldValue('ai-hours-start', aiConfig.businessHoursStart || '08:00');
+    setAIFieldValue('ai-hours-end', aiConfig.businessHoursEnd || '22:00');
+    setAIFieldValue('ai-report-hour', aiConfig.reportHour || '18:00');
+    setAIFieldValue('followup-h1', aiConfig.followUp1Hours ?? 4);
+    setAIFieldValue('followup-h2', aiConfig.followUp2Hours ?? 24);
+    setAIFieldValue('followup-cold', aiConfig.followUpColdHours ?? 48);
+    setAIFieldValue('ai-session-timeout', aiConfig.sessionTimeoutMinutes ?? 30);
+    setAIChecked('followup-enabled', aiConfig.followUpEnabled !== false);
+    setAIChecked('campaign-loop-enabled', aiConfig.campaignLoopEnabled !== false);
+    setAIChecked('collections-mode-enabled', aiConfig.collectionsModeEnabled === true);
+    setAIChecked('report-enabled', aiConfig.reportEnabled !== false);
+    setAIChecked('gemini-fallback-enabled', aiConfig.geminiFallbackEnabled === true);
 
-    // Models
-    document.getElementById('ai-model').value = aiConfig.aiModel || aiConfig.effectiveAiModel || getProviderDefaultModel(provider);
-    document.getElementById('qualification-model').value = aiConfig.qualificationModel || '';
-    updateModelFields(provider, false);
-    renderAIEffectiveSummary();
-
-    // Rest of fields
-    document.getElementById('ai-agent-name').value = aiConfig.agentName || '';
-    document.getElementById('ai-company-name').value = aiConfig.companyName || '';
-    document.getElementById('ai-company-info').value = aiConfig.companyInfo || '';
-    document.getElementById('ai-consultor-dist').value = aiConfig.consultorDistribution || 'alternated';
-    document.getElementById('ai-hours-start').value = aiConfig.businessHoursStart || '08:00';
-    document.getElementById('ai-hours-end').value = aiConfig.businessHoursEnd || '22:00';
-    document.getElementById('ai-report-hour').value = aiConfig.reportHour || '18:00';
-    document.getElementById('followup-enabled').checked = aiConfig.followUpEnabled !== false;
-    document.getElementById('followup-h1').value = aiConfig.followUp1Hours || 4;
-    document.getElementById('followup-h2').value = aiConfig.followUp2Hours || 24;
-    document.getElementById('followup-cold').value = aiConfig.followUpColdHours || 48;
-    document.getElementById('campaign-loop-enabled').checked = aiConfig.campaignLoopEnabled !== false;
-    document.getElementById('collections-mode-enabled').checked = aiConfig.collectionsModeEnabled === true;
-    document.getElementById('report-enabled').checked = aiConfig.reportEnabled !== false;
-
-    // Phase 3: personality + aggression
-    const personality = aiConfig.aiPersonality || 'human';
-    const aggression  = aiConfig.aiAggression  || 'balanced';
-    const pRadio = document.querySelector(`input[name="ai-personality"][value="${personality}"]`);
-    if (pRadio) pRadio.checked = true;
-    const aRadio = document.querySelector(`input[name="ai-aggression"][value="${aggression}"]`);
-    if (aRadio) aRadio.checked = true;
-    const sessionTimeoutEl = document.getElementById('ai-session-timeout');
-    if (sessionTimeoutEl) sessionTimeoutEl.value = aiConfig.sessionTimeoutMinutes || 30;
-    const knowledgeEl = document.getElementById('ai-company-info');
-    if (knowledgeEl) updateKnowledgeCounter(knowledgeEl);
+    const personality = document.querySelector(`input[name="ai-personality"][value="${aiConfig.aiPersonality || 'human'}"]`);
+    if (personality) personality.checked = true;
+    const salesStyle = document.querySelector(`input[name="ai-aggression"][value="${aiConfig.aiAggression || 'balanced'}"]`);
+    if (salesStyle) salesStyle.checked = true;
 
     updateAIStatusUI(aiConfig.aiEnabled);
     renderConsultors(aiConfig.consultors || []);
     resetPDFUploadArea();
-    await loadDocs();
-    await updateAIStats();
+    updateKnowledgeCounter(aiElement('ai-company-info'));
+    initializeAISettingsTracking();
+    aiConfigSnapshot = serializeAIConfigForm();
+    setAIConfigDirty(false);
+    await Promise.all([loadDocs(), updateAIStats()]);
+    renderAIEffectiveSummary();
+    window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
     if (state.systemStatus) renderSystemStatus();
-  } catch (err) {
-    console.error('Failed to load AI config:', err);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    aiConfigLoading = false;
   }
-}
-
-function switchAIProvider(provider, save = true) {
-  const groqGroup = document.getElementById('groq-key-group');
-  const geminiGroup = document.getElementById('gemini-key-group');
-  if (provider === 'gemini') {
-    groqGroup.classList.add('hidden');
-    geminiGroup.classList.remove('hidden');
-  } else {
-    groqGroup.classList.remove('hidden');
-    geminiGroup.classList.add('hidden');
-  }
-
-  updateModelFields(provider, save);
-}
-
-function updateAIStatusUI(enabled) {
-  const toggle = document.getElementById('ai-enabled');
-  const text = document.getElementById('ai-status-text');
-  const icon = document.getElementById('ai-status-icon');
-  toggle.checked = enabled;
-  text.textContent = enabled ? 'âœ… Ativo' : 'Desativado';
-  icon.textContent = enabled ? 'ðŸŸ¢' : 'âš¡';
-}
-
-function toggleAIEnabled() {
-  const enabled = document.getElementById('ai-enabled').checked;
-  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
-  const typedKey = provider === 'gemini'
-    ? document.getElementById('ai-gemini-key').value.trim()
-    : document.getElementById('ai-groq-key').value.trim();
-  const savedKey = provider === 'gemini'
-    ? !!aiConfig.hasEffectiveGeminiKey
-    : !!aiConfig.hasEffectiveGroqKey;
-
-  if (enabled && !typedKey && !savedKey) {
-    updateAIStatusUI(false);
-    showToast('Cadastre uma API key antes de ativar o agente.', 'warning');
-    return;
-  }
-
-  updateAIStatusUI(enabled);
-  // Auto-save just the enabled flag
-  fetch('/api/ai/config', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...collectAIFormData(), aiEnabled: enabled })
-  });
-  showToast(enabled ? 'ðŸ¤– Agente IA ativado!' : 'Agente IA desativado', enabled ? 'success' : 'info');
 }
 
 function collectAIFormData() {
-  const consultors = [];
-  document.querySelectorAll('.consultor-item').forEach(el => {
-    const name = el.querySelector('input[data-role="name"]')?.value?.trim();
-    const number = el.querySelector('input[data-role="number"]')?.value?.trim();
-    if (number) consultors.push({ name: name || 'Consultor', number });
-  });
-
-  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
-  const personality = document.querySelector('input[name="ai-personality"]:checked')?.value || 'human';
-  const aggression  = document.querySelector('input[name="ai-aggression"]:checked')?.value  || 'balanced';
-  const sessionTimeout = parseInt(document.getElementById('ai-session-timeout')?.value) || 30;
-
-  return {
-    aiEnabled: document.getElementById('ai-enabled').checked,
+  const consultors = [...document.querySelectorAll('#consultors-list .consultor-item')].map((row) => ({
+    name: row.querySelector('[data-role="name"]')?.value?.trim() || 'Consultor',
+    number: row.querySelector('[data-role="number"]')?.value?.trim() || '',
+  })).filter((consultor) => consultor.number);
+  const provider = getAIProvider();
+  const data = {
+    aiEnabled: !!aiElement('ai-enabled')?.checked,
     aiProvider: provider,
-    aiModel: document.getElementById('ai-model').value.trim(),
-    qualificationModel: document.getElementById('qualification-model').value.trim(),
-    groqKey: document.getElementById('ai-groq-key').value.trim() || undefined,
-    geminiKey: document.getElementById('ai-gemini-key').value.trim() || undefined,
-    agentName: document.getElementById('ai-agent-name').value.trim(),
-    companyName: document.getElementById('ai-company-name').value.trim(),
-    companyInfo: document.getElementById('ai-company-info').value.trim(),
+    aiModel: aiElement('ai-model')?.value || getProviderDefaultModel(provider),
+    qualificationModel: aiElement('qualification-model')?.value || '',
+    classificationModel: aiElement('classification-model')?.value || '',
+    geminiFallbackEnabled: !!aiElement('gemini-fallback-enabled')?.checked,
+    agentName: aiElement('ai-agent-name')?.value?.trim() || '',
+    companyName: aiElement('ai-company-name')?.value?.trim() || '',
+    companyInfo: aiElement('ai-company-info')?.value?.trim() || '',
     consultors,
-    consultorDistribution: document.getElementById('ai-consultor-dist').value,
-    businessHoursStart: document.getElementById('ai-hours-start').value,
-    businessHoursEnd: document.getElementById('ai-hours-end').value,
-    reportHour: document.getElementById('ai-report-hour').value,
-    followUpEnabled: document.getElementById('followup-enabled').checked,
-    followUp1Hours: parseInt(document.getElementById('followup-h1').value),
-    followUp2Hours: parseInt(document.getElementById('followup-h2').value),
-    followUpColdHours: parseInt(document.getElementById('followup-cold').value),
-    campaignLoopEnabled: document.getElementById('campaign-loop-enabled').checked,
-    collectionsModeEnabled: document.getElementById('collections-mode-enabled').checked,
-    reportEnabled: document.getElementById('report-enabled').checked,
-    aiPersonality: personality,
-    aiAggression: aggression,
-    sessionTimeoutMinutes: sessionTimeout,
+    consultorDistribution: aiElement('ai-consultor-dist')?.value || 'alternated',
+    businessHoursStart: aiElement('ai-hours-start')?.value || '08:00',
+    businessHoursEnd: aiElement('ai-hours-end')?.value || '22:00',
+    reportHour: aiElement('ai-report-hour')?.value || '18:00',
+    followUpEnabled: !!aiElement('followup-enabled')?.checked,
+    followUp1Hours: Number(aiElement('followup-h1')?.value || 4),
+    followUp2Hours: Number(aiElement('followup-h2')?.value || 24),
+    followUpColdHours: Number(aiElement('followup-cold')?.value || 48),
+    campaignLoopEnabled: !!aiElement('campaign-loop-enabled')?.checked,
+    collectionsModeEnabled: !!aiElement('collections-mode-enabled')?.checked,
+    reportEnabled: !!aiElement('report-enabled')?.checked,
+    aiPersonality: document.querySelector('input[name="ai-personality"]:checked')?.value || 'human',
+    aiAggression: document.querySelector('input[name="ai-aggression"]:checked')?.value || 'balanced',
+    sessionTimeoutMinutes: Number(aiElement('ai-session-timeout')?.value || 30),
   };
+  const groqKey = aiElement('ai-groq-key')?.value?.trim();
+  const geminiKey = aiElement('ai-gemini-key')?.value?.trim();
+  if (groqKey) data.groqKey = groqKey;
+  if (geminiKey) data.geminiKey = geminiKey;
+  if (aiPendingKeyClears.groq) data.clearGroqKey = true;
+  if (aiPendingKeyClears.gemini) data.clearGeminiKey = true;
+  return data;
 }
 
-// Visual feedback for behavior card selection
-function selectBehaviorCard(group, radioEl) {
-  // No extra logic needed â€” CSS handles :checked state automatically
-  // This function exists as an onchange hook for future analytics or validation
+function serializeAIConfigForm() {
+  const data = collectAIFormData();
+  delete data.groqKey;
+  delete data.geminiKey;
+  delete data.clearGroqKey;
+  delete data.clearGeminiKey;
+  return JSON.stringify(data);
+}
+
+function setAIConfigDirty(dirty) {
+  aiConfigDirty = !!dirty;
+  const save = aiElement('ai-save-button');
+  const reset = aiElement('ai-reset-button');
+  const stateText = aiElement('ai-save-state');
+  const detail = aiElement('ai-save-detail');
+  const stateIcon = aiElement('ai-save-state-icon');
+  if (save) save.disabled = !aiConfigDirty;
+  if (reset) reset.disabled = !aiConfigDirty;
+  if (stateText) stateText.textContent = aiConfigDirty ? 'Alteracoes nao salvas' : 'Configuracoes sincronizadas';
+  if (detail) detail.textContent = aiConfigDirty ? 'Revise e salve para aplicar no agente' : 'Nenhuma alteracao pendente';
+  stateIcon?.classList.toggle('dirty', aiConfigDirty);
+}
+
+function markAIConfigDirty() {
+  if (aiConfigLoading) return;
+  const hasTypedKey = !!aiElement('ai-groq-key')?.value || !!aiElement('ai-gemini-key')?.value;
+  const hasKeyClear = aiPendingKeyClears.groq || aiPendingKeyClears.gemini;
+  setAIConfigDirty(serializeAIConfigForm() !== aiConfigSnapshot || hasTypedKey || hasKeyClear);
+  renderAIEffectiveSummary();
+}
+
+function initializeAISettingsTracking() {
+  if (aiSettingsInitialized) return;
+  const root = aiElement('tab-ai-agent');
+  if (!root) return;
+  const handleChange = (event) => {
+    if (event.target.id === 'ai-enabled' || event.target.id === 'pdf-input') return;
+    markAIConfigDirty();
+  };
+  root.addEventListener('input', handleChange);
+  root.addEventListener('change', handleChange);
+  window.addEventListener('beforeunload', (event) => {
+    if (!aiConfigDirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+  aiSettingsInitialized = true;
+}
+
+async function toggleAIEnabled() {
+  const toggle = aiElement('ai-enabled');
+  if (!toggle) return;
+  const enabled = toggle.checked;
+  if (aiConfigDirty) {
+    toggle.checked = !!aiConfig.aiEnabled;
+    showToast('Salve ou descarte as alteracoes antes de mudar o status do agente.', 'warning');
+    return;
+  }
+  if (enabled && !aiConfig.hasEffectiveKey) {
+    toggle.checked = false;
+    showAISettingsSection('connection');
+    showToast('Cadastre uma chave valida antes de ativar o agente.', 'warning');
+    return;
+  }
+  toggle.disabled = true;
+  try {
+    const response = await fetch('/api/ai/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aiEnabled: enabled }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'Nao foi possivel alterar o status.');
+    aiConfig = payload.config || { ...aiConfig, aiEnabled: enabled };
+    updateAIStatusUI(enabled);
+    aiConfigSnapshot = serializeAIConfigForm();
+    showToast(enabled ? 'Agente de IA ativado.' : 'Agente de IA pausado.', enabled ? 'success' : 'info');
+  } catch (error) {
+    toggle.checked = !!aiConfig.aiEnabled;
+    showToast(error.message, 'error');
+  } finally {
+    toggle.disabled = false;
+  }
 }
 
 async function saveAIConfig() {
   const data = collectAIFormData();
-  const savedKeyAvailable = data.aiProvider === 'groq'
-    ? !!aiConfig.hasEffectiveGroqKey
-    : !!aiConfig.hasEffectiveGeminiKey;
-  const hasKey = data.aiProvider === 'groq'
-    ? !!data.groqKey || savedKeyAvailable
-    : !!data.geminiKey || savedKeyAvailable;
-  if (!hasKey) {
-    showToast('Informe a API Key antes de salvar.', 'warning');
+  const activeProvider = data.aiProvider;
+  const typedKey = activeProvider === 'groq' ? data.groqKey : data.geminiKey;
+  const clearingActive = activeProvider === 'groq' ? data.clearGroqKey : data.clearGeminiKey;
+  const existingKey = activeProvider === 'groq' ? aiConfig.hasEffectiveGroqKey : aiConfig.hasEffectiveGeminiKey;
+  if (data.aiEnabled && !typedKey && (!existingKey || clearingActive)) {
+    showAISettingsSection('connection');
+    showToast('O agente ativo precisa de uma chave no provedor principal.', 'warning');
     return;
   }
+  const saveButton = aiElement('ai-save-button');
+  const stateText = aiElement('ai-save-state');
+  if (saveButton) saveButton.disabled = true;
+  if (stateText) stateText.textContent = 'Salvando configuracoes...';
   try {
-    const r = await fetch('/api/ai/config', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const response = await fetch('/api/ai/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    const payload = await r.json().catch(() => ({}));
-    if (r.ok) {
-      showToast('âœ… ConfiguraÃ§Ãµes salvas com sucesso!', 'success');
-      await loadAIConfig();
-    } else {
-      showToast(payload.error || 'Erro ao salvar.', 'error');
-    }
-  } catch (err) {
-    showToast('Erro: ' + err.message, 'error');
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'Erro ao salvar configuracoes.');
+    aiConfig = payload.config || aiConfig;
+    await loadAIConfig({ force: true });
+    showToast('Configuracoes do agente salvas.', 'success');
+  } catch (error) {
+    setAIConfigDirty(true);
+    showToast(error.message, 'error');
   }
 }
 
-async function testAIKey() {
-  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'groq';
-  const key = provider === 'gemini'
-    ? document.getElementById('ai-gemini-key').value.trim()
-    : document.getElementById('ai-groq-key').value.trim();
-  const hasSavedKey = provider === 'gemini'
-    ? !!aiConfig.hasEffectiveGeminiKey
-    : !!aiConfig.hasEffectiveGroqKey;
-  const model = document.getElementById('ai-model').value.trim() || getProviderDefaultModel(provider);
-  if (!key && !hasSavedKey) { showToast('Informe uma API Key primeiro.', 'warning'); return; }
-  const btn = document.getElementById(provider === 'gemini' ? 'btn-test-key-gem' : 'btn-test-key');
-  if (btn) { btn.textContent = '...'; btn.disabled = true; }
+async function resetAIConfigChanges() {
+  await loadAIConfig({ force: true });
+  showToast('Alteracoes descartadas.', 'info');
+}
+
+function toggleAIKeyVisibility(provider) {
+  const input = aiElement(provider === 'gemini' ? 'ai-gemini-key' : 'ai-groq-key');
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+function clearAIKey(provider) {
+  aiPendingKeyClears[provider] = true;
+  const input = aiElement(provider === 'gemini' ? 'ai-gemini-key' : 'ai-groq-key');
+  if (input) input.value = '';
+  updateKeyField(provider);
+  markAIConfigDirty();
+}
+
+async function testAIKey(provider = getAIProvider()) {
+  const isGemini = provider === 'gemini';
+  const input = aiElement(isGemini ? 'ai-gemini-key' : 'ai-groq-key');
+  const key = input?.value?.trim() || '';
+  const hasEffectiveKey = !!aiConfig[isGemini ? 'hasEffectiveGeminiKey' : 'hasEffectiveGroqKey'];
+  if (!key && (!hasEffectiveKey || aiPendingKeyClears[provider])) {
+    showToast(`Informe uma chave ${isGemini ? 'Gemini' : 'Groq'} primeiro.`, 'warning');
+    return;
+  }
+  const selectedProvider = getAIProvider();
+  const model = selectedProvider === provider ? aiElement('ai-model')?.value : getProviderDefaultModel(provider);
+  const button = aiElement(isGemini ? 'btn-test-key-gem' : 'btn-test-key');
+  if (button) button.disabled = true;
   try {
-    const r = await fetch('/api/ai/test-key', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const response = await fetch('/api/ai/test-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, provider, model }),
     });
-    const d = await r.json();
-    showToast(d.ok ? '\u2705 ' + d.message : '\u274c ' + d.message, d.ok ? 'success' : 'error');
-  } catch (err) {
-    showToast('Erro de conex\u00e3o.', 'error');
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(payload.error || payload.message || 'A chave nao foi validada.');
+    showToast(payload.message || `Chave ${isGemini ? 'Gemini' : 'Groq'} validada.`, 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
   } finally {
-    if (btn) { btn.textContent = 'Testar'; btn.disabled = false; }
+    if (button) button.disabled = false;
   }
 }
 
-async function testGeminiKey() {
-  return testAIKey();
+function testGeminiKey() {
+  return testAIKey('gemini');
 }
 
-// Consultors
-function renderConsultors(consultors) {
-  const list = document.getElementById('consultors-list');
+function selectBehaviorCard() {
+  markAIConfigDirty();
+}
+
+function renderConsultors(consultors = []) {
+  const list = aiElement('consultors-list');
+  if (!list) return;
   list.innerHTML = '';
-  consultors.forEach((c, i) => addConsultorRow(c.name, c.number));
+  consultors.forEach((consultor) => addConsultorRow(consultor.name, consultor.number, false));
+  renderAIConsultorEmptyState();
+}
+
+function renderAIConsultorEmptyState() {
+  const list = aiElement('consultors-list');
+  if (!list || list.querySelector('.consultor-item')) return;
+  list.innerHTML = '<div class="ai-empty-state ai-consultor-empty"><i data-lucide="user-round-x" aria-hidden="true"></i><span>Nenhum consultor configurado para receber encaminhamentos.</span></div>';
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
 }
 
 function addConsultor() {
-  addConsultorRow('', '');
+  addConsultorRow('', '', true);
 }
 
-function addConsultorRow(name, number) {
-  const list = document.getElementById('consultors-list');
-  const idx = list.children.length;
-  const div = document.createElement('div');
-  div.className = 'consultor-item';
-  div.innerHTML = `
-    <span style="font-size:16px">ðŸ‘¤</span>
-    <input type="text" data-role="name" placeholder="Nome (ex: Gabriel)" value="${name || ''}" style="width:35%">
-    <input type="text" data-role="number" placeholder="DDD+NÃºmero (11999990000)" value="${number || ''}" style="flex:1;font-family:var(--mono)">
-    <button class="consultor-remove" onclick="this.parentElement.remove()">âœ•</button>
-  `;
-  list.appendChild(div);
+function addConsultorRow(name, number, focus = false) {
+  const list = aiElement('consultors-list');
+  if (!list) return;
+  list.querySelector('.ai-consultor-empty')?.remove();
+  const row = document.createElement('div');
+  row.className = 'consultor-item';
+  row.innerHTML = `<span class="ai-consultor-avatar"><i data-lucide="user-round" aria-hidden="true"></i></span><input type="text" data-role="name" placeholder="Nome do consultor" maxlength="80" value="${escapeAttr(name || '')}"><input type="tel" data-role="number" placeholder="WhatsApp com DDD" value="${escapeAttr(number || '')}"><button type="button" class="consultor-remove" onclick="removeAIConsultor(this)" title="Remover consultor" aria-label="Remover consultor"><i data-lucide="x" aria-hidden="true"></i></button>`;
+  list.appendChild(row);
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
+  if (focus) {
+    row.querySelector('[data-role="name"]')?.focus();
+    markAIConfigDirty();
+  }
+}
+
+function removeAIConsultor(button) {
+  button.closest('.consultor-item')?.remove();
+  renderAIConsultorEmptyState();
+  markAIConfigDirty();
 }
 
 // Internal panel
@@ -2772,19 +2917,24 @@ function renderDocs(docs) {
   const list = document.getElementById('docs-list');
   if (!list) return;
   if (!docs || docs.length === 0) {
-    list.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:8px 0;">Nenhum documento carregado ainda.</div>';
+    list.innerHTML = '<div class="ai-empty-state"><i data-lucide="files" aria-hidden="true"></i><span>Nenhum documento importado.</span></div>';
+    window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
     return;
   }
-  list.innerHTML = docs.map(d => `
+  list.innerHTML = docs.map(d => {
+    const encodedFilename = encodeURIComponent(d.filename).replace(/'/g, '%27');
+    return `
     <div class="doc-item">
-      <span class="doc-icon">ðŸ“„</span>
+      <span class="doc-icon"><i data-lucide="file-text" aria-hidden="true"></i></span>
       <div class="doc-info">
         <div class="doc-name">${escapeHtml(d.filename)}</div>
-        <div class="doc-meta">${d.pages} pÃ¡ginas Â· ${(d.wordCount || 0).toLocaleString()} palavras Â· Importado em ${new Date(d.extractedAt).toLocaleDateString('pt-BR')}</div>
+        <div class="doc-meta">${d.pages} paginas · ${(d.wordCount || 0).toLocaleString('pt-BR')} palavras · ${new Date(d.extractedAt).toLocaleDateString('pt-BR')}</div>
       </div>
-      <button class="doc-remove" onclick="removePDF('${d.filename}')">ðŸ—‘ï¸</button>
+      <button type="button" class="doc-remove" onclick="removePDF(decodeURIComponent('${encodedFilename}'))" title="Remover documento" aria-label="Remover ${escapeAttr(d.filename)}"><i data-lucide="trash-2" aria-hidden="true"></i></button>
     </div>
-  `).join('');
+  `;
+  }).join('');
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
 }
 
 async function handlePDFUpload(event) {
@@ -2802,14 +2952,15 @@ async function handlePDFDrop(event) {
 
 async function uploadPDF(file) {
   const area = document.getElementById('pdf-upload-area');
-  area.innerHTML = '<span class="upload-icon">â³</span><p>Extraindo texto...</p>';
+  if (!area) return;
+  setPDFUploadLoading('Extraindo texto...');
   const formData = new FormData();
   formData.append('pdf', file);
   try {
     const r = await fetch('/api/ai/docs', { method: 'POST', body: formData });
     const d = await r.json();
     if (r.ok) {
-      showToast(`âœ… ${d.filename} â€” ${d.pages} pÃ¡ginas, ${(d.wordCount||0).toLocaleString()} palavras`, 'success');
+      showToast(`${d.filename}: ${d.pages} paginas e ${(d.wordCount || 0).toLocaleString('pt-BR')} palavras importadas.`, 'success');
       await loadDocs();
     } else {
       showToast('Erro: ' + d.error, 'error');
@@ -2817,7 +2968,7 @@ async function uploadPDF(file) {
   } catch (err) {
     showToast('Erro ao fazer upload: ' + err.message, 'error');
   } finally {
-    area.innerHTML = '<input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)"><span class="upload-icon">ðŸ“„</span><p>Clique ou arraste o PDF aqui</p><span class="upload-hint">Apenas arquivos PDF Â· mÃ¡x. 32MB</span>';
+    resetPDFUploadArea();
   }
 }
 
@@ -2832,10 +2983,16 @@ async function updateAIStats() {
   try {
     const r = await fetch('/api/leads/stats');
     const s = await r.json();
-    document.getElementById('ai-pill-leads').innerHTML = `<span>${s.todayTotal || 0}</span> leads hoje`;
-    document.getElementById('ai-pill-qualified').innerHTML = `<span>${s.todayQualified || 0}</span> qualificados`;
-    document.getElementById('ai-pill-talking').innerHTML = `<span>${s.talking || 0}</span> em conversa`;
-    document.getElementById('ai-pill-rate').innerHTML = `<span>${s.conversationRate || 0}%</span> conversÃ£o`;
+    const values = {
+      'ai-pill-leads': s.todayTotal || 0,
+      'ai-pill-qualified': s.todayQualified || 0,
+      'ai-pill-talking': s.talking || 0,
+      'ai-pill-rate': `${s.conversationRate || 0}%`,
+    };
+    Object.entries(values).forEach(([id, value]) => {
+      const strong = document.querySelector(`#${id} strong`);
+      if (strong) strong.textContent = value;
+    });
   } catch {}
 }
 
@@ -2885,7 +3042,7 @@ async function loadLeads() {
         notifiedLeads.add(lead.number);
         playBeep();
         if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('ZapBot Pro - Atencao!', {
+          new Notification('MoOve IA - Atencao!', {
             body: 'O lead ' + (lead.name || lead.number) + ' precisa de atendimento humano!'
           });
         }
@@ -3318,6 +3475,7 @@ function escapeHtml(text) {
 
 // â”€â”€ Knowledge base word counter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function updateKnowledgeCounter(textarea) {
+  if (!textarea) return;
   const len = textarea.value.length;
   const MAX = 4000;
   const counter = document.getElementById('knowledge-counter');
@@ -3327,7 +3485,7 @@ function updateKnowledgeCounter(textarea) {
   if (remaining < 200)      { color = '#ef4444'; }
   else if (remaining < 800) { color = '#f59e0b'; }
   counter.style.color = color;
-  counter.textContent = `${len.toLocaleString()} / ${MAX.toLocaleString()} caracteres${remaining < 200 ? ' â€” quase no limite!' : ''}`;
+  counter.textContent = `${len.toLocaleString('pt-BR')} / ${MAX.toLocaleString('pt-BR')} caracteres${remaining < 200 ? ' - quase no limite!' : ''}`;
 }
 
 
@@ -3337,7 +3495,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   REDESIGN VISUAL — ZapBot Pro SaaS Upgrade (app.js additions)
+   REDESIGN VISUAL — MoOve IA (app.js additions)
 ═══════════════════════════════════════════════════════════════ */
 
 // ── Mobile Sidebar Toggle ────────────────────────────────────

@@ -4,7 +4,7 @@ Atualizado em: 2026-07-13
 
 ## Objetivo
 
-O ZapBot deve identificar a intencao da mensagem mais recente e separar com seguranca:
+O MoOve IA deve identificar a intencao da mensagem mais recente e separar com seguranca:
 
 - interesse comercial real em cotacao;
 - atendimento operacional de associado;

@@ -1,4 +1,4 @@
-# ZapBot Pro
+# MoOve IA
 
 Sistema de atendimento e CRM para WhatsApp, criado para qualificar leads, organizar conversas e apoiar consultores com um painel administrativo. O projeto combina automacao, regras deterministicas, IA e uma interface de acompanhamento comercial.
 

@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ZapBot Pro — Automação WhatsApp</title>
-  <meta name="description" content="Envio automatizado de mensagens WhatsApp com imagens. Custo zero, 100% local e gratuito.">
+  <title>MoOve IA — Atendimento WhatsApp</title>
+  <meta name="description" content="Atendimento inteligente, campanhas e gestao de leads da Moove Protecao Veicular.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4.0.0-ai-console">
   <link rel="stylesheet" href="leads.css?v=3.2.0-leads">
 </head>
 <body>
@@ -31,8 +31,8 @@
           </svg>
         </div>
         <div class="logo-text">
-          <span class="logo-name">ZapBot Pro</span>
-          <span class="logo-sub">WhatsApp Automation</span>
+          <span class="logo-name">MoOve IA</span>
+          <span class="logo-sub">Atendimento inteligente</span>
         </div>
       </div>
 
@@ -111,7 +111,7 @@
         <div class="topbar">
           <div class="topbar-left">
             <button class="hamburger-btn" onclick="toggleSidebar()" aria-label="Menu"><span></span><span></span><span></span></button>
-            <span class="topbar-title">ZapBot Pro</span>
+            <span class="topbar-title">MoOve IA</span>
             <span class="topbar-breadcrumb">/ <span id="topbar-section">Conexão</span></span>
           </div>
           <div class="topbar-right">
@@ -175,7 +175,7 @@
             <p id="status-detail" class="status-detail hidden"></p>
             <div class="info-box">
               <h3>⚡ Como funciona</h3>
-              <p>O ZapBot Pro usa a mesma tecnologia do <strong>WhatsApp Web</strong> para enviar mensagens. Suas credenciais são salvas <strong>localmente</strong> e nunca compartilhadas com servidores externos.</p>
+              <p>O MoOve IA usa a mesma tecnologia do <strong>WhatsApp Web</strong> para enviar mensagens. Suas credenciais são salvas <strong>localmente</strong> e nunca compartilhadas com servidores externos.</p>
             </div>
             <div class="warning-box">
               <h3>⚠️ Aviso Importante</h3>
@@ -694,7 +694,7 @@
               </div>
             </div>
             <div class="log-console" id="log-console">
-              <div class="log-line log-info">[Sistema] ZapBot Pro iniciado. Aguardando conexão WhatsApp...</div>
+              <div class="log-line log-info">[Sistema] MoOve IA iniciado. Aguardando conexão WhatsApp...</div>
             </div>
             <div class="campaign-diagnostic-panel" id="campaign-diagnostic-panel">
               <div class="campaign-diagnostic-title">Diagnostico do ultimo envio</div>
@@ -707,338 +707,224 @@
 
 
       <!-- ── Tab: AI Agent ─────────────── -->
-      <section id="tab-ai-agent" class="tab-pane">
-        <div class="page-header">
-          <h1 class="page-title">🤖 Agente IA</h1>
-          <p class="page-sub">Configure o atendimento automático inteligente por WhatsApp</p>
+      <section id="tab-ai-agent" class="tab-pane ai-console">
+        <header class="ai-page-head">
+          <div>
+            <div class="ai-page-kicker"><i data-lucide="bot" aria-hidden="true"></i> Atendimento inteligente</div>
+            <h1>Agente de IA</h1>
+            <p>Controle o agente que atende, qualifica e encaminha conversas no WhatsApp.</p>
+          </div>
+          <div class="ai-master-control">
+            <div class="ai-master-copy">
+              <span id="ai-status-icon" class="ai-live-dot"></span>
+              <div><strong id="ai-status-text">Desativado</strong><small id="ai-status-detail">O atendimento automatico esta pausado</small></div>
+            </div>
+            <label class="ai-switch" title="Ativar ou pausar o agente">
+              <input type="checkbox" id="ai-enabled" onchange="toggleAIEnabled()">
+              <span aria-hidden="true"></span>
+              <span class="sr-only">Ativar agente de IA</span>
+            </label>
+          </div>
+        </header>
+
+        <div id="ai-config-alert" class="ai-config-alert hidden" role="status"></div>
+
+        <div class="ai-overview-grid" aria-label="Resumo do agente">
+          <div class="ai-overview-item ai-overview-primary">
+            <span>Conexao da IA</span>
+            <strong id="ai-connection-state">Verificando</strong>
+            <small id="ai-provider-state">Carregando provedor</small>
+          </div>
+          <div class="ai-overview-item" id="ai-pill-leads"><span>Leads hoje</span><strong>0</strong><small>conversas recebidas</small></div>
+          <div class="ai-overview-item" id="ai-pill-qualified"><span>Qualificados</span><strong>0</strong><small>prontos para consultor</small></div>
+          <div class="ai-overview-item" id="ai-pill-talking"><span>Em conversa</span><strong>0</strong><small>atendimentos ativos</small></div>
+          <div class="ai-overview-item" id="ai-pill-rate"><span>Conversao</span><strong>0%</strong><small>taxa do periodo</small></div>
         </div>
 
-        <!-- AI Status Bar -->
-        <div class="card ai-status-card">
-          <div class="card-header">
-            <span class="card-icon" id="ai-status-icon">⚡</span>
-            <h2 class="card-title">Status do Agente</h2>
-            <div class="card-actions">
-              <label class="toggle-label">
-                <input type="checkbox" id="ai-enabled" onchange="toggleAIEnabled()">
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                <span id="ai-status-text" style="font-weight:600">Desativado</span>
-              </label>
-            </div>
-          </div>
-          <div class="ai-status-pills">
-            <div class="ai-pill" id="ai-pill-leads"><span>0</span> leads hoje</div>
-            <div class="ai-pill ai-pill-green" id="ai-pill-qualified"><span>0</span> qualificados</div>
-            <div class="ai-pill" id="ai-pill-talking"><span>0</span> em conversa</div>
-            <div class="ai-pill ai-pill-rate" id="ai-pill-rate"><span>0%</span> conversão</div>
-          </div>
-        </div>
+        <div class="ai-settings-layout">
+          <nav class="ai-settings-nav" aria-label="Configuracoes do agente">
+            <button type="button" class="active" data-ai-section="connection" onclick="showAISettingsSection('connection')"><i data-lucide="plug-zap" aria-hidden="true"></i><span>Conexao e modelos</span><small>Provedor, chaves e fallback</small></button>
+            <button type="button" data-ai-section="identity" onclick="showAISettingsSection('identity')"><i data-lucide="message-circle-more" aria-hidden="true"></i><span>Identidade e conversa</span><small>Nome, tom e conducao</small></button>
+            <button type="button" data-ai-section="handoff" onclick="showAISettingsSection('handoff')"><i data-lucide="users-round" aria-hidden="true"></i><span>Encaminhamento</span><small>Consultores e horarios</small></button>
+            <button type="button" data-ai-section="automations" onclick="showAISettingsSection('automations')"><i data-lucide="workflow" aria-hidden="true"></i><span>Automacoes</span><small>Follow-up e campanhas</small></button>
+            <button type="button" data-ai-section="knowledge" onclick="showAISettingsSection('knowledge')"><i data-lucide="library" aria-hidden="true"></i><span>Conhecimento</span><small>Informacoes e documentos</small></button>
+          </nav>
 
-        <div class="content-grid two-col">
-
-          <!-- Config -->
-          <div class="card">
-            <div class="card-header"><span class="card-icon">🔑</span><h2 class="card-title">Configuração da IA</h2></div>
-
-            <!-- Provider selector -->
-            <div class="form-group">
-              <label class="form-label">Provedor de IA</label>
-              <div class="radio-group" style="grid-template-columns:1fr 1fr;">
-                <label class="radio-card" id="radio-groq">
-                  <input type="radio" name="ai-provider" value="groq" checked onchange="switchAIProvider('groq')">
-                  <div class="radio-content">
-                    <span class="radio-icon">⚡</span>
-                    <span class="radio-label">Groq <span style="font-size:10px;color:var(--green);font-weight:700;">RECOMENDADO</span></span>
-                    <span class="radio-desc">Llama 3.1 8B — 500K tokens/dia grátis</span>
-                  </div>
-                </label>
-                <label class="radio-card" id="radio-gemini">
-                  <input type="radio" name="ai-provider" value="gemini" onchange="switchAIProvider('gemini')">
-                  <div class="radio-content">
-                    <span class="radio-icon">🔮</span>
-                    <span class="radio-label">Gemini</span>
-                    <span class="radio-desc">Google — requer projeto ativo</span>
-                  </div>
-                </label>
+          <div class="ai-settings-workspace">
+            <section class="ai-settings-panel active" data-ai-panel="connection" aria-labelledby="ai-connection-title">
+              <div class="ai-panel-heading">
+                <div class="ai-panel-icon"><i data-lucide="plug-zap" aria-hidden="true"></i></div>
+                <div><h2 id="ai-connection-title">Conexao e modelos</h2><p>Defina por onde o agente processa as conversas.</p></div>
               </div>
-            </div>
 
-            <!-- Groq key (shown by default) -->
-            <div class="form-group" id="groq-key-group">
-              <label class="form-label">API Key do Groq <span class="label-hint">(gratuita, sem cartão)</span></label>
-              <div class="input-with-unit">
-                <input type="password" id="ai-groq-key" class="form-input" placeholder="gsk_..." autocomplete="off">
-                <button class="btn btn-purple btn-sm" onclick="testAIKey()" id="btn-test-key">Testar</button>
-              </div>
-              <p class="hint-text" id="groq-key-status">Nenhuma chave salva ainda.</p>
-              <p class="hint-text">Obtenha grátis em <a href="https://console.groq.com" target="_blank" style="color:var(--accent-green)">console.groq.com</a> → API Keys → Create (30 segundos)</p>
-            </div>
-
-            <!-- Gemini key (hidden by default) -->
-            <div class="form-group hidden" id="gemini-key-group">
-              <label class="form-label">API Key do Gemini <span class="label-hint">(gratuita)</span></label>
-              <div class="input-with-unit">
-                <input type="password" id="ai-gemini-key" class="form-input" placeholder="AIza..." autocomplete="off">
-                <button class="btn btn-purple btn-sm" onclick="testAIKey()" id="btn-test-key-gem">Testar</button>
-              </div>
-              <p class="hint-text" id="gemini-key-status">Nenhuma chave salva ainda.</p>
-              <p class="hint-text">Obtenha em <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent-green)">aistudio.google.com</a> — precisa de projeto ativo com billing</p>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Modelo principal da IA</label>
-              <input type="text" id="ai-model" class="form-input" placeholder="openai/gpt-oss-120b" autocomplete="off">
-              <p class="hint-text" id="ai-model-hint">Se deixar no padrao, usamos o modelo recomendado do provedor.</p>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Modelo para qualificacao <span class="label-hint">— opcional</span></label>
-              <input type="text" id="qualification-model" class="form-input" placeholder="Em branco = usar o modelo principal" autocomplete="off">
-              <p class="hint-text" id="qualification-model-hint">Use apenas se quiser separar resposta e extracao.</p>
-            </div>
-            <div class="info-box compact" id="ai-effective-summary">
-              <h3>Configuracao efetiva</h3>
-              <p>Carregando provedor, modelo e origem da chave...</p>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Nome do agente</label>
-              <input type="text" id="ai-agent-name" class="form-input" placeholder="Ex: Júlia">
-              <p class="hint-text">Nome que a IA usará para se apresentar aos clientes</p>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Nome da empresa</label>
-              <input type="text" id="ai-company-name" class="form-input" placeholder="Ex: Moove Proteção Veicular">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Informações operacionais <span class="label-hint">— horário, contatos, dados da regional (regulamento e coberturas já estão na IA)</span></label>
-              <textarea id="ai-company-info" class="form-textarea" rows="8" maxlength="4000" oninput="updateKnowledgeCounter(this)" placeholder="Escreva informações operacionais da sua regional. Exemplos:
-
-Horário de atendimento: seg-sex 8h-20h, sáb 9h-14h
-Regional: Rio de Janeiro
-Contato direto: (21) 99999-9999
-Responsável: João da Silva
-
-Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados automaticamente na IA."></textarea>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-                <p class="hint-text" style="margin:0">Use para dados específicos da sua regional. Coberturas e regulamento já estão na IA.</p>
-                <span id="knowledge-counter" style="font-size:11px;color:var(--text-muted);font-family:monospace;">0 / 4000 caracteres</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Personality + Aggression Controls -->
-          <div class="card" style="margin-top:0;">
-            <div class="card-header"><span class="card-icon">🎭</span><h2 class="card-title">Comportamento da IA</h2></div>
-
-            <div class="form-group">
-              <label class="form-label">Personalidade <span class="label-hint">— como a IA fala com o cliente</span></label>
-              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px;">
-                <label class="behavior-card" id="card-personality-human">
-                  <input type="radio" name="ai-personality" value="human" checked onchange="selectBehaviorCard('personality',this)">
-                  <div class="behavior-card-inner">
-                    <span class="behavior-icon">🧠</span>
-                    <span class="behavior-title">Humano</span>
-                    <span class="behavior-desc">Natural, empático, usa gírias. Parece uma pessoa real.</span>
-                    <span class="behavior-badge">Padrão</span>
-                  </div>
-                </label>
-                <label class="behavior-card" id="card-personality-balanced">
-                  <input type="radio" name="ai-personality" value="balanced" onchange="selectBehaviorCard('personality',this)">
-                  <div class="behavior-card-inner">
-                    <span class="behavior-icon">⚖️</span>
-                    <span class="behavior-title">Equilibrado</span>
-                    <span class="behavior-desc">Simpático e profissional. Tom leve mas focado.</span>
-                  </div>
-                </label>
-                <label class="behavior-card" id="card-personality-robot">
-                  <input type="radio" name="ai-personality" value="robot" onchange="selectBehaviorCard('personality',this)">
-                  <div class="behavior-card-inner">
-                    <span class="behavior-icon">🤖</span>
-                    <span class="behavior-title">Direto</span>
-                    <span class="behavior-desc">Objetivo e sem rodeios. Respeita o tempo do cliente.</span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <div class="form-group" style="margin-top:18px;">
-              <label class="form-label">Estilo de Vendas <span class="label-hint">— agressividade comercial</span></label>
-              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px;">
-                <label class="behavior-card" id="card-aggression-aggressive">
-                  <input type="radio" name="ai-aggression" value="aggressive" onchange="selectBehaviorCard('aggression',this)">
-                  <div class="behavior-card-inner">
-                    <span class="behavior-icon">🔥</span>
-                    <span class="behavior-title">Agressivo</span>
-                    <span class="behavior-desc">Urgência, prova social, fecha na hora. Máxima conversão.</span>
-                  </div>
-                </label>
-                <label class="behavior-card" id="card-aggression-balanced">
-                  <input type="radio" name="ai-aggression" value="balanced" checked onchange="selectBehaviorCard('aggression',this)">
-                  <div class="behavior-card-inner">
-                    <span class="behavior-icon">⚖️</span>
-                    <span class="behavior-title">Consultivo</span>
-                    <span class="behavior-desc">Ouve, apresenta benefícios e conduz sem pressão.</span>
-                    <span class="behavior-badge">Padrão</span>
-                  </div>
-                </label>
-                <label class="behavior-card" id="card-aggression-soft">
-                  <input type="radio" name="ai-aggression" value="soft" onchange="selectBehaviorCard('aggression',this)">
-                  <div class="behavior-card-inner">
-                    <span class="behavior-icon">🌿</span>
-                    <span class="behavior-title">Educativo</span>
-                    <span class="behavior-desc">Tira dúvidas sem empurrar. Ideal para clientes sensíveis.</span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <div class="form-group" style="margin-top:18px;">
-              <label class="form-label">Tempo de silêncio para esquecer conversa <span class="label-hint">— só ativo se follow-up estiver desligado</span></label>
-              <div class="input-with-unit">
-                <input type="number" id="ai-session-timeout" class="form-input" value="30" min="5" max="240">
-                <span class="input-unit">minutos</span>
-              </div>
-              <p class="hint-text">Se o cliente ficar em silêncio por este tempo, o histórico da conversa é apagado e ela começa do zero.</p>
-            </div>
-          </div>
-
-          <!-- Consultors + Hours -->
-
-          <div style="display:flex;flex-direction:column;gap:16px;">
-            <div class="card">
-              <div class="card-header"><span class="card-icon">👥</span><h2 class="card-title">Consultores</h2></div>
-              <div id="consultors-list" class="consultors-list"></div>
-              <button class="btn btn-outline btn-sm" onclick="addConsultor()" style="width:100%;margin-top:8px;">➕ Adicionar consultor</button>
-              <div class="form-group" style="margin-top:14px;">
-                <label class="form-label">Distribuição de leads</label>
-                <select id="ai-consultor-dist" class="form-input">
-                  <option value="alternated">🔄 Alternado (reveza entre consultores)</option>
-                  <option value="first">👤 Sempre consultor 1</option>
-                  <option value="second">👤 Sempre consultor 2</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card-header"><span class="card-icon">🕐</span><h2 class="card-title">Horários</h2></div>
-              <div class="form-group">
-                <label class="form-label">Atendimento do bot (horário)</label>
-                <div class="range-row">
-                  <input type="time" id="ai-hours-start" class="form-input" value="08:00">
-                  <span class="range-sep">até</span>
-                  <input type="time" id="ai-hours-end" class="form-input" value="22:00">
+              <div class="ai-setting-block">
+                <div class="ai-setting-title"><div><h3>Provedor principal</h3><p>Usado em respostas, intencoes e qualificacao.</p></div></div>
+                <div class="ai-provider-grid">
+                  <label class="ai-provider-choice" id="radio-groq">
+                    <input type="radio" name="ai-provider" value="groq" checked onchange="switchAIProvider('groq')">
+                    <span class="ai-provider-mark"><i data-lucide="zap" aria-hidden="true"></i></span>
+                    <span><strong>Groq</strong><small>Resposta rapida com modelos abertos</small></span>
+                    <span class="ai-choice-check"><i data-lucide="check" aria-hidden="true"></i></span>
+                  </label>
+                  <label class="ai-provider-choice" id="radio-gemini">
+                    <input type="radio" name="ai-provider" value="gemini" onchange="switchAIProvider('gemini')">
+                    <span class="ai-provider-mark gemini"><i data-lucide="sparkles" aria-hidden="true"></i></span>
+                    <span><strong>Google Gemini</strong><small>Modelos Flash para alto volume</small></span>
+                    <span class="ai-choice-check"><i data-lucide="check" aria-hidden="true"></i></span>
+                  </label>
                 </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">Enviar relatório diário às</label>
-                <input type="time" id="ai-report-hour" class="form-input" value="18:00">
-                <p class="hint-text">Você e seu pai receberão um resumo de leads pelo WhatsApp</p>
+
+              <div class="ai-setting-block">
+                <div class="ai-form-grid two">
+                  <label class="ai-field"><span>Modelo principal</span><select id="ai-model" class="form-input"></select><small id="ai-model-hint">Modelo usado para responder ao cliente.</small></label>
+                  <div id="ai-effective-summary" class="ai-effective-summary"><span>Configuracao efetiva</span><strong>Carregando...</strong><small>Origem da credencial e modelo em uso</small></div>
+                </div>
+                <details class="ai-advanced-models">
+                  <summary><span><i data-lucide="sliders-horizontal" aria-hidden="true"></i> Modelos avancados</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+                  <div class="ai-form-grid two">
+                    <label class="ai-field"><span>Qualificacao</span><select id="qualification-model" class="form-input"></select><small>Em branco, herda o modelo principal.</small></label>
+                    <label class="ai-field"><span>Classificacao de intencao</span><select id="classification-model" class="form-input"></select><small>Em branco, herda o modelo de qualificacao.</small></label>
+                  </div>
+                  <label id="ai-gemini-fallback-row" class="ai-toggle-row">
+                    <span><strong>Fallback automatico no Gemini</strong><small>Se o Groq falhar, tenta a chave Gemini cadastrada.</small></span>
+                    <span class="ai-switch"><input type="checkbox" id="gemini-fallback-enabled"><span aria-hidden="true"></span></span>
+                  </label>
+                </details>
+              </div>
+
+              <div class="ai-setting-block">
+                <div class="ai-setting-title"><div><h3>Credenciais</h3><p>As chaves salvas nunca retornam completas para o navegador.</p></div></div>
+                <div class="ai-credential-list">
+                  <div class="ai-credential-row" id="groq-key-group">
+                    <div class="ai-credential-brand"><span class="ai-provider-mark"><i data-lucide="zap" aria-hidden="true"></i></span><span><strong>Groq API Key</strong><small id="groq-key-status">Nenhuma chave configurada</small></span></div>
+                    <div class="ai-secret-input">
+                      <input type="password" id="ai-groq-key" class="form-input" placeholder="gsk_..." autocomplete="new-password" aria-label="Nova chave Groq">
+                      <button type="button" class="ai-icon-button" onclick="toggleAIKeyVisibility('groq')" title="Mostrar ou ocultar chave" aria-label="Mostrar ou ocultar chave Groq"><i data-lucide="eye" aria-hidden="true"></i></button>
+                    </div>
+                    <div class="ai-credential-actions">
+                      <button type="button" class="btn btn-outline btn-sm" onclick="testAIKey('groq')" id="btn-test-key"><i data-lucide="flask-conical" aria-hidden="true"></i>Testar</button>
+                      <button type="button" class="ai-icon-button danger" onclick="clearAIKey('groq')" id="btn-clear-groq-key" title="Remover chave salva" aria-label="Remover chave Groq salva"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+                    </div>
+                  </div>
+                  <div class="ai-credential-row" id="gemini-key-group">
+                    <div class="ai-credential-brand"><span class="ai-provider-mark gemini"><i data-lucide="sparkles" aria-hidden="true"></i></span><span><strong>Gemini API Key</strong><small id="gemini-key-status">Nenhuma chave configurada</small></span></div>
+                    <div class="ai-secret-input">
+                      <input type="password" id="ai-gemini-key" class="form-input" placeholder="AIza..." autocomplete="new-password" aria-label="Nova chave Gemini">
+                      <button type="button" class="ai-icon-button" onclick="toggleAIKeyVisibility('gemini')" title="Mostrar ou ocultar chave" aria-label="Mostrar ou ocultar chave Gemini"><i data-lucide="eye" aria-hidden="true"></i></button>
+                    </div>
+                    <div class="ai-credential-actions">
+                      <button type="button" class="btn btn-outline btn-sm" onclick="testAIKey('gemini')" id="btn-test-key-gem"><i data-lucide="flask-conical" aria-hidden="true"></i>Testar</button>
+                      <button type="button" class="ai-icon-button danger" onclick="clearAIKey('gemini')" id="btn-clear-gemini-key" title="Remover chave salva" aria-label="Remover chave Gemini salva"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="ai-settings-panel" data-ai-panel="identity" aria-labelledby="ai-identity-title">
+              <div class="ai-panel-heading">
+                <div class="ai-panel-icon"><i data-lucide="message-circle-more" aria-hidden="true"></i></div>
+                <div><h2 id="ai-identity-title">Identidade e conversa</h2><p>Personalize como o agente se apresenta e conduz interessados.</p></div>
+              </div>
+              <div class="ai-setting-block">
+                <div class="ai-form-grid two">
+                  <label class="ai-field"><span>Nome do agente</span><input type="text" id="ai-agent-name" class="form-input" maxlength="80" placeholder="Júlia"><small>Usado quando o cliente pergunta quem esta atendendo.</small></label>
+                  <label class="ai-field"><span>Nome da empresa</span><input type="text" id="ai-company-name" class="form-input" maxlength="120" placeholder="Moove Proteção Veicular"><small>Nome apresentado no contexto institucional.</small></label>
+                </div>
+              </div>
+              <div class="ai-setting-block">
+                <div class="ai-setting-title"><div><h3>Tom de conversa</h3><p>Aplica-se ao agente atual sem alterar as regras de seguranca.</p></div></div>
+                <div class="ai-behavior-grid">
+                  <label class="ai-behavior-choice"><input type="radio" name="ai-personality" value="human" checked onchange="selectBehaviorCard('personality',this)"><span><i data-lucide="heart-handshake" aria-hidden="true"></i><strong>Natural</strong><small>Caloroso, espontaneo e adaptavel.</small></span></label>
+                  <label class="ai-behavior-choice"><input type="radio" name="ai-personality" value="balanced" onchange="selectBehaviorCard('personality',this)"><span><i data-lucide="scale" aria-hidden="true"></i><strong>Profissional</strong><small>Cordial, proximo e objetivo.</small></span></label>
+                  <label class="ai-behavior-choice"><input type="radio" name="ai-personality" value="robot" onchange="selectBehaviorCard('personality',this)"><span><i data-lucide="list-checks" aria-hidden="true"></i><strong>Direto</strong><small>Curto e focado no proximo passo.</small></span></label>
+                </div>
+              </div>
+              <div class="ai-setting-block">
+                <div class="ai-setting-title"><div><h3>Conducao comercial</h3><p>Controla o ritmo da conversa quando existe interesse real.</p></div></div>
+                <div class="ai-behavior-grid">
+                  <label class="ai-behavior-choice"><input type="radio" name="ai-aggression" value="aggressive" onchange="selectBehaviorCard('aggression',this)"><span><i data-lucide="fast-forward" aria-hidden="true"></i><strong>Proativa</strong><small>Sugere cedo o menor proximo passo util.</small></span></label>
+                  <label class="ai-behavior-choice"><input type="radio" name="ai-aggression" value="balanced" checked onchange="selectBehaviorCard('aggression',this)"><span><i data-lucide="messages-square" aria-hidden="true"></i><strong>Consultiva</strong><small>Resolve a barreira e avanca naturalmente.</small></span></label>
+                  <label class="ai-behavior-choice"><input type="radio" name="ai-aggression" value="soft" onchange="selectBehaviorCard('aggression',this)"><span><i data-lucide="shield-check" aria-hidden="true"></i><strong>Cautelosa</strong><small>Prioriza duvidas e confianca.</small></span></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="ai-settings-panel" data-ai-panel="handoff" aria-labelledby="ai-handoff-title">
+              <div class="ai-panel-heading">
+                <div class="ai-panel-icon"><i data-lucide="users-round" aria-hidden="true"></i></div>
+                <div><h2 id="ai-handoff-title">Encaminhamento</h2><p>Defina quem recebe casos comerciais e operacionais.</p></div>
+              </div>
+              <div class="ai-setting-block">
+                <div class="ai-setting-title ai-setting-title-action"><div><h3>Consultores</h3><p>O agente confirma o encaminhamento somente depois da entrega.</p></div><button type="button" class="btn btn-outline btn-sm" onclick="addConsultor()"><i data-lucide="user-plus" aria-hidden="true"></i>Adicionar</button></div>
+                <div id="consultors-list" class="consultors-list ai-consultors-list"></div>
+                <label class="ai-field ai-field-compact"><span>Distribuicao</span><select id="ai-consultor-dist" class="form-input"><option value="alternated">Alternar entre consultores ativos</option><option value="first">Sempre o primeiro consultor</option><option value="second">Sempre o segundo consultor</option></select></label>
+              </div>
+              <div class="ai-setting-block">
+                <div class="ai-setting-title"><div><h3>Janela de atendimento</h3><p>Fora deste periodo, o agente informa o horario antes de continuar.</p></div></div>
+                <div class="ai-form-grid two">
+                  <label class="ai-field"><span>Inicio</span><input type="time" id="ai-hours-start" class="form-input" value="08:00"></label>
+                  <label class="ai-field"><span>Fim</span><input type="time" id="ai-hours-end" class="form-input" value="22:00"></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="ai-settings-panel" data-ai-panel="automations" aria-labelledby="ai-automations-title">
+              <div class="ai-panel-heading">
+                <div class="ai-panel-icon"><i data-lucide="workflow" aria-hidden="true"></i></div>
+                <div><h2 id="ai-automations-title">Automacoes</h2><p>Controle retornos, campanhas e relatorios.</p></div>
+              </div>
+              <div class="ai-setting-block">
+                <label class="ai-toggle-row"><span><strong>Follow-up automatico</strong><small>Retoma leads que ficaram em silencio.</small></span><span class="ai-switch"><input type="checkbox" id="followup-enabled" checked><span aria-hidden="true"></span></span></label>
+                <div class="ai-form-grid three">
+                  <label class="ai-field"><span>Primeiro retorno</span><div class="ai-unit-input"><input type="number" id="followup-h1" class="form-input" value="4" min="1" max="72"><small>horas</small></div></label>
+                  <label class="ai-field"><span>Segundo retorno</span><div class="ai-unit-input"><input type="number" id="followup-h2" class="form-input" value="24" min="1" max="168"><small>horas</small></div></label>
+                  <label class="ai-field"><span>Marcar como frio</span><div class="ai-unit-input"><input type="number" id="followup-cold" class="form-input" value="48" min="24" max="720"><small>horas</small></div></label>
+                </div>
+              </div>
+              <div class="ai-setting-block ai-toggle-stack">
+                <label class="ai-toggle-row"><span><strong>Respostas de campanha pela IA</strong><small>O agente assume quando um contato responde uma campanha.</small></span><span class="ai-switch"><input type="checkbox" id="campaign-loop-enabled" checked><span aria-hidden="true"></span></span></label>
+                <label class="ai-toggle-row"><span><strong>Campanha de regularizacao</strong><small>Afeta apenas contatos da campanha ativa de cobranca.</small></span><span class="ai-switch"><input type="checkbox" id="collections-mode-enabled"><span aria-hidden="true"></span></span></label>
+                <label class="ai-toggle-row"><span><strong>Relatorio diario</strong><small>Envia o resumo aos consultores cadastrados.</small></span><span class="ai-switch"><input type="checkbox" id="report-enabled" checked><span aria-hidden="true"></span></span></label>
+              </div>
+              <div class="ai-setting-block">
+                <div class="ai-form-grid two">
+                  <label class="ai-field"><span>Horario do relatorio</span><input type="time" id="ai-report-hour" class="form-input" value="18:00"></label>
+                  <label class="ai-field"><span>Limpar conversa apos silencio</span><div class="ai-unit-input"><input type="number" id="ai-session-timeout" class="form-input" value="30" min="5" max="240"><small>minutos</small></div><small>Usado apenas quando o follow-up esta desligado.</small></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="ai-settings-panel" data-ai-panel="knowledge" aria-labelledby="ai-knowledge-title">
+              <div class="ai-panel-heading">
+                <div class="ai-panel-icon"><i data-lucide="library" aria-hidden="true"></i></div>
+                <div><h2 id="ai-knowledge-title">Conhecimento</h2><p>Complemente a base oficial com dados da operacao.</p></div>
+              </div>
+              <div class="ai-setting-block">
+                <label class="ai-field"><span>Informacoes operacionais</span><textarea id="ai-company-info" class="form-textarea" rows="8" maxlength="4000" oninput="updateKnowledgeCounter(this)" placeholder="Horario especial, regional, contatos e orientacoes internas confirmadas."></textarea><span class="ai-field-meta"><small>O agente atual usa este texto como fonte operacional.</small><small id="knowledge-counter">0 / 4.000 caracteres</small></span></label>
+              </div>
+              <div class="ai-setting-block">
+                <div class="ai-setting-title"><div><h3>Documentos PDF</h3><p>Arquivos importados entram na busca de conhecimento do agente.</p></div></div>
+                <div class="ai-docs-grid">
+                  <div id="pdf-upload-area" class="upload-area ai-upload-area" onclick="document.getElementById('pdf-input')?.click()" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="this.classList.remove('drag-over'); handlePDFDrop(event)">
+                    <input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)">
+                    <i data-lucide="file-up" aria-hidden="true"></i><strong>Adicionar PDF</strong><small>Arquivo de ate 32 MB</small>
+                  </div>
+                  <div id="docs-list" class="docs-list ai-docs-list"><div class="ai-empty-state"><i data-lucide="files" aria-hidden="true"></i><span>Nenhum documento importado.</span></div></div>
+                </div>
+              </div>
+            </section>
+
+            <div class="ai-save-bar">
+              <div class="ai-save-state"><span id="ai-save-state-icon"><i data-lucide="check-circle-2" aria-hidden="true"></i></span><span><strong id="ai-save-state">Configuracoes sincronizadas</strong><small id="ai-save-detail">Nenhuma alteracao pendente</small></span></div>
+              <div class="ai-save-actions">
+                <button type="button" class="btn btn-outline" id="ai-reset-button" onclick="resetAIConfigChanges()" disabled><i data-lucide="rotate-ccw" aria-hidden="true"></i>Descartar</button>
+                <button type="button" class="btn btn-primary" id="ai-save-button" onclick="saveAIConfig()" disabled><i data-lucide="save" aria-hidden="true"></i>Salvar alteracoes</button>
               </div>
             </div>
           </div>
         </div>
-
-        <div class="card">
-          <div class="card-header"><span class="card-icon">📚</span><h2 class="card-title">Documentos da IA</h2></div>
-          <div class="content-grid two-col">
-            <div>
-              <label class="form-label">Upload de PDFs</label>
-              <div
-                id="pdf-upload-area"
-                class="upload-area"
-                onclick="document.getElementById('pdf-input')?.click()"
-                ondragover="event.preventDefault(); this.classList.add('drag-over')"
-                ondragleave="this.classList.remove('drag-over')"
-                ondrop="this.classList.remove('drag-over'); handlePDFDrop(event)"
-              >
-                <input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)">
-                <span class="upload-icon">📄</span>
-                <p>Clique ou arraste o PDF aqui</p>
-                <span class="upload-hint">Apenas arquivos PDF · max. 32MB</span>
-              </div>
-              <p class="hint-text">Os PDFs carregados entram no contexto da IA com limite reduzido para manter a resposta rapida e economizar tokens.</p>
-            </div>
-            <div>
-              <label class="form-label">Documentos carregados</label>
-              <div id="docs-list" class="docs-list">
-                <div style="color:var(--text-3);font-size:13px;padding:8px 0;">Nenhum documento carregado ainda.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Follow-up + Loop -->
-        <div class="content-grid two-col">
-          <div class="card">
-            <div class="card-header"><span class="card-icon">⏰</span><h2 class="card-title">Follow-up Automático</h2></div>
-            <div class="form-group">
-              <label class="toggle-label">
-                <input type="checkbox" id="followup-enabled" checked>
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                <span>Ativar follow-up automático</span>
-              </label>
-              <p class="hint-text">Manda mensagem automática para leads que ficaram em silêncio.</p>
-            </div>
-            <div class="form-group">
-              <label class="form-label">1ª mensagem após silêncio de</label>
-              <div class="input-with-unit">
-                <input type="number" id="followup-h1" class="form-input" value="4" min="1" max="72">
-                <span class="input-unit">horas</span>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">2ª mensagem após</label>
-              <div class="input-with-unit">
-                <input type="number" id="followup-h2" class="form-input" value="24" min="1" max="168">
-                <span class="input-unit">horas</span>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Marcar como frio após</label>
-              <div class="input-with-unit">
-                <input type="number" id="followup-cold" class="form-input" value="48" min="24" max="720">
-                <span class="input-unit">horas</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header"><span class="card-icon">🔄</span><h2 class="card-title">Loop Campanha → IA</h2></div>
-            <div class="form-group">
-              <label class="toggle-label">
-                <input type="checkbox" id="campaign-loop-enabled" checked>
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                <span>Ativar loop de campanha</span>
-              </label>
-              <p class="hint-text">Quando alguém responder uma campanha enviada por você, o agente de IA assume automaticamente a conversa para qualificar o lead.</p>
-            </div>
-            <div class="form-group">
-              <label class="toggle-label">
-                <input type="checkbox" id="collections-mode-enabled">
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                <span>Modo inadimplencia</span>
-              </label>
-              <p class="hint-text">Quando ligado, contatos da campanha ativa de cobranca deixam de ser tratados como prospeccao e passam a receber respostas de regularizacao.</p>
-            </div>
-            <div class="form-group">
-              <label class="toggle-label">
-                <input type="checkbox" id="report-enabled" checked>
-                <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                <span>Enviar relatório diário</span>
-              </label>
-              <p class="hint-text">Resumo enviado no WhatsApp dos consultores todos os dias no horário configurado.</p>
-            </div>
-            <div class="info-box" style="margin-top:12px;">
-              <h3>📊 Como funciona o relatório</h3>
-              <p>Cada consultor recebe um resumo com número de leads, taxa de conversão e lista dos leads qualificados do dia.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Save -->
-        <button class="btn btn-primary btn-lg" onclick="saveAIConfig()" style="width:100%;">💾 Salvar Configurações</button>
-
       </section>
 
       <!-- ── Tab: Internal ─────────────── -->
@@ -1205,14 +1091,14 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
       <section id="tab-status" class="tab-pane">
         <div class="page-header">
           <h1 class="page-title">Status do Sistema</h1>
-          <p class="page-sub">Acompanhe em tempo real o que esta saudavel, degradado ou parado no ZapBot Pro.</p>
+          <p class="page-sub">Acompanhe em tempo real o que esta saudavel, degradado ou parado no MoOve IA.</p>
         </div>
 
         <div class="card status-hero-card">
           <div class="status-hero-top">
             <div>
               <div class="status-eyebrow">Painel ao vivo</div>
-              <h2 class="status-hero-title">Saude operacional do ZapBot</h2>
+              <h2 class="status-hero-title">Saude operacional do MoOve IA</h2>
               <p class="status-hero-copy" id="system-status-summary">Carregando diagnostico consolidado...</p>
             </div>
             <div class="status-hero-stamp">
@@ -1590,7 +1476,7 @@ Dica: O regulamento, coberturas e cotas da Moove já estão pré-carregados auto
 
   <script src="/vendor/lucide/lucide.min.js"></script>
   <script src="ad-research-ui.js"></script>
-  <script src="app.js?v=3.2.0-leads"></script>
+  <script src="app.js?v=4.0.0-ai-console"></script>
   <script src="leads-workspace.js?v=3.2.0-leads"></script>
   <script src="ad-research.js"></script>
 </body>

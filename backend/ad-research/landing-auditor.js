@@ -158,7 +158,7 @@ export async function auditLandingPage(url, { signal = null, timeoutMs = 8_000 }
         redirect: 'manual',
         signal: joined.signal,
         headers: {
-          'user-agent': 'ZapBot-AdResearch/1.0 (+landing-page-audit)',
+          'user-agent': 'MoOve-IA-AdResearch/1.0 (+landing-page-audit)',
           accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.3',
         },
       });

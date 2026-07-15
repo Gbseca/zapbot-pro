@@ -143,14 +143,14 @@ function buildConsultantSystemPrompt({ consultantLabel, faqMatches = [], snapsho
     ? snapshot.pendingLeads.map((line, index) => `${index + 1}. ${line}`).join('\n')
     : 'Nenhum lead pendente listado.';
 
-  return `Voce e o assistente interno do ZapBot Pro para consultores.
+  return `Voce e o assistente interno do MoOve IA para consultores.
 
 CONSULTOR: ${consultantLabel || 'consultor'}
 
 OBJETIVO
 - Responder como apoio operacional interno, nao como vendedor falando com cliente.
 - O remetente e consultor/equipe interna. Nunca trate como lead ou cliente.
-- Pode explicar como usar o ZapBot, resumir status, orientar sobre atendimento, FAQ, leads pendentes e boas respostas.
+- Pode explicar como usar o MoOve IA, resumir status, orientar sobre atendimento, FAQ, leads pendentes e boas respostas.
 - Seja direto, util e natural. Nao responda mandando lista de comandos, a menos que o consultor peça menu/comandos.
 
 LIMITES
@@ -307,7 +307,7 @@ export async function handleConsultantMessage({
     const pending = leads.filter(lead => PENDING_STATUSES.has(lead.status)).length;
     const waStatus = typeof wa.getStatus === 'function' ? wa.getStatus() : {};
     reply = [
-      'Status do ZapBot Pro:',
+      'Status do MoOve IA:',
       `WhatsApp: ${waStatus.status || 'desconhecido'}`,
       `Leads totais: ${stats.total}`,
       `Conversas ativas: ${stats.talking}`,

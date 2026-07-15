@@ -1779,6 +1779,17 @@ export function buildKnowledgeQuery(message = '', lead = {}) {
 export function buildCustomerAgentContext({ config = {}, lead = {}, message = '', knowledge = {} } = {}) {
   const agentName = config.agentName || 'Júlia';
   const companyName = config.companyName || 'Moove Proteção Veicular';
+  const personalityGuidance = {
+    human: 'Fale de modo caloroso e espontaneo, adaptando o vocabulario ao cliente sem exagerar em girias e sem fingir ser humana.',
+    balanced: 'Fale de modo cordial, profissional e natural, mantendo clareza e proximidade.',
+    robot: 'Fale de modo direto, objetivo e economico, sem perder educacao ou contexto.',
+  }[config.aiPersonality] || 'Fale de modo caloroso e espontaneo, sem exagerar em girias e sem fingir ser humana.';
+  const salesGuidance = {
+    aggressive: 'Conducao proativa: sugira cedo o menor proximo passo util quando houver interesse real, sem pressionar, criar urgencia ou atropelar duvidas.',
+    balanced: 'Conducao consultiva: entenda a necessidade, responda a barreira atual e avance de forma natural, sem pressao.',
+    soft: 'Conducao cautelosa: priorize duvidas e confianca, oferecendo o proximo passo apenas quando o cliente demonstrar abertura.',
+  }[config.aiAggression] || 'Conducao consultiva: entenda a necessidade, responda a barreira atual e avance de forma natural, sem pressao.';
+  const configuredCompanyInfo = cleanString(config.companyInfo, 4000);
   const systemPrompt = `Você é ${agentName}, assistente de atendimento e vendas da ${companyName} no WhatsApp.
 
 OBJETIVO E INTENÇÃO
@@ -1798,6 +1809,9 @@ FONTES E VERDADE
 
 CONVERSA E VENDA
 - Escreva em português brasileiro natural, adaptado ao jeito do cliente, com 1 a 3 frases curtas. Sem emoji, "senhor(a)", burocracia, lista desnecessária ou mais de UMA pergunta.
+- Preferencia de tom configurada pelo administrador: ${personalityGuidance}
+- Preferencia de conducao comercial configurada pelo administrador: ${salesGuidance}
+- Essas preferencias nunca substituem as regras de seguranca, verdade, intencao, pausa, recusa ou encaminhamento deste prompt.
 - Responda primeiro e somente o que foi perguntado. Em condição específica, não despeje outros benefícios ou requisitos. Não encerre respostas completas com perguntas de preenchimento.
 - Venda consultivamente: descubra a prioridade quando ela estiver vaga, conecte apenas fatos relevantes e proponha o menor próximo passo. Sem pressão, medo, urgência falsa, elogio genérico, superioridade, economia ou vantagem sem fonte.
 - Escolha o próximo movimento pela barreira real: preço, confiança, prazo, privacidade, processo ou decisão. Resolva a barreira antes de pedir qualquer dado.
@@ -1847,6 +1861,9 @@ JSON OBRIGATÓRIO
 ${JSON.stringify(buildLeadSnapshot(lead), null, 2)}
 
 CONFIANÇA DA BUSCA DE CONHECIMENTO: ${knowledge.confidence || 'low'}
+INFORMACOES OPERACIONAIS CONFIGURADAS PELO ADMINISTRADOR
+${configuredCompanyInfo || '(nenhuma informacao operacional adicional)'}
+
 FONTES DISPONÍVEIS
 ${String(knowledge.text || '').trim().slice(0, 6000) || '(nenhuma fonte confirmou o assunto)'}
 
