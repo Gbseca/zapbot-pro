@@ -777,6 +777,24 @@ test('redacts customer identifiers before they reach the model context', () => {
   assert.doesNotMatch(bounded.userMessage, /x{801}|y{6001}/);
 });
 
+test('applies configured tone, sales conduct and operational information to the current agent', () => {
+  const context = buildCustomerAgentContext({
+    config: {
+      aiPersonality: 'robot',
+      aiAggression: 'aggressive',
+      companyInfo: 'Regional Rio: atendimento especial aos sabados.',
+    },
+    lead: {},
+    message: 'como funciona?',
+    knowledge: knowledge([]),
+  });
+
+  assert.match(context.systemPrompt, /Fale de modo direto, objetivo e economico/);
+  assert.match(context.systemPrompt, /Conducao proativa/);
+  assert.match(context.systemPrompt, /sem pressionar, criar urgencia/);
+  assert.match(context.userMessage, /Regional Rio: atendimento especial aos sabados/);
+});
+
 test('does not turn a casual unknown message into an unnecessary handoff', () => {
   const turn = validateCustomerAgentTurn(generated({
     reply: 'Sem problema! Quando precisar, estou por aqui.',

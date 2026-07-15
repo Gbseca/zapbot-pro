@@ -1,7 +1,7 @@
 {
-  "name": "zapbot-pro",
+  "name": "moove-ia",
   "version": "1.0.0",
-  "description": "ZapBot Pro - Automação de WhatsApp custo zero",
+  "description": "MoOve IA - atendimento inteligente e CRM para WhatsApp",
   "main": "backend/server.js",
   "type": "module",
   "scripts": {

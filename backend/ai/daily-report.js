@@ -40,7 +40,7 @@ async function sendDailyReport(wa) {
     : '\n_Nenhum lead qualificado hoje._\n\n';
 
   const msg =
-    `📊 *Resumo do dia — ZapBot Pro*\n` +
+    `📊 *Resumo do dia — MoOve IA*\n` +
     `_${dateStr}_\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━━\n` +
     `🆕 Novos contatos hoje: *${stats.todayTotal}*\n` +
@@ -51,7 +51,7 @@ async function sendDailyReport(wa) {
     `📈 Taxa de conversão: *${stats.conversationRate}%*\n` +
     qualifiedSection +
     `━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `_Relatório automático ZapBot Pro_ 🤖`;
+    `_Relatório automático MoOve IA_ 🤖`;
 
   for (const consultor of consultors) {
     try {

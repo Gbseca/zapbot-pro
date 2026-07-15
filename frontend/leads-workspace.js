@@ -113,7 +113,7 @@
   };
 
   const SOUND_STORAGE_KEY = 'zapbot_lead_sound_enabled';
-  const baseDocumentTitle = String(document.title || 'ZapBot Pro').replace(/^\[\d+\]\s*/, '');
+  const baseDocumentTitle = String(document.title || 'MoOve IA').replace(/^\[\d+\]\s*/, '');
   const state = {
     initialized: false,
     sessionToken: '',
@@ -864,7 +864,7 @@
 
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
-        const notification = new Notification(`ZapBot Pro - ${copy.title}`, { body: copy.message, tag: `zapbot-${kind}` });
+        const notification = new Notification(`MoOve IA - ${copy.title}`, { body: copy.message, tag: `zapbot-${kind}` });
         notification.onclick = () => {
           window.focus();
           if (typeof window.switchTab === 'function') window.switchTab('leads');
