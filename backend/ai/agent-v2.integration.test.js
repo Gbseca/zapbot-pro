@@ -252,3 +252,61 @@ test('keeps the conversation responsive when no AI key is configured', async () 
     writeConfig();
   }
 });
+
+test('respects a temporary quote pause and a later stop command during provider outage', async () => {
+  const originalFetch = global.fetch;
+  const originalGroqKey = process.env.GROQ_API_KEY;
+  const originalGroqKeyAlias = process.env.GROQ_KEY;
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+  const originalGeminiKeyAlias = process.env.GEMINI_KEY;
+  const originalGoogleKey = process.env.GOOGLE_API_KEY;
+  let fetchCalls = 0;
+  writeConfig({ groqKey: '', geminiKey: '' });
+  process.env.GROQ_API_KEY = '';
+  process.env.GROQ_KEY = '';
+  process.env.GEMINI_API_KEY = '';
+  process.env.GEMINI_KEY = '';
+  process.env.GOOGLE_API_KEY = '';
+  global.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error('network should not be called without a key');
+  };
+
+  try {
+    const phone = '5511987654995';
+    const wa = new MockWhatsApp();
+    const messages = [
+      'Queria fazer uma cotação pro veículo do meu filho',
+      'Um momento vou perguntar a ele',
+      'Calma vou perguntar pra ele',
+      'Para porra',
+    ];
+
+    for (let index = 0; index < messages.length; index += 1) {
+      await handleIncomingMessage(wa, textMessage(phone, messages[index]));
+      await waitFor(() => wa.messages.length > index);
+    }
+
+    assert.equal(fetchCalls, 0);
+    assert.match(wa.messages[0].message, /modelo e o ano/i);
+    assert.doesNotMatch(wa.messages[1].message, /modelo|ano|\?|consultor/i);
+    assert.match(wa.messages[1].message, /aguard|confirmar|calma/i);
+    assert.doesNotMatch(wa.messages[2].message, /modelo|ano|\?|consultor/i);
+    assert.notEqual(wa.messages[2].message, wa.messages[1].message);
+    assert.match(wa.messages[3].message, /n[aã]o vou insistir/i);
+    assert.doesNotMatch(wa.messages[3].message, /consultor|encaminh/i);
+
+    const lead = getLead(phone);
+    assert.equal(lead.aiProviderLastUsed, 'fallback');
+    assert.equal(lead.lastIntent, 'no_interest');
+    assert.equal(lead.status, 'no_interest');
+  } finally {
+    global.fetch = originalFetch;
+    restoreEnv('GROQ_API_KEY', originalGroqKey);
+    restoreEnv('GROQ_KEY', originalGroqKeyAlias);
+    restoreEnv('GEMINI_API_KEY', originalGeminiKey);
+    restoreEnv('GEMINI_KEY', originalGeminiKeyAlias);
+    restoreEnv('GOOGLE_API_KEY', originalGoogleKey);
+    writeConfig();
+  }
+});

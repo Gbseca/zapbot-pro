@@ -1030,6 +1030,88 @@ test('keeps a soft sales hesitation active even if the model tries to close it',
   assert.equal(turn.shouldStopAutomation, false);
 });
 
+test('waits for the customer to confirm vehicle data without repeating the pending question', () => {
+  const lead = {
+    phone: '5511999999999',
+    stage: 'ask_model_year',
+    history: [
+      { role: 'user', content: 'Queria fazer uma cotação pro veículo do meu filho' },
+      { role: 'assistant', content: 'Para eu adiantar sua cotação, qual é o modelo e o ano do veículo?' },
+    ],
+    aiMemory: {
+      customerGoal: 'fazer uma cotação',
+      currentTopic: 'cotação de proteção veicular',
+      salesStage: 'qualification',
+      primaryNeed: 'receber uma cotação',
+      pendingQuestion: 'modelo e ano do veículo',
+      lastQuestionAsked: 'Para eu adiantar sua cotação, qual é o modelo e o ano do veículo?',
+    },
+  };
+  const first = validateCustomerAgentTurn(generated({
+    reply: 'Para eu adiantar sua cotação, qual é o modelo e o ano do veículo?',
+    primaryIntent: 'sales_quote',
+    action: 'ask_model_year',
+    answerStatus: 'not_applicable',
+    knowledgeIds: [],
+  }), {
+    lead,
+    message: 'Um momento vou perguntar a ele',
+    knowledge: knowledge([]),
+  });
+
+  assert.equal(first.primaryIntent, 'other');
+  assert.equal(first.action, 'respond');
+  assert.equal(first.preservePendingQualification, true);
+  assert.equal(first.shouldStopAutomation, false);
+  assert.doesNotMatch(first.reply, /modelo|ano|\?|consultor/i);
+  assert.match(first.reply, /aguardo|confirmar|calma/i);
+  assert.equal(first.memory.pendingQuestion, 'modelo e ano do veículo');
+
+  lead.history.push({ role: 'assistant', content: first.reply });
+  const second = validateCustomerAgentTurn(generated({
+    reply: 'Para eu adiantar sua cotação, qual é o modelo e o ano do veículo?',
+    primaryIntent: 'sales_quote',
+    action: 'ask_model_year',
+    answerStatus: 'not_applicable',
+    knowledgeIds: [],
+  }), {
+    lead,
+    message: 'Calma vou perguntar pra ele',
+    knowledge: knowledge([]),
+  });
+
+  assert.equal(second.primaryIntent, 'other');
+  assert.equal(second.action, 'respond');
+  assert.notEqual(second.reply, first.reply);
+  assert.doesNotMatch(second.reply, /modelo|ano|\?|consultor/i);
+});
+
+test('treats an angry stop command as refusal instead of a human handoff', () => {
+  const turn = validateCustomerAgentTurn(generated({
+    reply: 'Entendi. Encaminhei sua mensagem para um consultor.',
+    primaryIntent: 'human_requested',
+    action: 'handoff_operational',
+    answerStatus: 'not_applicable',
+    knowledgeIds: [],
+  }), {
+    lead: {
+      phone: '5511999999999',
+      stage: 'ask_model_year',
+      history: [
+        { role: 'assistant', content: 'Para eu adiantar sua cotação, qual é o modelo e o ano do veículo?' },
+      ],
+    },
+    message: 'Para porra',
+    knowledge: knowledge([]),
+  });
+
+  assert.equal(turn.primaryIntent, 'no_interest');
+  assert.equal(turn.action, 'stop');
+  assert.equal(turn.shouldHandoff, false);
+  assert.equal(turn.shouldStopAutomation, true);
+  assert.doesNotMatch(turn.reply, /consultor|encaminh/i);
+});
+
 test('blocks a broad promise of one hundred percent of FIPE', () => {
   const source = { id: 'coverage.fire', content: 'Incendio decorrente de colisao: 100% da FIPE.' };
   const turn = validateCustomerAgentTurn(generated({

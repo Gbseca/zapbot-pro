@@ -241,7 +241,10 @@ export function applyConversationDecisionToLead(lead, decision, content = {}) {
     };
     lead.pendingHandoffReason = decision.notes || lead.pendingHandoffReason || null;
   } else if (decision.shouldStopAutomation) {
-    lead.status = 'human_requested';
+    const isSalesRefusal = decision.conversationMode === 'sales'
+      && decision.intent === 'no_interest'
+      && !decision.shouldHandoff;
+    lead.status = isSalesRefusal ? 'no_interest' : 'human_requested';
   } else {
     lead.status = lead.status || 'talking';
   }

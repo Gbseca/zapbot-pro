@@ -54,6 +54,11 @@ const SAFE_SALES_HANDOFF_REPLY = 'Encaminhei seu atendimento para um consultor c
 const SAFE_OBJECTION_HANDOFF_REPLY = 'Entendi sua preocupação com essa condição. Encaminhei sua dúvida para um consultor esclarecer os detalhes do seu caso.';
 const SAFE_OBJECTION_CONTINUATION = 'Entendo sua preocupação. O que você gostaria de esclarecer sobre esse ponto?';
 const SAFE_HESITATION_REPLY = 'Sem problema. Ficou alguma dúvida que eu possa esclarecer?';
+const TEMPORARY_WAIT_REPLIES = [
+  'Claro, pode perguntar. Fico no aguardo.',
+  'Tudo bem, pode confirmar com calma.',
+  'Sem problema, aguardo você confirmar.',
+];
 const MODEL_YEAR_QUESTION = 'Para eu adiantar sua cotação, qual é o modelo e o ano do veículo?';
 const MODEL_QUESTION = 'Para eu adiantar sua cotação, qual é o modelo do veículo?';
 const YEAR_QUESTION = 'Para eu adiantar sua cotação, qual é o ano do veículo?';
@@ -595,6 +600,55 @@ function wasVehicleDataQuestionRecentlyAsked(lead = {}) {
     && /\bano\b/i.test(String(entry.content || '')));
 }
 
+function hasPendingVehicleQualification(lead = {}) {
+  const memoryQuestion = [
+    lead.aiMemory?.pendingQuestion,
+    lead.aiMemory?.lastQuestionAsked,
+  ].filter(Boolean).join(' ');
+  return lead.stage === 'ask_model_year'
+    || (lead.aiMemory?.salesStage === 'qualification' && /\b(?:modelo|ano)\b/i.test(memoryQuestion))
+    || /\b(?:modelo|ano)\b/i.test(memoryQuestion)
+    || wasVehicleDataQuestionRecentlyAsked(lead);
+}
+
+export function isTemporaryCustomerWait(message = '', lead = {}) {
+  if (!hasPendingVehicleQualification(lead)) return false;
+  const normalized = String(message || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return false;
+
+  const shortPause = /^(?:calma(?: ai)?|pera(?: ai)?|perai|espera(?: ai)?|aguarda(?: ai)?|(?:so )?um momento|(?:so )?um minut(?:o|inho))(?: por favor)?$/;
+  const checkingWithSomeone = /\b(?:vou|deixa eu|preciso)\s+(?:perguntar|confirmar|conferir|ver|falar)\b.{0,70}\b(?:ele|ela|filho|filha|dono|dona|proprietario|proprietaria|pai|mae|modelo|ano|dados?|informacoes?|com|pra|pro|para)\b/;
+  const pauseThenCheck = /\b(?:calma|pera(?: ai)?|perai|espera(?: ai)?|aguarda(?: ai)?|(?:so )?um momento|(?:so )?um minut(?:o|inho))\b.{0,55}\b(?:vou|deixa eu|preciso)\s+(?:perguntar|confirmar|conferir|ver|falar)\b/;
+  return shortPause.test(normalized)
+    || checkingWithSomeone.test(normalized)
+    || pauseThenCheck.test(normalized);
+}
+
+export function buildTemporaryWaitReply(lead = {}) {
+  const previousReplies = new Set((lead.history || [])
+    .filter((entry) => entry?.role === 'assistant')
+    .slice(-8)
+    .map((entry) => cleanString(entry.content, 300).toLowerCase()));
+  return TEMPORARY_WAIT_REPLIES.find((reply) => !previousReplies.has(reply.toLowerCase()))
+    || 'Certo, continuo aguardando sua confirmação.';
+}
+
+function resolveTemporaryWaitReply(generatedReply = '', lead = {}) {
+  const candidate = removeVehicleDataQuestion(generatedReply).trim();
+  const safeAcknowledgement = candidate
+    && !candidate.includes('?')
+    && !/\b(?:encaminh|consultor|atendente|modelo|ano|placa|cota[cç][aã]o)\b/i.test(candidate)
+    && /\b(?:aguard|calma|sem pressa|pode perguntar|pode confirmar|claro|tudo bem|sem problema)\b/i.test(candidate)
+    && !wasReplyAlreadySent(candidate, lead);
+  return safeAcknowledgement ? candidate : buildTemporaryWaitReply(lead);
+}
+
 function hasPriorConfirmedHandoff(lead = {}) {
   return (lead.history || []).slice(-8).some((entry) => entry?.role === 'assistant'
     && /\b(?:encaminh(?:ei|ado|ada)|passei|direcionei)\b/i.test(String(entry.content || ''))
@@ -1062,10 +1116,15 @@ export function validateCustomerAgentTurn(raw, {
     ? parsed.answerStatus
     : 'unknown';
   const deterministicDecision = classifyDeterministicIntent(message);
+  const temporaryCustomerWait = isTemporaryCustomerWait(message, lead)
+    && !(deterministicDecision.explicit && deterministicDecision.mode === 'operational');
   const deterministicOperationalIntent = deterministicDecision.explicit
     && deterministicDecision.mode === 'operational'
     ? (deterministicDecision.intent === 'angry_customer' ? 'human_requested' : deterministicDecision.intent)
     : null;
+  const deterministicConversationStop = deterministicDecision.explicit
+    && deterministicDecision.mode === 'sales'
+    && deterministicDecision.intent === 'no_interest';
   const knowledgeIds = [...new Set(
     cleanStringList(parsed.knowledgeIds, 10, 120)
       .map(normalizeKnowledgeId)
@@ -1103,6 +1162,20 @@ export function validateCustomerAgentTurn(raw, {
     secondaryIntent = 'none';
     action = 'handoff_operational';
     mode = 'operational';
+    answerStatus = 'not_applicable';
+  }
+  if (temporaryCustomerWait) {
+    primaryIntent = 'other';
+    secondaryIntent = 'none';
+    action = 'respond';
+    mode = 'sales';
+    answerStatus = 'not_applicable';
+  }
+  if (deterministicConversationStop) {
+    primaryIntent = 'no_interest';
+    secondaryIntent = 'none';
+    action = 'stop';
+    mode = 'sales';
     answerStatus = 'not_applicable';
   }
   if (ambiguityReply) {
@@ -1496,6 +1569,22 @@ export function validateCustomerAgentTurn(raw, {
     reply = SAFE_OPERATIONAL_REPLY;
   }
 
+  if (temporaryCustomerWait) {
+    primaryIntent = 'other';
+    secondaryIntent = 'none';
+    action = 'respond';
+    mode = 'sales';
+    answerStatus = 'not_applicable';
+    reply = resolveTemporaryWaitReply(parsed.reply, lead);
+  } else if (deterministicConversationStop) {
+    primaryIntent = 'no_interest';
+    secondaryIntent = 'none';
+    action = 'stop';
+    mode = 'sales';
+    answerStatus = 'not_applicable';
+    reply = SAFE_STOP_REPLY;
+  }
+
   if (action === 'ask_model_year') {
     reply = ensureVehicleDataQuestion(reply, {
       model: lead.model || extractedFacts.vehicleModel,
@@ -1567,6 +1656,30 @@ export function validateCustomerAgentTurn(raw, {
     memory.pendingQuestion = '';
     memory.lastQuestionAsked = '';
   }
+  if (temporaryCustomerWait) {
+    const previousMemory = lead.aiMemory || {};
+    const pendingQuestion = !lead.model && !lead.year
+      ? 'modelo e ano do veículo'
+      : !lead.model
+        ? 'modelo do veículo'
+        : 'ano do veículo';
+    memory.customerGoal = cleanString(previousMemory.customerGoal || 'fazer uma cotação', 180);
+    memory.currentTopic = cleanString(previousMemory.currentTopic || 'cotação de proteção veicular', 120);
+    memory.salesStage = 'qualification';
+    memory.primaryNeed = cleanString(previousMemory.primaryNeed || 'receber uma cotação', 180);
+    memory.pendingQuestion = cleanString(previousMemory.pendingQuestion || pendingQuestion, 180);
+    memory.lastQuestionAsked = cleanString(
+      previousMemory.lastQuestionAsked
+        || [...(lead.history || [])].reverse().find((entry) => entry?.role === 'assistant'
+          && /\b(?:modelo|ano)\b/i.test(String(entry.content || '')))?.content,
+      180,
+    );
+  }
+  if (deterministicConversationStop) {
+    memory.salesStage = 'closed';
+    memory.pendingQuestion = '';
+    memory.lastQuestionAsked = '';
+  }
   if (associationStatusOnly) {
     memory.customerType = 'associated';
     memory.currentTopic = 'atendimento de associado';
@@ -1611,6 +1724,7 @@ export function validateCustomerAgentTurn(raw, {
     provider,
     model,
     architecture: 'customer-agent-v2',
+    preservePendingQualification: temporaryCustomerWait,
   };
 }
 
@@ -1689,9 +1803,11 @@ CONVERSA E VENDA
 - Escolha o próximo movimento pela barreira real: preço, confiança, prazo, privacidade, processo ou decisão. Resolva a barreira antes de pedir qualquer dado.
 - Sinal claro de compra pede avanço: colete somente modelo/ano quando faltarem e encaminhe assim que houver dados suficientes ou pedido para fechar.
 - Não elogie marca/modelo. Não pergunte por cotação após toda dúvida. Uma pergunta deve ter função concreta e nunca repetir algo respondido.
+- Se o cliente disser que vai perguntar, conferir ou confirmar a informação e pedir um momento, reconheça a pausa sem repetir a pergunta. Mantenha o dado pendente e aguarde.
 - Interesse em cotação sem modelo/ano: ask_model_year. Preço real com modelo e ano conhecidos, cliente pronto ou pedido de consultor: handoff_sales. Não troque mensalidade por cota/franquia.
 - A placa é opcional e serve só para identificar o veículo e organizar a cotação. Explique isso se perguntarem; aceite recusa ou veículo ainda sem placa e encaminhe sem insistir.
 - Recusa explícita: stop, sem insistir ou fingir cancelamento. Cancelamento da proteção por associado é cancel_request operacional.
+- "Para", "pare" ou "chega" dirigidos à conversa são recusa/stop, mesmo com irritação ou palavrão. Só encaminhe por irritação quando houver um problema real ou pedido de atendimento humano.
 
 OBJEÇÕES
 - Reconheça brevemente e resolva a causa clara com fonte; se estiver vaga, faça uma pergunta específica. Nunca responda só "entendo sua preocupação".
@@ -1838,7 +1954,7 @@ export function customerAgentTurnToDecision(turn = {}, lead = {}) {
     secondaryIntent: turn.secondaryIntent || 'none',
     emotion: turn.emotion || 'neutral',
     conversationMode: turn.mode || 'sales',
-    step: stepMap[turn.action] || 'answer_question',
+    step: turn.preservePendingQualification ? 'ask_model_year' : (stepMap[turn.action] || 'answer_question'),
     nextAction: turn.action || 'respond',
     shouldHandoff: !!turn.shouldHandoff && !turn.shouldAskPhone,
     shouldAskPhone: !!turn.shouldAskPhone,

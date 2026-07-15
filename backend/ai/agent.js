@@ -26,7 +26,9 @@ import { buildHumanizedReply } from './humanized-reply-builder.js';
 import { getRelevantKnowledge } from './knowledge-retriever.js';
 import {
   applyCustomerAgentTurnToLead,
+  buildTemporaryWaitReply,
   customerAgentTurnToDecision,
+  isTemporaryCustomerWait,
   redactSensitiveText,
   runCustomerAgent,
 } from './customer-agent.js';
@@ -1253,6 +1255,9 @@ function buildUnavailableCustomerAgentTurn(lead = {}, message = '') {
   const asksIdentity = /\b(?:voce|vc) (?:e|eh) (?:um |uma )?(?:robo|bot|ia|assistente)\b|\bquem (?:e|eh) voce\b/.test(normalized);
   const isOperational = deterministic.mode === 'operational' && deterministic.explicit;
   const isNoInterest = deterministic.mode === 'sales' && deterministic.intent === 'no_interest';
+  const isTemporaryWait = !isOperational
+    && !isNoInterest
+    && isTemporaryCustomerWait(message, lead);
   const currentSalesIntent = ['sales_quote', 'sales_price_request', 'sales_consultant_requested']
     .includes(deterministic.intent)
     ? deterministic.intent
@@ -1324,6 +1329,20 @@ function buildUnavailableCustomerAgentTurn(lead = {}, message = '') {
     action = 'stop';
     reply = 'Tudo bem, sem problema. Não vou insistir. Se precisar, é só chamar.';
     salesStage = 'closed';
+  } else if (isTemporaryWait) {
+    primaryIntent = 'other';
+    action = 'respond';
+    reply = buildTemporaryWaitReply(lead);
+    salesStage = 'qualification';
+    currentTopic = previousMemory.currentTopic || 'cotação de proteção veicular';
+    primaryNeed = previousMemory.primaryNeed || 'receber uma cotação';
+    customerGoal = previousMemory.customerGoal || 'fazer uma cotação';
+    pendingQuestion = previousMemory.pendingQuestion || (!model && !year
+      ? 'modelo e ano do veículo'
+      : !model
+        ? 'modelo do veículo'
+        : 'ano do veículo');
+    lastQuestionAsked = previousMemory.lastQuestionAsked || '';
   } else if (hasSalesContext && currentSalesIntent !== 'sales_consultant_requested' && (!model || !year)) {
     primaryIntent = currentSalesIntent || lead.lastIntent || 'sales_quote';
     action = 'ask_model_year';
@@ -1397,6 +1416,7 @@ function buildUnavailableCustomerAgentTurn(lead = {}, message = '') {
     provider: 'fallback',
     model: 'deterministic-provider-outage',
     architecture: 'customer-agent-v2',
+    preservePendingQualification: isTemporaryWait,
   };
 }
 
