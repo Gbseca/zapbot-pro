@@ -162,6 +162,12 @@ function isInformationalQuestion(normalized = '') {
   return matchAny(normalized, INFORMATIVE_OPERATIONAL_PATTERNS);
 }
 
+function isExplicitConversationStop(normalized = '') {
+  return /^(?:para|pare|chega)(?: (?:ai|agora|isso|com isso|por favor|porra|caralho|merda))*$/.test(normalized)
+    || /\b(?:para|pare) de (?:insistir|perguntar|mandar mensagens?|me chamar)\b/.test(normalized)
+    || /\b(?:me deixa em paz|nao manda mais mensagens?|nao fala mais comigo)\b/.test(normalized);
+}
+
 function classifySingle(rawText = '') {
   const normalized = normalizeCustomerText(rawText);
   const emotion = detectEmotion(normalized, rawText);
@@ -358,6 +364,10 @@ function classifySingle(rawText = '') {
     return makeResult('operational', 'cancel_request', true, 'Cliente pediu cancelamento da associacao ou cadastro.', emotion);
   }
 
+  if (isExplicitConversationStop(active)) {
+    return makeResult('sales', 'no_interest', true, 'Cliente pediu para encerrar a conversa ou parar a abordagem.', emotion);
+  }
+
   const humanRequest = matchAny(active, HUMAN_PATTERNS);
   if (humanRequest) {
     return makeResult('operational', 'human_requested', true, 'Cliente pediu atendimento humano.', emotion);
@@ -380,7 +390,9 @@ function classifySingle(rawText = '') {
   }
 
   if (matchAny(normalized, [
-    /\bnao (?:quero|tenho interesse|preciso)\b/,
+    /^(?:nao quero(?: mais)?|nao tenho interesse|nao preciso)(?: disso| agora| mais)?$/,
+    /\bnao quero mais\b.{0,30}\b(?:pode parar|para de insistir|pare de insistir)\b/,
+    /^nao preciso de (?:reboque|guincho|assistencia|chaveiro|socorro)(?: agora)?$/,
     /\bsem interesse\b/,
     /\bdeixa (?:pra|para) la\b/,
   ])) {

@@ -320,6 +320,36 @@ const multiTurn = [
     ],
   },
   {
+    name: 'multi-cotacao-filho-respeita-espera-e-parada',
+    turns: [
+      { message: 'Oi', intents: ['greeting'], actions: ['respond'] },
+      { message: 'Queria fazer uma cotação pro veículo do meu filho', intents: ['sales_quote'], actions: ['ask_model_year'] },
+      {
+        message: 'Um momento vou perguntar a ele',
+        intents: ['other'],
+        actions: ['respond'],
+        mustNotAsk: true,
+        requiredReplyPatterns: [/aguard|confirmar|calma/i],
+        forbiddenReplyPatterns: [/modelo|ano|consultor|encaminh/i],
+      },
+      {
+        message: 'Calma vou perguntar pra ele',
+        intents: ['other'],
+        actions: ['respond'],
+        mustNotAsk: true,
+        requiredReplyPatterns: [/aguard|confirmar|calma/i],
+        forbiddenReplyPatterns: [/modelo|ano|consultor|encaminh/i],
+      },
+      {
+        message: 'Para porra',
+        intents: ['no_interest'],
+        actions: ['stop'],
+        mustNotAsk: true,
+        forbiddenReplyPatterns: [/consultor|encaminh/i],
+      },
+    ],
+  },
+  {
     name: 'multi-duvida-depois-cotacao',
     turns: [
       { message: 'o que e a moove?', intents: ['company_question'], actions: ['respond'] },
