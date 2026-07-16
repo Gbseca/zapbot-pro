@@ -68,15 +68,15 @@ const AD_RESEARCH_STORAGE_KEY = 'zapbot_pro_ad_research_job_id';
 
 // â”€â”€ Emoji Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const EMOJIS = {
-  smileys: ['ðŸ˜€','ðŸ˜ƒ','ðŸ˜„','ðŸ˜','ðŸ˜†','ðŸ˜…','ðŸ¤£','ðŸ˜‚','ðŸ™‚','ðŸ˜Š','ðŸ˜‡','ðŸ¥°','ðŸ˜','ðŸ¤©','ðŸ˜˜','ðŸ˜š','ðŸ˜‹','ðŸ˜›','ðŸ˜œ','ðŸ¤ª','ðŸ˜','ðŸ¤‘','ðŸ¤—','ðŸ¤”','ðŸ¤','ðŸ˜‘','ðŸ˜¶','ðŸ˜','ðŸ˜’','ðŸ™„','ðŸ˜¬','ðŸ¤¥','ðŸ˜Œ','ðŸ˜”','ðŸ˜ª','ðŸ˜´','ðŸ˜·','ðŸ¤’','ðŸ¤•','ðŸ¤¢','ðŸ¤®','ðŸ¤§','ðŸ¥µ','ðŸ¥¶','ðŸ˜µ','ðŸ¤¯','ðŸ¤ ','ðŸ¥³','ðŸ¥¸','ðŸ˜Ž','ðŸ¤“','ðŸ§','ðŸ˜£','ðŸ˜–','ðŸ˜«','ðŸ˜©','ðŸ¥º','ðŸ˜¢','ðŸ˜­','ðŸ˜¤','ðŸ˜ ','ðŸ˜¡','ðŸ¤¬','ðŸ˜ˆ','ðŸ‘¿','ðŸ’€','â˜ ï¸','ðŸ’©','ðŸ¤¡','ðŸ‘¹','ðŸ‘º','ðŸ‘»','ðŸ‘½','ðŸ‘¾','ðŸ¤–'],
-  gestures: ['ðŸ‘','ðŸ‘Ž','ðŸ‘Š','âœŠ','ðŸ¤›','ðŸ¤œ','ðŸ¤ž','âœŒï¸','ðŸ¤Ÿ','ðŸ¤˜','ðŸ¤™','ðŸ‘ˆ','ðŸ‘‰','ðŸ‘†','ðŸ‘‡','â˜ï¸','âœ‹','ðŸ¤š','ðŸ–ï¸','ðŸ––','ðŸ‘‹','ðŸ¤','ðŸ™Œ','ðŸ‘','ðŸ¤²','ðŸ™','âœï¸','ðŸ’…','ðŸ¤³','ðŸ’ª','ðŸ¦µ','ðŸ¦¶','ðŸ‘‚','ðŸ¦»','ðŸ‘ƒ','ðŸ«€','ðŸ«','ðŸ§ ','ðŸ¦·','ðŸ¦´','ðŸ‘€','ðŸ‘ï¸','ðŸ‘…','ðŸ‘„','ðŸ’‹','ðŸ«¦'],
-  hearts: ['â¤ï¸','ðŸ§¡','ðŸ’›','ðŸ’š','ðŸ’™','ðŸ’œ','ðŸ¤Ž','ðŸ–¤','ðŸ¤','ðŸ’”','â£ï¸','ðŸ’•','ðŸ’ž','ðŸ’“','ðŸ’—','ðŸ’–','ðŸ’˜','ðŸ’','ðŸ’Ÿ','â™¥ï¸','â¤ï¸â€ðŸ”¥','â¤ï¸â€ðŸ©¹','ðŸ’Œ','ðŸŽ','ðŸŽ€','ðŸŽŠ','ðŸŽ‰','ðŸ¥‚','ðŸ¾','ðŸ«¶'],
-  objects: ['ðŸ”¥','âœ¨','ðŸŒŸ','ðŸ’«','â­','ðŸŒˆ','â˜€ï¸','ðŸŒ™','âš¡','â„ï¸','ðŸŒŠ','ðŸ’Ž','ðŸ†','ðŸ¥‡','ðŸŽ¯','ðŸŽ®','ðŸŽµ','ðŸŽ¶','ðŸŽ¸','ðŸŽ¹','ðŸ“±','ðŸ’»','ðŸ“§','ðŸ“ž','â˜Žï¸','â°','ðŸ“…','ðŸ””','ðŸ”•','ðŸ“¢','ðŸ“£','ðŸ’¡','ðŸ”®','ðŸª„','ðŸŽ¬','ðŸ“·','ðŸ¤³','ðŸŽ¤','ðŸŽ§','ðŸŽ¼','ðŸ“š','âœï¸','ðŸ–Šï¸','ðŸ“','ðŸ—’ï¸','ðŸ“Œ','ðŸ”‘','ðŸ”’','ðŸ”“','ðŸ’°','ðŸ’µ','ðŸ’´','ðŸ’¶','ðŸ’·','ðŸ’¸','ðŸ ','ðŸš€','ðŸ›¸','âœˆï¸','ðŸš—','ðŸï¸'],
-  symbols: ['âœ…','âŒ','âš ï¸','ðŸš¨','â„¹ï¸','â“','â—','â€¼ï¸','â‰ï¸','ðŸ”´','ðŸŸ ','ðŸŸ¡','ðŸŸ¢','ðŸ”µ','ðŸŸ£','âš«','âšª','ðŸ”¶','ðŸ”·','ðŸ”¸','ðŸ”¹','ðŸ’¯','ðŸ†•','ðŸ†—','ðŸ†’','ðŸ†™','ðŸ”','ðŸ”œ','ðŸ”›','ðŸ”š','â­•','ðŸ”ž','ðŸˆµ','ðŸˆ²','ðŸ†“','ðŸ†–','ðŸ…°ï¸','ðŸ…±ï¸','ðŸ†Ž','ðŸ†‘','ðŸ…¾ï¸','ðŸ†˜','ðŸš«','â›”','ðŸ“µ','ðŸ”‡','ðŸ”•','ðŸš·','ðŸš¯','ðŸš³','ðŸš±','ðŸ“¶','ðŸ”ˆ','ðŸ”‰','ðŸ”Š','ðŸ“³','ðŸ“´','â™»ï¸','ðŸ”ƒ','ðŸ”„'],
-  numbers: ['0ï¸âƒ£','1ï¸âƒ£','2ï¸âƒ£','3ï¸âƒ£','4ï¸âƒ£','5ï¸âƒ£','6ï¸âƒ£','7ï¸âƒ£','8ï¸âƒ£','9ï¸âƒ£','ðŸ”Ÿ','ðŸ’¯','#ï¸âƒ£','*ï¸âƒ£','â–¶ï¸','â¸ï¸','â¹ï¸','âºï¸','â­ï¸','â®ï¸','â©','âª','â«','â¬','ðŸ”€','ðŸ”','ðŸ”‚','ðŸ”¼','ðŸ”½','âž•','âž–','âž—','âœ–ï¸','ðŸ’²','ðŸ’±','â„¢ï¸','Â©ï¸','Â®ï¸'],
+  smileys: ['😀','😃','😄','😁','😆','😅','😂','🙂','😊','😍','🥰','😘','😎','🤩','🤔','🤗','😐','😕','😟','😢','😭','😠','😡','🥳','🤝'],
+  gestures: ['👍','👎','👏','🙌','🙏','👋','🤝','💪','✍️','👉','👈','👆','👇','✋','👌','🤞','✌️','🤙'],
+  hearts: ['❤️','🧡','💛','💚','💙','💜','🤍','🖤','💔','💕','💞','💓','💗','💖','💝','💌'],
+  objects: ['🔥','✨','⭐','💡','📱','💻','📧','📞','⏰','📅','🔔','📢','📌','🔑','🔒','💰','🏠','🚗','🏍️','📄','📋','📎'],
+  symbols: ['✅','❌','⚠️','ℹ️','❓','❗','🟢','🟡','🔴','🔵','⚫','⚪','➡️','⬅️','⬆️','⬇️','➕','➖','✔️'],
+  numbers: ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟','#️⃣','*️⃣','▶️','⏸️','⏹️'],
 };
 
-const REACTION_EMOJIS = ['1ï¸âƒ£','2ï¸âƒ£','3ï¸âƒ£','4ï¸âƒ£','5ï¸âƒ£','6ï¸âƒ£','7ï¸âƒ£','8ï¸âƒ£','9ï¸âƒ£'];
+const REACTION_EMOJIS = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
 
 // â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.addEventListener('DOMContentLoaded', () => {
@@ -149,7 +149,7 @@ function handleWsMessage(data) {
       break;
     case 'ai_status':
       updateAIStatusUI(data.enabled);
-      updateBadge('ai-agent', data.enabled ? 'â—' : null);
+      updateBadge('ai-agent', data.enabled ? 'ON' : null);
       break;
     case 'ad_research_update':
       window.adResearchApp?.handleUpdate(data.job);
@@ -208,22 +208,22 @@ function handleStatusUpdate(status, details = null) {
   if (status === 'connected') {
     dot.classList.add('connected');
     text.textContent = 'Conectado';
-    statusEl.textContent = 'â— Conectado';
+    statusEl.textContent = 'Conectado';
     statusEl.className = 'status-value status-connected';
     qrConn.classList.remove('hidden');
-    showToast('âœ… WhatsApp conectado!', 'success');
-    updateBadge('connection', 'âœ“');
+    showToast('WhatsApp conectado.', 'success');
+    updateBadge('connection', 'ON');
   } else if (status === 'qr_ready') {
     dot.classList.add('connecting');
     text.textContent = 'Aguardando scan...';
-    statusEl.textContent = 'â— Aguardando QR';
+    statusEl.textContent = 'Aguardando QR';
     statusEl.className = 'status-value status-connecting';
     qrPH.style.display = 'flex';
     qrPH.innerHTML = '<p style="color:#888;font-size:13px">Carregando QR Code...</p>';
   } else {
     dot.classList.add('disconnected');
     text.textContent = 'Desconectado';
-    statusEl.textContent = 'â— Desconectado';
+    statusEl.textContent = 'Desconectado';
     statusEl.className = 'status-value status-disconnected';
     qrPH.style.display = 'flex';
     if (detailText) {
@@ -245,11 +245,11 @@ function handleQRCode(qrDataUrl) {
 }
 
 async function disconnectWhatsApp() {
-  if (!confirm('Tem certeza? Isso encerrarÃ¡ a sessÃ£o atual e gerarÃ¡ um novo QR Code.')) return;
+  if (!confirm('Tem certeza? Isso encerrara a sessao atual e gerara um novo QR Code.')) return;
   try {
     const r = await fetch('/api/disconnect', { method: 'POST' });
     const d = await r.json();
-    showToast(d.message || 'SessÃ£o encerrada.', 'info');
+    showToast(d.message || 'Sessao encerrada.', 'info');
   } catch (err) {
     showToast('Erro ao desconectar: ' + err.message, 'error');
   }
@@ -395,8 +395,19 @@ function switchEmojiCat(cat, btn) {
 
 function filterEmojis(val) {
   if (val.length === 0) { renderEmojiGrid(); return; }
-  // Simple search: show all emojis matching the unicode block
-  const all = Object.values(EMOJIS).flat();
+  const query = val.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const aliases = {
+    smileys: 'rosto sorriso feliz alegria triste bravo emocao pessoa',
+    gestures: 'gesto mao obrigado ok positivo negativo apontar aplauso',
+    hearts: 'coracao amor carinho afeto',
+    objects: 'objeto fogo estrela ideia telefone computador email carro moto casa dinheiro documento',
+    symbols: 'sim nao certo errado alerta informacao seta cor',
+    numbers: 'numero opcao contagem play pausar parar',
+  };
+  const matches = Object.entries(aliases)
+    .filter(([, terms]) => terms.includes(query))
+    .flatMap(([category]) => EMOJIS[category]);
+  const all = matches.length ? matches : Object.values(EMOJIS).flat().filter((emoji) => emoji.includes(val));
   const grid = document.getElementById('emoji-grid');
   grid.innerHTML = all.map(e =>
     `<button class="emoji-btn-item" onclick="insertEmoji('${e}')" title="${e}">${e}</button>`
@@ -442,21 +453,22 @@ function renderReactions() {
     div.className = 'reaction-item';
     div.innerHTML = `
       <span class="reaction-number">${REACTION_EMOJIS[i] || (i+1)}</span>
-      <input type="text" class="reaction-input" id="reaction-${i}" placeholder="Ex: SIM, tenho interesse" />
-      <button class="reaction-remove" onclick="removeReaction(${i})">âœ•</button>
+      <input type="text" class="reaction-input" id="reaction-${i}" aria-label="Opcao de resposta ${i + 1}" placeholder="Ex: SIM, tenho interesse" />
+      <button class="reaction-remove" onclick="removeReaction(${i})" title="Remover opcao" aria-label="Remover opcao ${i + 1}"><i data-lucide="x" aria-hidden="true"></i></button>
     `;
     list.appendChild(div);
   }
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
 }
 
 function addReaction() {
-  if (state.reactionCount >= 9) { showToast('MÃ¡ximo de 9 opÃ§Ãµes!', 'warning'); return; }
+  if (state.reactionCount >= 9) { showToast('Maximo de 9 opcoes.', 'warning'); return; }
   state.reactionCount++;
   renderReactions();
 }
 
 function removeReaction(index) {
-  if (state.reactionCount <= 1) { showToast('Pelo menos 1 opÃ§Ã£o Ã© necessÃ¡ria.', 'warning'); return; }
+  if (state.reactionCount <= 1) { showToast('Pelo menos uma opcao e necessaria.', 'warning'); return; }
   // Collect current values
   const vals = collectReactionValues();
   vals.splice(index, 1);
@@ -480,7 +492,7 @@ function togglePollMode() {
   const group = document.getElementById('poll-question-group');
   if (state.pollMode) {
     group.classList.remove('hidden');
-    showToast('ðŸ“Š Modo enquete ativo! As opÃ§Ãµes serÃ£o enviadas como enquete nativa.', 'info');
+    showToast('Modo enquete ativo. As opcoes serao enviadas como enquete nativa.', 'info');
   } else {
     group.classList.add('hidden');
   }
@@ -497,18 +509,17 @@ function collectReactionValues() {
 
 function insertReactionsInMessage() {
   const vals = collectReactionValues();
-  // Usa valor preenchido ou texto padrÃ£o para campos vazios
-  const options = vals.map((v, i) => v.trim() || `OpÃ§Ã£o ${i + 1}`);
+  const options = vals.map((v, i) => v.trim() || `Opcao ${i + 1}`);
 
-  const block = '\n\n*Selecione uma opÃ§Ã£o:*\n' +
+  const block = '\n\n*Selecione uma opcao:*\n' +
     options.map((v, i) => `${REACTION_EMOJIS[i]} ${v}`).join('\n') +
-    '\n\n*Responda com o nÃºmero da sua escolha.*';
+    '\n\n*Responda com o numero da sua escolha.*';
 
   const ta = document.getElementById('message-textarea');
   ta.value += block;
   updateMessagePreview();
   updateCharCount();
-  showToast('OpÃ§Ãµes inseridas na mensagem!', 'success');
+  showToast('Opcoes inseridas na mensagem.', 'success');
 }
 
 // â”€â”€ Image Upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -531,7 +542,7 @@ function handleImageSelect(e) {
 }
 
 function loadImageFile(file) {
-  if (file.size > 16 * 1024 * 1024) { showToast('Imagem muito grande! MÃ¡x. 16MB.', 'error'); return; }
+  if (file.size > 16 * 1024 * 1024) { showToast('Imagem muito grande. O limite e 16 MB.', 'error'); return; }
   state.selectedImage = file;
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -542,7 +553,7 @@ function loadImageFile(file) {
     // Update message bubble preview
     document.getElementById('bubble-img').src = src;
     document.getElementById('preview-image-bubble').classList.remove('hidden');
-    updateBadge('message', 'ðŸ–¼');
+    updateBadge('message', '1');
   };
   reader.readAsDataURL(file);
 }
@@ -570,12 +581,12 @@ function updateMessagePreview() {
     .replace(/\n/g, '<br>');
 
   if (!html) {
-    preview.innerHTML = '<em style="color:#666">Sua mensagem aparecerÃ¡ aqui...</em>';
+    preview.innerHTML = '<em style="color:#666">Sua mensagem aparecera aqui...</em>';
   } else {
     preview.innerHTML = html;
   }
 
-  if (text.trim()) updateBadge('message', 'âœ“');
+  if (text.trim()) updateBadge('message', 'OK');
   else updateBadge('message', null);
 }
 
@@ -725,8 +736,8 @@ function updateEstimate() {
     const end = new Date(Date.now() + totalSec * 1000);
     document.getElementById('est-end').textContent = end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   } else {
-    document.getElementById('est-duration').textContent = 'â€”';
-    document.getElementById('est-end').textContent = 'â€”';
+    document.getElementById('est-duration').textContent = '--';
+    document.getElementById('est-end').textContent = '--';
   }
 }
 
@@ -746,7 +757,7 @@ async function startCampaign() {
     return;
   }
   if (state.validNumbers.length === 0) {
-    showToast('Adicione contatos vÃ¡lidos!', 'error');
+    showToast('Adicione contatos validos.', 'error');
     switchTab('contacts');
     return;
   }
@@ -763,10 +774,10 @@ async function startCampaign() {
   let pollQuestion = '';
   if (pollMode) {
     const vals = collectReactionValues();
-    pollOptions = vals.map((v, i) => v.trim() || `OpÃ§Ã£o ${i + 1}`);
+    pollOptions = vals.map((v, i) => v.trim() || `Opcao ${i + 1}`);
     pollQuestion = document.getElementById('poll-question')?.value?.trim() || '';
     if (pollOptions.length < 2) {
-      showToast('A enquete precisa de pelo menos 2 opÃ§Ãµes!', 'error');
+      showToast('A enquete precisa de pelo menos duas opcoes.', 'error');
       return;
     }
   }
@@ -810,7 +821,7 @@ async function startCampaign() {
   try {
     const btn = document.getElementById('btn-start');
     btn.disabled = true;
-    btn.textContent = 'â³ Iniciando...';
+    btn.textContent = 'Iniciando...';
 
     const r = await fetch('/api/campaign/start', { method: 'POST', body: formData });
     const d = await r.json();
@@ -825,11 +836,12 @@ async function startCampaign() {
       showToast(d.error || 'Erro ao iniciar.', 'error');
     }
   } catch (err) {
-    showToast('Erro de conexÃ£o: ' + err.message, 'error');
+    showToast('Erro de conexao: ' + err.message, 'error');
   } finally {
     const btn = document.getElementById('btn-start');
     btn.disabled = false;
-    btn.textContent = 'ðŸš€ Iniciar Campanha';
+    btn.innerHTML = '<i data-lucide="send" aria-hidden="true"></i>Iniciar campanha';
+    window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
   }
 }
 
@@ -849,12 +861,12 @@ async function clearQueue() {
     showToast('Pause ou pare a campanha antes de limpar.', 'warning');
     return;
   }
-  if (!confirm('Limpar todo o histÃ³rico da fila?')) return;
+  if (!confirm('Limpar todo o historico da fila?')) return;
   try {
     const r = await fetch('/api/campaign/clear', { method: 'POST' });
     const d = await r.json();
     if (r.ok) {
-      showToast('HistÃ³rico limpo!', 'success');
+      showToast('Historico limpo.', 'success');
     } else {
       showToast(d.error || 'Erro ao limpar.', 'error');
     }
@@ -885,11 +897,11 @@ function handleCampaignStatus(status) {
   const btnStop = document.getElementById('btn-stop');
 
   const map = {
-    idle:      { text: 'ðŸ’¤ Aguardando', cls: 'status-idle' },
-    running:   { text: 'ðŸš€ Enviando...', cls: 'status-running' },
-    paused:    { text: 'â¸ï¸ Pausado', cls: 'status-paused' },
-    stopped:   { text: 'ðŸ›‘ Parado', cls: 'status-stopped' },
-    completed: { text: 'âœ… ConcluÃ­do', cls: 'status-completed' },
+    idle:      { text: 'Aguardando', cls: 'status-idle' },
+    running:   { text: 'Enviando', cls: 'status-running' },
+    paused:    { text: 'Pausada', cls: 'status-paused' },
+    stopped:   { text: 'Interrompida', cls: 'status-stopped' },
+    completed: { text: 'Concluida', cls: 'status-completed' },
   };
 
   const info = map[status] || map.idle;
@@ -914,7 +926,7 @@ function handleCampaignStatus(status) {
     btnStop.classList.remove('hidden');
   }
 
-  updateBadge('campaign', status === 'running' ? 'â—' : null);
+  updateBadge('campaign', status === 'running' ? 'ON' : null);
 }
 
 function waitReasonLabel(reason) {
@@ -1036,15 +1048,15 @@ function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget
     statusEl.className = 'queue-item-status timeout';
     item.classList.remove('active-item');
   } else if (status === 'sent') {
-    statusEl.textContent = 'âœ… Enviado';
+    statusEl.textContent = 'Enviado';
     statusEl.className = 'queue-item-status sent';
     item.classList.remove('active-item');
   } else if (status === 'failed') {
-    statusEl.textContent = `âŒ Falha`;
+    statusEl.textContent = 'Falha';
     statusEl.className = 'queue-item-status failed';
     item.classList.remove('active-item');
   } else if (status === 'sending') {
-    statusEl.textContent = 'ðŸ“¤ Enviando...';
+    statusEl.textContent = 'Enviando...';
     statusEl.className = 'queue-item-status sending';
     item.classList.add('active-item');
     item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -1073,16 +1085,6 @@ function renderQueueList() {
       </div>
     `;
   }).join('');
-  return;
-  list.innerHTML = state.queue.map((item, i) => `
-    <div class="queue-item" id="qi-${i}">
-      <span class="queue-item-dot dot-${item.status === 'confirmed' ? 'sent' : item.status === 'delivery_timeout' ? 'failed' : item.status}"></span>
-      <span class="queue-item-num">+55 ${item.number}</span>
-      <span class="queue-item-status ${item.status === 'accepted' ? 'accepted' : item.status === 'confirmed' || item.status === 'sent' ? 'confirmed' : item.status === 'delivery_timeout' ? 'timeout' : item.status === 'failed' ? 'failed' : item.status === 'sending' ? 'sending' : ''}">
-        ${item.status === 'sent' ? 'âœ… Enviado' : item.status === 'failed' ? 'âŒ Falha' : item.status === 'sending' ? 'ðŸ“¤ Enviando...' : 'â³ Pendente'}
-      </span>
-    </div>
-  `).join('');
 }
 
 // â”€â”€ Log Console â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1792,7 +1794,7 @@ function renderAdResearchResults() {
       </div>
 
       <div class="ad-result-actions">
-        <button class="btn btn-purple btn-sm" onclick="copyAdResearchCopy('${String(result.id || '').replace(/'/g, '')}')">Copiar copy</button>
+        <button class="btn btn-outline btn-sm" onclick="copyAdResearchCopy('${String(result.id || '').replace(/'/g, '')}')">Copiar copy</button>
         <a class="btn btn-outline btn-sm" href="${result.adUrl || '#'}" target="_blank" rel="noopener noreferrer">Abrir anuncio</a>
       </div>
     </article>
@@ -2310,7 +2312,7 @@ function updateAIStatusUI(enabled) {
 function resetPDFUploadArea() {
   const area = aiElement('pdf-upload-area');
   if (!area) return;
-  area.innerHTML = '<input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)"><i data-lucide="file-up" aria-hidden="true"></i><strong>Adicionar PDF</strong><small>Arquivo de ate 32 MB</small>';
+  area.innerHTML = '<input type="file" id="pdf-input" accept=".pdf" aria-label="Selecionar documento PDF" hidden onchange="handlePDFUpload(event)"><i data-lucide="file-up" aria-hidden="true"></i><strong>Adicionar PDF</strong><small>Arquivo de ate 32 MB</small>';
   window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
 }
 
@@ -3207,10 +3209,10 @@ async function exportLeadsCSV() {
 }
 
 async function blockLead(number) {
-  if (!confirm('Parar o bot para este nÃºmero?')) return;
+  if (!confirm('Parar o bot para este numero?')) return;
   await fetch(`/api/leads/${number}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'blocked' }) });
   await loadLeads();
-  showToast('Bot pausado para esse nÃºmero.', 'info');
+  showToast('Bot pausado para esse numero.', 'info');
 }
 
 async function updateLeadStatus(number, updates, toastMessage) {
@@ -3254,7 +3256,7 @@ function openLeadModal(number) {
   currentModalLead = lead;
 
   document.getElementById('modal-lead-name').textContent = lead.name || 'Desconhecido';
-  document.getElementById('modal-lead-number').textContent = `${formatLeadPhone(lead)} Â· ${statusLabel(lead.status)}`;
+  document.getElementById('modal-lead-number').textContent = `${formatLeadPhone(lead)} - ${statusLabel(lead.status)}`;
 
   // Populate CRM tools
   const tagSelect = document.getElementById('modal-lead-tag');
@@ -3278,9 +3280,9 @@ function openLeadModal(number) {
 
   const vehicle = document.getElementById('modal-vehicle');
   vehicle.innerHTML = lead.model || lead.plate
-    ? `<div class="modal-vehicle-item">ðŸš— <strong>${lead.model || '?'}</strong></div>
-       <div class="modal-vehicle-item">ðŸ”‘ <strong>${lead.plate || '?'}</strong></div>
-       <div class="modal-vehicle-item" style="margin-left:auto">ðŸ“… ${new Date(lead.createdAt).toLocaleDateString('pt-BR')}</div>`
+    ? `<div class="modal-vehicle-item"><strong>Veiculo:</strong> ${lead.model || '?'}</div>
+       <div class="modal-vehicle-item"><strong>Placa:</strong> ${lead.plate || '?'}</div>
+       <div class="modal-vehicle-item" style="margin-left:auto">${new Date(lead.createdAt).toLocaleDateString('pt-BR')}</div>`
     : `<div class="modal-vehicle-item" style="color:var(--text-3)">Veiculo nao capturado ainda</div>`;
 
   const risk = getLeadRisk(lead);
@@ -3299,9 +3301,9 @@ function openLeadModal(number) {
   actions.innerHTML = `
     ${lead.status !== 'human_taken_over' ? `<button class="btn btn-outline btn-sm" onclick="takeOverLead('${number}')">Assumir atendimento</button>` : ''}
     ${['human_requested','awaiting_financial_review','transferred_to_financial','transferred_to_support','awaiting_operational_data','awaiting_phone_for_handoff','awaiting_contact_for_handoff','handoff_client_confirmation_failed','handoff_failed','human_taken_over'].includes(lead.status) ? `<button class="btn btn-outline btn-sm" onclick="returnLeadToAI('${number}')">Devolver para IA</button>` : ''}
-    ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm">ðŸ’¬ Abrir no WhatsApp</a>` : `<span class="btn btn-outline btn-sm disabled">WhatsApp nao resolvido</span>`}
-    ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()">â›” Pausar bot</button>` : ''}
-    <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')">ðŸ—‘ï¸ Excluir lead</button>
+    ${waTarget ? `<a href="https://wa.me/${waTarget}" target="_blank" class="btn btn-primary btn-sm"><i data-lucide="message-circle" aria-hidden="true"></i>Abrir no WhatsApp</a>` : `<span class="btn btn-outline btn-sm disabled">WhatsApp nao resolvido</span>`}
+    ${lead.status !== 'blocked' ? `<button class="btn btn-outline btn-sm" onclick="blockLead('${number}');closeLeadModal()"><i data-lucide="pause" aria-hidden="true"></i>Pausar bot</button>` : ''}
+    <button class="btn btn-outline btn-sm" onclick="deleteLead('${number}')"><i data-lucide="trash-2" aria-hidden="true"></i>Excluir lead</button>
   `;
 
   const chat = document.getElementById('modal-chat');
@@ -3316,7 +3318,7 @@ function openLeadModal(number) {
       return `
         <div class="chat-bubble-wrap ${isUser ? '' : 'outgoing'}">
           <div class="chat-bubble">${escapeHtml(msg.content)}</div>
-          <div class="chat-ts">${isUser ? 'Cliente' : 'Bot'} ${time}</div>
+          <div class="chat-ts">${isUser ? 'Cliente' : 'Agente'} - ${time}</div>
           ${deliveryMeta ? `<div class="chat-ts"><span class="chat-delivery ${deliveryMeta.className}">${deliveryMeta.label}</span></div>` : ''}
           ${!isUser && msg.error ? `<div class="chat-ts">${escapeHtml(msg.error)}</div>` : ''}
         </div>
@@ -3326,26 +3328,7 @@ function openLeadModal(number) {
   }
 
   document.getElementById('lead-modal').classList.remove('hidden');
-  return;
-
-  if (history.length === 0) {
-    chat.innerHTML = '<div style="color:var(--text-3);text-align:center;padding:20px;">Sem histÃ³rico de conversa.</div>';
-  } else {
-    chat.innerHTML = history.map(msg => {
-      const isUser = msg.role === 'user';
-      const time = msg.ts ? new Date(msg.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-      const deliveryMeta = !isUser ? deliveryStatusMeta(msg.deliveryStatus) : null;
-      return `
-        <div class="chat-bubble-wrap ${isUser ? '' : 'outgoing'}">
-          <div class="chat-bubble">${escapeHtml(msg.content)}</div>
-          <div class="chat-ts">${isUser ? 'ðŸ‘¤' : 'ðŸ¤–'} ${time}</div>
-        </div>
-      `;
-    }).join('');
-    setTimeout(() => { chat.scrollTop = chat.scrollHeight; }, 50);
-  }
-
-  document.getElementById('lead-modal').classList.remove('hidden');
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
 }
 
 function closeLeadModal(event) {
@@ -3359,7 +3342,7 @@ async function deleteLead(number) {
   await fetch(`/api/leads/${number}`, { method: 'DELETE' });
   closeLeadModal();
   await loadLeads();
-  showToast('Lead excluÃ­do.', 'info');
+  showToast('Lead excluido.', 'info');
 }
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3609,7 +3592,7 @@ function closeSidebar() {
         <div class="lead-name">${name}</div>
         <div class="lead-meta-row">
           <span class="lead-phone-tag${phoneCls}">${phoneTxt}</span>
-          ${lid ? `<span class="lead-lid-tag">${lid.slice(0,10)}…</span>` : ''}
+          ${lid ? `<span class="lead-lid-tag">${lid.slice(0,10)}...</span>` : ''}
         </div>
         ${summary ? `<div class="lead-summary-text">${summary.slice(0,80)}</div>` : ''}
       </div>
@@ -3619,7 +3602,7 @@ function closeSidebar() {
         ${plate ? `<span class="lead-plate">${plate}</span>` : ''}
       </div>
       <div class="lead-actions-mini">
-        <button class="lead-btn danger" onclick="event.stopPropagation();blockLead&&blockLead('${lid}')" title="Bloquear">🚫</button>
+        <button class="lead-btn danger" onclick="event.stopPropagation();blockLead&&blockLead('${lid}')" title="Bloquear" aria-label="Bloquear lead"><i data-lucide="ban" aria-hidden="true"></i></button>
       </div>`;
     return card;
   };
@@ -3640,8 +3623,8 @@ function closeSidebar() {
     card.innerHTML = `
       <div class="internal-cons-avatar">${initial}</div>
       <div class="internal-cons-info">
-        <div class="internal-cons-name">${c.name || '—'}</div>
-        <div class="internal-cons-meta">${c.phone || ''} ${c.role ? '· ' + c.role : ''}</div>
+        <div class="internal-cons-name">${c.name || '--'}</div>
+        <div class="internal-cons-meta">${c.phone || ''} ${c.role ? '- ' + c.role : ''}</div>
         <div class="internal-cons-tags">${tags.join('')}</div>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
@@ -3656,10 +3639,10 @@ function closeSidebar() {
     card.className = 'internal-faq-card';
     card.innerHTML = `
       <div class="internal-faq-head">
-        <span class="internal-faq-title">${f.title || '—'}</span>
+        <span class="internal-faq-title">${f.title || '--'}</span>
         ${f.category ? `<span class="internal-faq-cat">${f.category}</span>` : ''}
       </div>
-      <div class="internal-faq-preview">${(f.answer || '').slice(0, 120)}${(f.answer || '').length > 120 ? '…' : ''}</div>
+      <div class="internal-faq-preview">${(f.answer || '').slice(0, 120)}${(f.answer || '').length > 120 ? '...' : ''}</div>
       ${keywords.length ? `<div class="internal-faq-keywords">${keywords.map(k => `<span class="internal-faq-kw">${k}</span>`).join('')}</div>` : ''}
       <div style="display:flex;gap:6px;margin-top:8px;">
         <button class="btn btn-outline btn-sm" onclick="toggleFaqActive('${f.id}', ${!f.active})">${f.active !== false ? 'Desativar' : 'Ativar'}</button>

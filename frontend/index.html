@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css?v=4.0.0-ai-console">
   <link rel="stylesheet" href="leads.css?v=3.2.0-leads">
+  <link rel="stylesheet" href="redesign.css?v=5.0.0-workspace">
 </head>
 <body>
   <div class="app">
@@ -19,15 +20,9 @@
       <div class="sidebar-logo">
         <div class="logo-icon">
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="10" fill="url(#grad)"/>
+            <rect width="32" height="32" rx="8" fill="#20c77a"/>
             <path d="M16 6C10.48 6 6 10.48 6 16c0 1.96.56 3.78 1.52 5.32L6 26l4.82-1.48C12.28 25.46 14.1 26 16 26c5.52 0 10-4.48 10-10S21.52 6 16 6z" fill="white" fill-opacity="0.9"/>
-            <path d="M21 18.5c-.3.8-1.5 1.5-2.1 1.6-.6.1-1.3.1-4.1-1.6-2.4-1.5-4-4.1-4.1-4.3-.1-.2-.9-1.3-.9-2.4 0-1.1.6-1.7.8-1.9.2-.2.5-.3.7-.3h.5c.2 0 .4.1.5.4.2.5.7 1.7.8 1.8.1.2.1.4 0 .6-.1.2-.2.3-.3.5-.1.1-.2.3-.1.5.3.5.8 1.2 1.4 1.7.6.5 1.2.9 1.8 1.1.2.1.4 0 .5-.1l.5-.6c.1-.2.3-.2.5-.1.2.1 1.4.6 1.6.7.2.1.3.2.3.3 0 .2 0 .8-.3 1.6z" fill="#128C7E"/>
-            <defs>
-              <linearGradient id="grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#7c3aed"/>
-                <stop offset="1" stop-color="#a855f7"/>
-              </linearGradient>
-            </defs>
+            <path d="M21 18.5c-.3.8-1.5 1.5-2.1 1.6-.6.1-1.3.1-4.1-1.6-2.4-1.5-4-4.1-4.1-4.3-.1-.2-.9-1.3-.9-2.4 0-1.1.6-1.7.8-1.9.2-.2.5-.3.7-.3h.5c.2 0 .4.1.5.4.2.5.7 1.7.8 1.8.1.2.1.4 0 .6-.1.2-.2.3-.3.5-.1.1-.2.3-.1.5.3.5.8 1.2 1.4 1.7.6.5 1.2.9 1.8 1.1.2.1.4 0 .5-.1l.5-.6c.1-.2.3-.2.5-.1.2.1 1.4.6 1.6.7.2.1.3.2.3.3 0 .2 0 .8-.3 1.6z" fill="#0b3b27"/>
           </svg>
         </div>
         <div class="logo-text">
@@ -40,7 +35,7 @@
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">WhatsApp</span>
           <button class="nav-item active" data-tab="connection" id="nav-connection">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg></span>
+            <span class="nav-icon"><i data-lucide="wifi" aria-hidden="true"></i></span>
             <span class="nav-label">Conexão</span>
             <span class="nav-badge" id="badge-connection"></span>
           </button>
@@ -49,19 +44,19 @@
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">Campanhas</span>
           <button class="nav-item" data-tab="contacts" id="nav-contacts">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 7a4 4 0 100 8 4 4 0 000-8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></span>
+            <span class="nav-icon"><i data-lucide="users-round" aria-hidden="true"></i></span>
             <span class="nav-label">Contatos</span><span class="nav-badge" id="badge-contacts"></span>
           </button>
           <button class="nav-item" data-tab="message" id="nav-message">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></span>
+            <span class="nav-icon"><i data-lucide="message-square-text" aria-hidden="true"></i></span>
             <span class="nav-label">Mensagem</span><span class="nav-badge" id="badge-message"></span>
           </button>
           <button class="nav-item" data-tab="schedule" id="nav-schedule">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>
+            <span class="nav-icon"><i data-lucide="clock-3" aria-hidden="true"></i></span>
             <span class="nav-label">Agendamento</span><span class="nav-badge" id="badge-schedule"></span>
           </button>
           <button class="nav-item" data-tab="campaign" id="nav-campaign">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 19-7z"/></svg></span>
+            <span class="nav-icon"><i data-lucide="send" aria-hidden="true"></i></span>
             <span class="nav-label">Campanha</span><span class="nav-badge" id="badge-campaign"></span>
           </button>
         </div>
@@ -69,15 +64,15 @@
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">IA &amp; Leads</span>
           <button class="nav-item" data-tab="ai-agent" id="nav-ai-agent">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="9" cy="10" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="10" r="1.5" fill="currentColor" stroke="none"/><path d="M9 15c0 0 1 2 3 2s3-2 3-2"/></svg></span>
+            <span class="nav-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
             <span class="nav-label">Agente IA</span><span class="nav-badge" id="badge-ai-agent"></span>
           </button>
           <button class="nav-item" data-tab="leads" id="nav-leads">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z"/></svg></span>
+            <span class="nav-icon"><i data-lucide="briefcase-business" aria-hidden="true"></i></span>
             <span class="nav-label">Leads</span><span class="nav-badge" id="badge-leads"></span>
           </button>
           <button class="nav-item" data-tab="internal" id="nav-internal">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></span>
+            <span class="nav-icon"><i data-lucide="users" aria-hidden="true"></i></span>
             <span class="nav-label">Consultores / FAQ</span><span class="nav-badge" id="badge-internal"></span>
           </button>
         </div>
@@ -85,11 +80,11 @@
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">Sistema</span>
           <button class="nav-item" data-tab="ad-research" id="nav-ad-research">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6"/><path d="M11 8v6"/></svg></span>
+            <span class="nav-icon"><i data-lucide="search" aria-hidden="true"></i></span>
             <span class="nav-label">Pesquisa Ads</span><span class="nav-badge" id="badge-ad-research"></span>
           </button>
           <button class="nav-item" data-tab="status" id="nav-status">
-            <span class="nav-icon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 2 4-5"/></svg></span>
+            <span class="nav-icon"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i></span>
             <span class="nav-label">Status</span><span class="nav-badge" id="badge-status"></span>
           </button>
         </div>
@@ -105,22 +100,50 @@
 
     <!-- ── Main Content ──────────────────────────────────── -->
     <main class="main-content">
+      <header class="workspace-topbar">
+        <div class="workspace-topbar-main">
+          <button class="workspace-icon-button hamburger-btn" onclick="toggleSidebar()" aria-label="Abrir menu" title="Abrir menu">
+            <i data-lucide="menu" aria-hidden="true"></i>
+          </button>
+          <div class="workspace-location">
+            <strong>MoOve IA</strong>
+            <span aria-hidden="true">/</span>
+            <span id="topbar-section">Conexao</span>
+          </div>
+        </div>
+        <div class="workspace-topbar-actions">
+          <div class="workspace-connection" id="topbar-wa-pill">
+            <span class="workspace-connection-dot" id="topbar-wa-dot"></span>
+            <span><strong id="topbar-wa-text">Desconectado</strong><small id="topbar-wa-health">WhatsApp</small></span>
+          </div>
+          <span class="workspace-notification-spacer" aria-hidden="true"></span>
+        </div>
+      </header>
+
+      <nav class="campaign-workflow hidden" id="campaign-workflow" aria-label="Etapas da campanha">
+        <button type="button" data-campaign-step="contacts" onclick="switchTab('contacts')">
+          <span class="campaign-step-index">1</span>
+          <span><strong>Contatos</strong><small>Lista e validacao</small></span>
+        </button>
+        <span class="campaign-step-line" aria-hidden="true"></span>
+        <button type="button" data-campaign-step="message" onclick="switchTab('message')">
+          <span class="campaign-step-index">2</span>
+          <span><strong>Mensagem</strong><small>Texto e respostas</small></span>
+        </button>
+        <span class="campaign-step-line" aria-hidden="true"></span>
+        <button type="button" data-campaign-step="schedule" onclick="switchTab('schedule')">
+          <span class="campaign-step-index">3</span>
+          <span><strong>Agendamento</strong><small>Ritmo e limites</small></span>
+        </button>
+        <span class="campaign-step-line" aria-hidden="true"></span>
+        <button type="button" data-campaign-step="campaign" onclick="switchTab('campaign')">
+          <span class="campaign-step-index">4</span>
+          <span><strong>Revisao e envio</strong><small>Fila e acompanhamento</small></span>
+        </button>
+      </nav>
 
       <!-- ── Tab: Connection ────────────── -->
       <section id="tab-connection" class="tab-pane active">
-        <div class="topbar">
-          <div class="topbar-left">
-            <button class="hamburger-btn" onclick="toggleSidebar()" aria-label="Menu"><span></span><span></span><span></span></button>
-            <span class="topbar-title">MoOve IA</span>
-            <span class="topbar-breadcrumb">/ <span id="topbar-section">Conexão</span></span>
-          </div>
-          <div class="topbar-right">
-            <div class="topbar-wa-pill" id="topbar-wa-pill">
-              <span class="topbar-wa-dot" id="topbar-wa-dot"></span>
-              <span id="topbar-wa-text">Desconectado</span>
-            </div>
-          </div>
-        </div>
         <div class="page-header">
           <h1 class="page-title">Conexão WhatsApp</h1>
           <p class="page-sub">Escaneie o QR Code com seu WhatsApp para começar</p>
@@ -128,7 +151,7 @@
         <div class="content-grid two-col">
           <div class="card qr-card">
             <div class="card-header">
-              <span class="card-icon">📱</span>
+              <span class="card-icon"><i data-lucide="qr-code" aria-hidden="true"></i></span>
               <h2 class="card-title">QR Code</h2>
             </div>
             <div class="qr-container" id="qr-container">
@@ -139,7 +162,7 @@
               <img id="qr-image" src="" alt="QR Code WhatsApp" class="qr-image hidden">
               <div class="qr-connected hidden" id="qr-connected">
                 <div class="connected-anim">
-                  <div class="connected-circle">✅</div>
+                  <div class="connected-circle"><i data-lucide="check" aria-hidden="true"></i></div>
                 </div>
                 <p class="connected-text">WhatsApp Conectado!</p>
                 <p class="connected-sub">Pronto para enviar mensagens</p>
@@ -147,7 +170,7 @@
             </div>
             <div class="qr-actions">
               <button class="btn btn-outline btn-sm" id="btn-disconnect" onclick="disconnectWhatsApp()">
-                🔄 Trocar Conta / Reconectar
+                <i data-lucide="refresh-cw" aria-hidden="true"></i>Trocar conta
               </button>
             </div>
             <div class="qr-instructions">
@@ -163,7 +186,7 @@
 
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">ℹ️</span>
+              <span class="card-icon"><i data-lucide="activity" aria-hidden="true"></i></span>
               <h2 class="card-title">Status da Conexão</h2>
             </div>
             <div class="status-info">
@@ -174,11 +197,11 @@
             </div>
             <p id="status-detail" class="status-detail hidden"></p>
             <div class="info-box">
-              <h3>⚡ Como funciona</h3>
+              <h3><i data-lucide="zap" aria-hidden="true"></i>Como funciona</h3>
               <p>O MoOve IA usa a mesma tecnologia do <strong>WhatsApp Web</strong> para enviar mensagens. Suas credenciais são salvas <strong>localmente</strong> e nunca compartilhadas com servidores externos.</p>
             </div>
             <div class="warning-box">
-              <h3>⚠️ Aviso Importante</h3>
+              <h3><i data-lucide="triangle-alert" aria-hidden="true"></i>Aviso importante</h3>
               <p>O uso de automação pode violar os <strong>Termos de Uso do WhatsApp</strong>. Use com responsabilidade e prefira um <strong>número secundário</strong> para campanhas em massa.</p>
             </div>
           </div>
@@ -188,20 +211,20 @@
       <!-- ── Tab: Contacts ──────────────── -->
       <section id="tab-contacts" class="tab-pane">
         <div class="page-header">
-          <h1 class="page-title">Lista de Contatos</h1>
-          <p class="page-sub">Formato: DDD + número (ex: 11999990000) — apenas Brasil</p>
+          <h1 class="page-title">Contatos da campanha</h1>
+          <p class="page-sub">Adicione e valide os numeros que receberao esta mensagem.</p>
         </div>
         <div class="card">
           <div class="card-header">
-            <span class="card-icon">👥</span>
-            <h2 class="card-title">Números Alvo</h2>
+            <span class="card-icon"><i data-lucide="contact-round" aria-hidden="true"></i></span>
+            <h2 class="card-title">Lista de envio</h2>
             <div class="card-actions">
-              <button class="btn btn-outline btn-sm" onclick="clearContacts()">🗑️ Limpar</button>
-              <button class="btn btn-outline btn-sm" onclick="importExample()">📋 Exemplo</button>
+              <button class="btn btn-outline btn-sm" onclick="clearContacts()"><i data-lucide="trash-2" aria-hidden="true"></i>Limpar</button>
+              <button class="btn btn-outline btn-sm" onclick="importExample()"><i data-lucide="list-plus" aria-hidden="true"></i>Exemplo</button>
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Números de telefone <span class="label-hint">— um por linha</span></label>
+            <label class="form-label" for="contacts-textarea">Numeros de telefone <span class="label-hint">- um por linha</span></label>
             <textarea
               id="contacts-textarea"
               class="form-textarea mono"
@@ -217,11 +240,11 @@
             </div>
             <div class="val-item val-valid">
               <span class="val-num" id="val-valid">0</span>
-              <span class="val-label">✅ Válidos</span>
+              <span class="val-label">Validos</span>
             </div>
             <div class="val-item val-invalid">
               <span class="val-num" id="val-invalid">0</span>
-              <span class="val-label">❌ Inválidos</span>
+              <span class="val-label">Invalidos</span>
             </div>
             <div class="val-item">
               <span class="val-num" id="val-duplicates">0</span>
@@ -229,12 +252,16 @@
             </div>
           </div>
           <div id="invalid-list" class="invalid-numbers hidden">
-            <h4>⚠️ Números com formato inválido:</h4>
+            <h4>Numeros com formato invalido:</h4>
             <div id="invalid-items" class="invalid-items-grid"></div>
           </div>
           <div id="duplicate-list" class="invalid-numbers hidden">
             <h4>Contatos duplicados ignorados:</h4>
             <div id="duplicate-items" class="invalid-items-grid"></div>
+          </div>
+          <div class="campaign-page-actions">
+            <span id="contact-step-status">A lista e validada automaticamente.</span>
+            <button class="btn btn-primary" type="button" onclick="switchTab('message')">Continuar para mensagem<i data-lucide="arrow-right" aria-hidden="true"></i></button>
           </div>
         </div>
       </section>
@@ -242,41 +269,45 @@
       <!-- ── Tab: Message ───────────────── -->
       <section id="tab-message" class="tab-pane">
         <div class="page-header">
-          <h1 class="page-title">Mensagem</h1>
-          <p class="page-sub">Compose sua mensagem com emojis, image e opções de resposta</p>
+          <h1 class="page-title">Mensagem da campanha</h1>
+          <p class="page-sub">Escreva, visualize e prepare as opcoes de resposta.</p>
+        </div>
+        <div class="message-mobile-tabs" role="tablist" aria-label="Visualizacao da mensagem">
+          <button type="button" class="active" data-message-view="editor" onclick="showMessageWorkspaceView('editor')" role="tab" aria-selected="true">Editar</button>
+          <button type="button" data-message-view="preview" onclick="showMessageWorkspaceView('preview')" role="tab" aria-selected="false">Previa</button>
         </div>
         <div class="content-grid two-col">
 
           <!-- Compositor -->
-          <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="message-editor-column" data-message-panel="editor">
             <div class="card">
               <div class="card-header">
-                <span class="card-icon">✍️</span>
-                <h2 class="card-title">Compositor</h2>
+                <span class="card-icon"><i data-lucide="message-square-text" aria-hidden="true"></i></span>
+                <h2 class="card-title">Texto da mensagem</h2>
               </div>
 
               <div class="form-group">
                 <div class="textarea-header">
-                  <label class="form-label">Texto da mensagem</label>
+                  <label class="form-label" for="message-textarea">Texto da mensagem</label>
                   <div class="textarea-tools">
-                    <button class="tool-btn" id="emoji-btn" onclick="toggleEmojiPicker(event)" title="Inserir emoji">😀</button>
-                    <button class="tool-btn" onclick="wrapSelection('*')" title="Negrito WhatsApp">*B*</button>
-                    <button class="tool-btn" onclick="wrapSelection('_')" title="Itálico WhatsApp">_I_</button>
-                    <button class="tool-btn" onclick="wrapSelection('~')" title="Tachado">~S~</button>
+                    <button class="tool-btn" id="emoji-btn" onclick="toggleEmojiPicker(event)" title="Inserir emoji" aria-label="Inserir emoji"><i data-lucide="smile" aria-hidden="true"></i></button>
+                    <button class="tool-btn" onclick="wrapSelection('*')" title="Negrito no WhatsApp" aria-label="Negrito no WhatsApp"><i data-lucide="bold" aria-hidden="true"></i></button>
+                    <button class="tool-btn" onclick="wrapSelection('_')" title="Italico no WhatsApp" aria-label="Italico no WhatsApp"><i data-lucide="italic" aria-hidden="true"></i></button>
+                    <button class="tool-btn" onclick="wrapSelection('~')" title="Tachado no WhatsApp" aria-label="Tachado no WhatsApp"><i data-lucide="strikethrough" aria-hidden="true"></i></button>
                   </div>
                 </div>
                 <div class="message-editor-wrapper" style="position:relative;">
                   <textarea
                     id="message-textarea"
                     class="form-textarea"
-                    placeholder="sua mensagem aqui...&#10;&#10;💡 Use {{numero}} para inserir o número do contato automaticamente."
+                    placeholder="Sua mensagem aqui...&#10;&#10;Use {{numero}} para inserir o numero do contato automaticamente."
                     rows="7"
                     oninput="updateMessagePreview(); updateCharCount();"
                   ></textarea>
                   <!-- Emoji Picker -->
                   <div id="emoji-picker" class="emoji-picker hidden">
                     <div class="emoji-search">
-                      <input type="text" id="emoji-search-input" placeholder="Buscar emoji..." oninput="filterEmojis(this.value)">
+                      <input type="text" id="emoji-search-input" aria-label="Buscar emoji" placeholder="Buscar emoji..." oninput="filterEmojis(this.value)">
                     </div>
                     <div class="emoji-tabs" id="emoji-tabs">
                       <button class="emoji-tab active" onclick="switchEmojiCat('smileys', this)" title="Rostos">😀</button>
@@ -296,15 +327,15 @@
             <!-- Reaction Builder -->
             <div class="card">
               <div class="card-header">
-                <span class="card-icon">1️⃣</span>
+                <span class="card-icon"><i data-lucide="list-ordered" aria-hidden="true"></i></span>
                 <h2 class="card-title">Opções de Resposta</h2>
               </div>
               <p class="hint-text" style="margin-bottom:12px;">Adicione opções numeradas para o contato responder:</p>
               <div id="reactions-list"></div>
               <div class="reactions-actions">
-                <button class="btn btn-outline btn-sm" onclick="addReaction()">➕ Adicionar opção</button>
-                <button class="btn btn-purple btn-sm" onclick="insertReactionsInMessage()">↓ Inserir na mensagem</button>
-                <button class="btn btn-outline btn-sm" onclick="clearReactions()">🗑️ Limpar</button>
+                <button class="btn btn-outline btn-sm" onclick="addReaction()"><i data-lucide="plus" aria-hidden="true"></i>Adicionar opcao</button>
+                <button class="btn btn-outline btn-sm" onclick="insertReactionsInMessage()"><i data-lucide="list-plus" aria-hidden="true"></i>Inserir no texto</button>
+                <button class="btn btn-outline btn-sm" onclick="clearReactions()"><i data-lucide="trash-2" aria-hidden="true"></i>Limpar</button>
               </div>
 
               <!-- Enquete WhatsApp Nativa -->
@@ -312,12 +343,12 @@
                 <label class="toggle-label">
                   <input type="checkbox" id="poll-mode" onchange="togglePollMode()">
                   <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                  <span>📊 Enviar como Enquete WhatsApp (nativa)</span>
+                  <span>Enviar como enquete do WhatsApp</span>
                 </label>
-                <p class="hint-text">Quando ativo, envia uma enquete interativa que o contato pode <strong>tocar para votar</strong> — em vez de texto formatado.</p>
+                <p class="hint-text">Quando ativo, envia uma enquete interativa que o contato pode <strong>tocar para votar</strong>, em vez de texto formatado.</p>
               </div>
               <div id="poll-question-group" class="form-group hidden">
-                <label class="form-label">Pergunta da enquete</label>
+                <label class="form-label" for="poll-question">Pergunta da enquete</label>
                 <input type="text" id="poll-question" class="form-input" placeholder="Ex: Você tem interesse em saber mais?" maxlength="255">
                 <p class="hint-text">Deixe vazio para usar o início da mensagem como pergunta.</p>
               </div>
@@ -326,7 +357,7 @@
             <!-- Image Upload -->
             <div class="card">
               <div class="card-header">
-                <span class="card-icon">🖼️</span>
+                <span class="card-icon"><i data-lucide="image" aria-hidden="true"></i></span>
                 <h2 class="card-title">Imagem (opcional)</h2>
               </div>
               <div class="upload-area" id="upload-area"
@@ -334,16 +365,16 @@
                    ondrop="handleImageDrop(event)"
                    ondragover="handleDragOver(event)"
                    ondragleave="handleDragLeave(event)">
-                <input type="file" id="image-input" accept="image/*" hidden onchange="handleImageSelect(event)">
+                <input type="file" id="image-input" accept="image/*" aria-label="Selecionar imagem da campanha" hidden onchange="handleImageSelect(event)">
                 <div class="upload-placeholder" id="upload-placeholder">
-                  <span class="upload-icon">🖼️</span>
+                  <span class="upload-icon"><i data-lucide="image-plus" aria-hidden="true"></i></span>
                   <p>Clique ou arraste uma imagem aqui</p>
                   <span class="upload-hint">JPG, PNG, GIF, WebP • máx. 16MB</span>
                 </div>
                 <div class="upload-preview hidden" id="upload-preview">
                   <img id="preview-img" src="" alt="Preview da imagem">
                   <div class="preview-overlay">
-                    <button class="preview-remove-btn" onclick="removeImage(event)">✕ Remover imagem</button>
+                    <button class="preview-remove-btn" onclick="removeImage(event)"><i data-lucide="x" aria-hidden="true"></i>Remover imagem</button>
                   </div>
                 </div>
               </div>
@@ -351,10 +382,10 @@
           </div><!-- /left col -->
 
           <!-- Preview Phone -->
-          <div class="card preview-card" style="align-self:start;position:sticky;top:20px;">
+          <div class="card preview-card" data-message-panel="preview">
             <div class="card-header">
-              <span class="card-icon">👁️</span>
-              <h2 class="card-title">Preview da Mensagem</h2>
+              <span class="card-icon"><i data-lucide="eye" aria-hidden="true"></i></span>
+              <h2 class="card-title">Previa da mensagem</h2>
             </div>
             <div class="phone-frame">
               <div class="phone-notch"></div>
@@ -386,20 +417,24 @@
           </div>
 
         </div><!-- /content-grid -->
+        <div class="campaign-page-actions">
+          <button class="btn btn-outline" type="button" onclick="clearCampaignMessage()"><i data-lucide="trash-2" aria-hidden="true"></i>Limpar mensagem</button>
+          <button class="btn btn-primary" type="button" onclick="switchTab('schedule')">Continuar para agendamento<i data-lucide="arrow-right" aria-hidden="true"></i></button>
+        </div>
       </section>
 
       <!-- ── Tab: Schedule ──────────────── -->
       <section id="tab-schedule" class="tab-pane">
         <div class="page-header">
-          <h1 class="page-title">Agendamento</h1>
-          <p class="page-sub">Configure intervalos, janela de horário e proteções anti-banimento</p>
+          <h1 class="page-title">Agendamento da campanha</h1>
+          <p class="page-sub">Defina ritmo, horario e limites antes do envio.</p>
         </div>
         <div class="content-grid two-col">
 
           <!-- Interval -->
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">⏱️</span>
+              <span class="card-icon"><i data-lucide="timer" aria-hidden="true"></i></span>
               <h2 class="card-title">Intervalo entre Mensagens</h2>
             </div>
             <div class="form-group">
@@ -408,7 +443,7 @@
                 <label class="radio-card">
                   <input type="radio" name="interval-mode" value="fixed" checked onchange="updateIntervalMode()">
                   <div class="radio-content">
-                    <span class="radio-icon">📏</span>
+                    <span class="radio-icon"><i data-lucide="ruler" aria-hidden="true"></i></span>
                     <span class="radio-label">Fixo</span>
                     <span class="radio-desc">Sempre o mesmo tempo</span>
                   </div>
@@ -416,7 +451,7 @@
                 <label class="radio-card">
                   <input type="radio" name="interval-mode" value="random" onchange="updateIntervalMode()">
                   <div class="radio-content">
-                    <span class="radio-icon">🎲</span>
+                    <span class="radio-icon"><i data-lucide="dices" aria-hidden="true"></i></span>
                     <span class="radio-label">Aleatório</span>
                     <span class="radio-desc">Mais seguro (recomendado)</span>
                   </div>
@@ -424,7 +459,7 @@
               </div>
             </div>
             <div id="interval-fixed-group" class="form-group">
-              <label class="form-label">Intervalo (segundos)</label>
+              <label class="form-label" for="interval-fixed-val">Intervalo (segundos)</label>
               <div class="input-with-unit">
                 <input type="number" id="interval-fixed-val" class="form-input" value="45" min="5" max="3600" oninput="updateEstimate()">
                 <span class="input-unit">seg</span>
@@ -434,12 +469,12 @@
               <label class="form-label">Intervalo aleatório entre</label>
               <div class="range-row">
                 <div class="input-with-unit">
-                  <input type="number" id="interval-min" class="form-input" value="20" min="5" max="3600" oninput="updateEstimate()">
+                  <input type="number" id="interval-min" class="form-input" value="20" min="5" max="3600" aria-label="Intervalo minimo em segundos" oninput="updateEstimate()">
                   <span class="input-unit">mín</span>
                 </div>
                 <span class="range-sep">até</span>
                 <div class="input-with-unit">
-                  <input type="number" id="interval-max" class="form-input" value="90" min="5" max="3600" oninput="updateEstimate()">
+                  <input type="number" id="interval-max" class="form-input" value="90" min="5" max="3600" aria-label="Intervalo maximo em segundos" oninput="updateEstimate()">
                   <span class="input-unit">máx</span>
                 </div>
               </div>
@@ -450,7 +485,7 @@
           <!-- Time Window -->
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">🕐</span>
+              <span class="card-icon"><i data-lucide="clock-3" aria-hidden="true"></i></span>
               <h2 class="card-title">Janela de Horário</h2>
             </div>
             <div class="form-group">
@@ -463,11 +498,11 @@
             </div>
             <div id="time-window-settings" class="hidden">
               <div class="form-group">
-                <label class="form-label">Horário de início</label>
+                <label class="form-label" for="window-start">Horario de inicio</label>
                 <input type="time" id="window-start" class="form-input" value="08:00">
               </div>
               <div class="form-group">
-                <label class="form-label">Horário de término</label>
+                <label class="form-label" for="window-end">Horario de termino</label>
                 <input type="time" id="window-end" class="form-input" value="20:00">
               </div>
             </div>
@@ -476,7 +511,7 @@
           <!-- Flow Control -->
           <div class="card flow-control-card">
             <div class="card-header">
-              <span class="card-icon">ðŸš¦</span>
+              <span class="card-icon"><i data-lucide="traffic-cone" aria-hidden="true"></i></span>
               <h2 class="card-title">Fluxo de Contatos</h2>
               <div class="card-actions">
                 <button class="btn btn-outline btn-sm" onclick="applySafeSendPreset()">Modo seguro</button>
@@ -493,12 +528,12 @@
             <div id="flow-control-settings" class="hidden">
               <div class="range-row">
                 <div class="form-group">
-                  <label class="form-label">Maximo de contatos</label>
+                  <label class="form-label" for="flow-max-contacts">Maximo de contatos</label>
                   <input type="number" id="flow-max-contacts" class="form-input" value="15" min="1" max="10000" oninput="updateEstimate()">
                 </div>
                 <span class="range-sep">a cada</span>
                 <div class="form-group">
-                  <label class="form-label">Janela</label>
+                  <label class="form-label" for="flow-window-minutes">Janela</label>
                   <div class="input-with-unit">
                     <input type="number" id="flow-window-minutes" class="form-input" value="10" min="1" max="1440" oninput="updateEstimate()">
                     <span class="input-unit">min</span>
@@ -514,7 +549,7 @@
           <!-- Anti-restriction -->
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">🛡️</span>
+              <span class="card-icon"><i data-lucide="shield-check" aria-hidden="true"></i></span>
               <h2 class="card-title">Proteção Anti-Restrição</h2>
             </div>
             <div class="form-group">
@@ -541,21 +576,21 @@
               </label>
             </div>
             <div id="limit-settings" class="hidden form-group">
-              <label class="form-label">Máximo por dia</label>
+              <label class="form-label" for="daily-limit">Maximo por dia</label>
               <div class="input-with-unit">
                 <input type="number" id="daily-limit" class="form-input" value="50" min="1" max="1000">
                 <span class="input-unit">msg/dia</span>
               </div>
             </div>
             <div class="warning-box compact">
-              <p>⚠️ Para contas novas recomendamos máximo de <strong>30–50 mensagens/dia</strong>.</p>
+              <p>Para contas novas, recomendamos no maximo <strong>30 a 50 mensagens por dia</strong>.</p>
             </div>
           </div>
 
           <!-- Estimate -->
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">📊</span>
+              <span class="card-icon"><i data-lucide="calculator" aria-hidden="true"></i></span>
               <h2 class="card-title">Estimativa de Campanha</h2>
             </div>
             <div class="estimate-grid">
@@ -576,63 +611,52 @@
                 <span class="est-label">Término estimado</span>
               </div>
             </div>
-            <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px;" onclick="updateEstimate()">🔄 Recalcular</button>
+            <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px;" onclick="updateEstimate()"><i data-lucide="refresh-cw" aria-hidden="true"></i>Recalcular</button>
           </div>
 
+        </div>
+        <div class="campaign-page-actions">
+          <button class="btn btn-outline" type="button" onclick="switchTab('message')"><i data-lucide="arrow-left" aria-hidden="true"></i>Voltar para mensagem</button>
+          <button class="btn btn-primary" type="button" onclick="switchTab('campaign')">Revisar campanha<i data-lucide="arrow-right" aria-hidden="true"></i></button>
         </div>
       </section>
 
       <!-- ── Tab: Campaign ──────────────── -->
       <section id="tab-campaign" class="tab-pane">
         <div class="page-header">
-          <h1 class="page-title">Campanha</h1>
-          <p class="page-sub">Gerencie e monitore o envio em tempo real</p>
-        </div>
-        <!-- Tipo de campanha -->
-        <div class="card" style="padding:14px 20px;margin-bottom:12px;">
-          <div class="card-header" style="margin-bottom:10px;">
-            <span class="card-icon">🏷️</span>
-            <h2 class="card-title">Tipo da Campanha <span class="label-hint">— opcional, apenas visual</span></h2>
-          </div>
-          <select id="campaign-type" class="campaign-type-select">
-            <option value="">— Selecione o tipo —</option>
-            <option value="new_lead">🆕 Cliente novo / cotação</option>
-            <option value="regularization">📋 Regularização / retorno</option>
-            <option value="reinspection">🔍 Revistoria / suporte</option>
-            <option value="reactivation">🔄 Reativação</option>
-            <option value="other">📌 Outro</option>
-          </select>
+          <h1 class="page-title">Revisao e envio</h1>
+          <p class="page-sub">Confirme a preparacao e acompanhe cada entrega em tempo real.</p>
         </div>
 
         <!-- Stats -->
         <div class="stats-row">
           <div class="stat-card">
-            <div class="stat-icon">📤</div>
+            <div class="stat-icon"><i data-lucide="list" aria-hidden="true"></i></div>
             <div class="stat-value" id="stat-total">0</div>
             <div class="stat-label">Total</div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon">ðŸ“¨</div>
+            <div class="stat-icon"><i data-lucide="send" aria-hidden="true"></i></div>
             <div class="stat-value" id="stat-accepted">0</div>
             <div class="stat-label">Aceitas</div>
           </div>
           <div class="stat-card stat-success">
-            <div class="stat-icon">✅</div>
+            <div class="stat-icon"><i data-lucide="badge-check" aria-hidden="true"></i></div>
             <div class="stat-value" id="stat-confirmed">0</div>
             <div class="stat-label">Confirmadas</div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon">✉️</div>
+            <div class="stat-icon"><i data-lucide="mail-check" aria-hidden="true"></i></div>
             <div class="stat-value" id="stat-accepted-unconfirmed">0</div>
             <div class="stat-label">Aceitas sem confirmacao</div>
           </div>
           <div class="stat-card stat-error">
-            <div class="stat-icon">❌</div>
+            <div class="stat-icon"><i data-lucide="circle-x" aria-hidden="true"></i></div>
             <div class="stat-value" id="stat-failed">0</div>
             <div class="stat-label">Falhas</div>
           </div>
           <div class="stat-card stat-pending">
-            <div class="stat-icon">⏳</div>
+            <div class="stat-icon"><i data-lucide="clock-3" aria-hidden="true"></i></div>
             <div class="stat-value" id="stat-pending">0</div>
             <div class="stat-label">Pendentes</div>
           </div>
@@ -641,7 +665,7 @@
         <!-- Progress -->
         <div class="card progress-card">
           <div class="progress-header">
-            <span id="campaign-status-label" class="campaign-status-badge status-idle">💤 Aguardando</span>
+            <span id="campaign-status-label" class="campaign-status-badge status-idle">Aguardando</span>
             <span id="progress-pct" class="progress-pct">0%</span>
           </div>
           <div class="progress-bar-track">
@@ -653,16 +677,16 @@
         <div class="card controls-card">
           <div class="controls-row">
             <button class="btn btn-primary btn-lg" id="btn-start" onclick="startCampaign()">
-              🚀 Iniciar Campanha
+              <i data-lucide="send" aria-hidden="true"></i>Iniciar campanha
             </button>
             <button class="btn btn-warning btn-lg hidden" id="btn-pause" onclick="pauseCampaign()">
-              ⏸️ Pausar
+              <i data-lucide="pause" aria-hidden="true"></i>Pausar
             </button>
             <button class="btn btn-success btn-lg hidden" id="btn-resume" onclick="resumeCampaign()">
-              ▶️ Retomar
+              <i data-lucide="play" aria-hidden="true"></i>Retomar
             </button>
             <button class="btn btn-danger btn-lg hidden" id="btn-stop" onclick="stopCampaign()">
-              🛑 Parar
+              <i data-lucide="square" aria-hidden="true"></i>Parar
             </button>
           </div>
           <p class="controls-hint" id="controls-hint">Configure os contatos, mensagem e agendamento nas abas anteriores.</p>
@@ -672,10 +696,10 @@
         <div class="content-grid two-col">
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">📋</span>
+              <span class="card-icon"><i data-lucide="list-checks" aria-hidden="true"></i></span>
               <h2 class="card-title">Fila de Envio</h2>
               <div class="card-actions">
-                <button class="btn btn-outline btn-sm" onclick="clearQueue()" id="btn-clear-queue">🗑️ Limpar</button>
+                <button class="btn btn-outline btn-sm" onclick="clearQueue()" id="btn-clear-queue"><i data-lucide="trash-2" aria-hidden="true"></i>Limpar</button>
               </div>
             </div>
             <div class="queue-list" id="queue-list">
@@ -685,12 +709,12 @@
 
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">💻</span>
+              <span class="card-icon"><i data-lucide="terminal" aria-hidden="true"></i></span>
               <h2 class="card-title">Log em Tempo Real</h2>
               <div class="card-actions">
-                <button class="btn btn-outline btn-sm" onclick="copyCampaignLog()">Copiar log</button>
-                <button class="btn btn-outline btn-sm" onclick="copyLastCampaignDiagnostic()">Copiar ultimo envio</button>
-                <button class="btn btn-outline btn-sm" onclick="clearLog()">🗑️ Limpar</button>
+                <button class="btn btn-outline btn-sm" onclick="copyCampaignLog()"><i data-lucide="copy" aria-hidden="true"></i>Copiar log</button>
+                <button class="btn btn-outline btn-sm" onclick="copyLastCampaignDiagnostic()"><i data-lucide="clipboard-check" aria-hidden="true"></i>Ultimo envio</button>
+                <button class="btn btn-outline btn-sm" onclick="clearLog()"><i data-lucide="trash-2" aria-hidden="true"></i>Limpar</button>
               </div>
             </div>
             <div class="log-console" id="log-console">
@@ -908,7 +932,7 @@
                 <div class="ai-setting-title"><div><h3>Documentos PDF</h3><p>Arquivos importados entram na busca de conhecimento do agente.</p></div></div>
                 <div class="ai-docs-grid">
                   <div id="pdf-upload-area" class="upload-area ai-upload-area" onclick="document.getElementById('pdf-input')?.click()" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="this.classList.remove('drag-over'); handlePDFDrop(event)">
-                    <input type="file" id="pdf-input" accept=".pdf" hidden onchange="handlePDFUpload(event)">
+                    <input type="file" id="pdf-input" accept=".pdf" aria-label="Selecionar documento PDF" hidden onchange="handlePDFUpload(event)">
                     <i data-lucide="file-up" aria-hidden="true"></i><strong>Adicionar PDF</strong><small>Arquivo de ate 32 MB</small>
                   </div>
                   <div id="docs-list" class="docs-list ai-docs-list"><div class="ai-empty-state"><i data-lucide="files" aria-hidden="true"></i><span>Nenhum documento importado.</span></div></div>
@@ -930,65 +954,89 @@
       <!-- ── Tab: Internal ─────────────── -->
       <section id="tab-internal" class="tab-pane">
         <div class="page-header">
-          <h1 class="page-title">Modo Interno</h1>
-          <p class="page-sub">Cadastre consultores e respostas de FAQ usadas pelos comandos internos do WhatsApp.</p>
+          <h1 class="page-title">Consultores e FAQ</h1>
+          <p class="page-sub">Defina os responsaveis pelos encaminhamentos e as respostas de apoio interno.</p>
         </div>
 
-        <div class="content-grid two-col">
-          <div class="card internal-card">
-            <div class="card-header">
-              <span class="card-icon">👥</span>
-              <h2 class="card-title">Consultores</h2>
-              <div class="card-actions">
-                <button class="btn btn-outline btn-sm" onclick="loadInternalPanel()">Atualizar</button>
+        <div class="internal-settings-layout">
+          <nav class="internal-settings-nav" aria-label="Configuracoes internas">
+            <button type="button" class="active" data-internal-section="consultants" onclick="showInternalWorkspaceSection('consultants')">
+              <i data-lucide="users-round" aria-hidden="true"></i><span><strong>Consultores</strong><small>Equipe e encaminhamentos</small></span>
+            </button>
+            <button type="button" data-internal-section="faq" onclick="showInternalWorkspaceSection('faq')">
+              <i data-lucide="book-open-text" aria-hidden="true"></i><span><strong>FAQ interna</strong><small>Respostas de apoio</small></span>
+            </button>
+            <button type="button" data-internal-section="guide" onclick="showInternalWorkspaceSection('guide')">
+              <i data-lucide="circle-help" aria-hidden="true"></i><span><strong>Como funciona</strong><small>Regras do modo interno</small></span>
+            </button>
+          </nav>
+
+          <div class="internal-settings-workspace">
+            <section class="internal-settings-panel active" data-internal-panel="consultants">
+              <div class="card internal-card">
+                <div class="card-header">
+                  <span class="card-icon"><i data-lucide="users-round" aria-hidden="true"></i></span>
+                  <div class="card-heading-copy"><h2 class="card-title">Consultores</h2><p>Defina quem recebe vendas e atendimentos encaminhados.</p></div>
+                  <div class="card-actions">
+                    <button class="workspace-icon-button" onclick="loadInternalPanel()" title="Atualizar consultores" aria-label="Atualizar consultores"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+                  </div>
+                </div>
+
+                <div class="internal-form-grid">
+                  <label class="internal-field"><span>Nome</span><input type="text" id="internal-consultant-name" class="form-input" placeholder="Nome do consultor"></label>
+                  <label class="internal-field"><span>WhatsApp</span><input type="text" id="internal-consultant-phone" class="form-input" placeholder="Telefone com DDD"></label>
+                  <label class="internal-field"><span>Funcao</span><input type="text" id="internal-consultant-role" class="form-input" placeholder="Ex: comercial"></label>
+                  <label class="internal-field"><span>Prioridade</span><input type="number" id="internal-consultant-priority" class="form-input" min="1" max="999" value="100"></label>
+                </div>
+                <div class="internal-checks">
+                  <label><input type="checkbox" id="internal-consultant-sales" checked> Recebe vendas</label>
+                  <label><input type="checkbox" id="internal-consultant-support" checked> Recebe atendimentos</label>
+                  <label><input type="checkbox" id="internal-consultant-active" checked> Ativo</label>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="createInternalConsultant()"><i data-lucide="user-plus" aria-hidden="true"></i>Salvar consultor</button>
+
+                <div id="internal-consultants-list" class="internal-list">
+                  <div class="internal-empty">Carregando consultores...</div>
+                </div>
               </div>
-            </div>
+            </section>
 
-            <div class="internal-form-grid">
-              <input type="text" id="internal-consultant-name" class="form-input" placeholder="Nome">
-              <input type="text" id="internal-consultant-phone" class="form-input" placeholder="Telefone com DDD">
-              <input type="text" id="internal-consultant-role" class="form-input" placeholder="Funcao (ex: comercial)">
-              <input type="number" id="internal-consultant-priority" class="form-input" placeholder="Prioridade" value="100">
-            </div>
-            <div class="internal-checks">
-              <label><input type="checkbox" id="internal-consultant-sales" checked> Recebe vendas</label>
-              <label><input type="checkbox" id="internal-consultant-support" checked> Recebe suporte</label>
-              <label><input type="checkbox" id="internal-consultant-active" checked> Ativo</label>
-            </div>
-            <button class="btn btn-primary btn-sm" onclick="createInternalConsultant()">Salvar consultor</button>
+            <section class="internal-settings-panel" data-internal-panel="faq">
+              <div class="card internal-card">
+                <div class="card-header">
+                  <span class="card-icon"><i data-lucide="book-open-text" aria-hidden="true"></i></span>
+                  <div class="card-heading-copy"><h2 class="card-title">FAQ interna</h2><p>Mantenha respostas seguras para consultas dos consultores.</p></div>
+                  <div class="card-actions">
+                    <button class="workspace-icon-button" onclick="loadInternalPanel()" title="Atualizar FAQ" aria-label="Atualizar FAQ"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+                  </div>
+                </div>
 
-            <div id="internal-consultants-list" class="internal-list">
-              <div class="internal-empty">Carregando consultores...</div>
-            </div>
-          </div>
+                <div class="internal-form-grid">
+                  <label class="internal-field"><span>Titulo</span><input type="text" id="internal-faq-title" class="form-input" placeholder="Assunto da resposta"></label>
+                  <label class="internal-field"><span>Categoria</span><input type="text" id="internal-faq-category" class="form-input" placeholder="Ex: vistoria"></label>
+                  <label class="internal-field internal-field-wide"><span>Palavras-chave</span><input type="text" id="internal-faq-keywords" class="form-input" placeholder="Separe os termos por virgula"></label>
+                </div>
+                <label class="internal-field internal-answer-field"><span>Resposta</span><textarea id="internal-faq-answer" class="form-textarea" rows="5" placeholder="Resposta segura para o consultor usar"></textarea></label>
+                <label class="internal-inline-check"><input type="checkbox" id="internal-faq-active" checked> FAQ ativa</label>
+                <button class="btn btn-primary btn-sm" onclick="createInternalFaq()"><i data-lucide="save" aria-hidden="true"></i>Salvar FAQ</button>
 
-          <div class="card internal-card">
-            <div class="card-header">
-              <span class="card-icon">📚</span>
-              <h2 class="card-title">FAQ / Docs</h2>
-              <div class="card-actions">
-                <button class="btn btn-outline btn-sm" onclick="loadInternalPanel()">Atualizar</button>
+                <div id="internal-faq-list" class="internal-list">
+                  <div class="internal-empty">Carregando FAQ...</div>
+                </div>
               </div>
-            </div>
+            </section>
 
-            <div class="internal-form-grid">
-              <input type="text" id="internal-faq-title" class="form-input" placeholder="Titulo">
-              <input type="text" id="internal-faq-category" class="form-input" placeholder="Categoria">
-              <input type="text" id="internal-faq-keywords" class="form-input" placeholder="Palavras-chave separadas por virgula">
-            </div>
-            <textarea id="internal-faq-answer" class="form-textarea" rows="5" placeholder="Resposta segura para o consultor usar"></textarea>
-            <label class="internal-inline-check"><input type="checkbox" id="internal-faq-active" checked> FAQ ativo</label>
-            <button class="btn btn-primary btn-sm" onclick="createInternalFaq()">Salvar FAQ</button>
-
-            <div id="internal-faq-list" class="internal-list">
-              <div class="internal-empty">Carregando FAQ...</div>
-            </div>
+            <section class="internal-settings-panel" data-internal-panel="guide">
+              <div class="card internal-help-card">
+                <div class="card-header"><span class="card-icon"><i data-lucide="message-circle-question" aria-hidden="true"></i></span><div class="card-heading-copy"><h2 class="card-title">Como o modo interno funciona</h2><p>Separacao entre atendimento ao cliente e apoio ao consultor.</p></div></div>
+                <div class="internal-guide-list">
+                  <div><i data-lucide="user-check" aria-hidden="true"></i><span><strong>Consultores identificados</strong><small>Numeros cadastrados aqui nao entram no funil de clientes.</small></span></div>
+                  <div><i data-lucide="book-check" aria-hidden="true"></i><span><strong>Respostas baseadas na FAQ</strong><small>A IA usa apenas orientacoes internas cadastradas e fontes oficiais.</small></span></div>
+                  <div><i data-lucide="route" aria-hidden="true"></i><span><strong>Sem novo encaminhamento</strong><small>O modo interno orienta o trabalho sem criar lead nem acionar handoff.</small></span></div>
+                </div>
+              </div>
+            </section>
           </div>
-        </div>
-
-        <div class="card internal-help-card">
-          <div class="card-header"><span class="card-icon">💬</span><h2 class="card-title">Como o modo consultor funciona</h2></div>
-          <p class="hint-text">Numeros cadastrados aqui nao entram no funil de cliente. Quando um consultor chama o bot, a IA responde como apoio interno: pode explicar status, FAQ, pendencias e orientar o atendimento sem criar lead nem acionar handoff.</p>
         </div>
       </section>
 
@@ -1002,7 +1050,7 @@
         <div class="ad-search-grid">
           <div class="card">
             <div class="card-header">
-              <span class="card-icon">🔎</span>
+              <span class="card-icon"><i data-lucide="search" aria-hidden="true"></i></span>
               <h2 class="card-title">Nova Busca</h2>
             </div>
 
@@ -1031,14 +1079,14 @@
             </div>
 
             <div class="ad-search-actions">
-              <button id="btn-start-ad-search" class="btn btn-primary" onclick="startAdResearch()">Pesquisar anuncios</button>
-              <button class="btn btn-outline" onclick="restoreAdResearchJob(true)">Recuperar ultima busca</button>
+              <button id="btn-start-ad-search" class="btn btn-primary" onclick="startAdResearch()"><i data-lucide="search" aria-hidden="true"></i>Pesquisar anuncios</button>
+              <button class="btn btn-outline" onclick="restoreAdResearchJob(true)"><i data-lucide="history" aria-hidden="true"></i>Recuperar ultima busca</button>
             </div>
           </div>
 
           <div class="card ad-search-sidecard">
             <div class="card-header">
-              <span class="card-icon">📈</span>
+              <span class="card-icon"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i></span>
               <h2 class="card-title">Como o ranking funciona</h2>
             </div>
 
@@ -1077,7 +1125,7 @@
 
         <div class="card">
           <div class="card-header">
-            <span class="card-icon">🧠</span>
+            <span class="card-icon"><i data-lucide="scan-search" aria-hidden="true"></i></span>
             <h2 class="card-title">Resultados encontrados</h2>
           </div>
           <div class="ad-search-results-summary" id="ad-search-results-summary">Inicie uma busca para listar os anuncios aqui.</div>
@@ -1108,13 +1156,13 @@
           </div>
 
           <div class="status-actions">
-            <button class="btn btn-outline" onclick="disconnectWhatsApp()">Reconectar WhatsApp</button>
-            <button class="btn btn-outline" onclick="testEffectiveAIStatus()">Testar IA efetiva</button>
-            <button class="btn btn-outline" onclick="revalidateAdsCollector()">Revalidar coletor de anuncios</button>
-            <button class="btn btn-outline" onclick="copySystemDiagnostic()">Copiar log diagnostico</button>
-            <button class="btn btn-outline" onclick="copyLastOutboundByContext('ai')">Copiar ultimo envio IA</button>
-            <button class="btn btn-outline" onclick="copyLastOutboundByContext('campaign')">Copiar ultimo envio Campanha</button>
-            <button class="btn btn-primary" onclick="refreshSystemStatus()">Atualizar diagnostico agora</button>
+            <button class="btn btn-outline" onclick="disconnectWhatsApp()"><i data-lucide="refresh-cw" aria-hidden="true"></i>Reconectar WhatsApp</button>
+            <button class="btn btn-outline" onclick="testEffectiveAIStatus()"><i data-lucide="flask-conical" aria-hidden="true"></i>Testar IA efetiva</button>
+            <button class="btn btn-outline" onclick="revalidateAdsCollector()"><i data-lucide="search-check" aria-hidden="true"></i>Revalidar coletor de anuncios</button>
+            <button class="btn btn-outline" onclick="copySystemDiagnostic()"><i data-lucide="copy" aria-hidden="true"></i>Copiar log diagnostico</button>
+            <button class="btn btn-outline" onclick="copyLastOutboundByContext('ai')"><i data-lucide="bot" aria-hidden="true"></i>Copiar ultimo envio IA</button>
+            <button class="btn btn-outline" onclick="copyLastOutboundByContext('campaign')"><i data-lucide="send" aria-hidden="true"></i>Copiar ultimo envio campanha</button>
+            <button class="btn btn-primary" onclick="refreshSystemStatus()"><i data-lucide="refresh-cw" aria-hidden="true"></i>Atualizar diagnostico</button>
           </div>
         </div>
 
@@ -1129,7 +1177,7 @@
 
         <div class="card">
           <div class="card-header">
-            <span class="card-icon">🧭</span>
+            <span class="card-icon"><i data-lucide="activity" aria-hidden="true"></i></span>
             <h2 class="card-title">Ultimos eventos importantes</h2>
           </div>
           <div class="status-events" id="status-events">
@@ -1285,7 +1333,7 @@
 
           <div class="lead-bulk-bar hidden" id="lead-bulk-bar" role="region" aria-label="A&ccedil;&otilde;es para leads selecionados">
             <strong id="lead-selected-count">0 selecionados</strong>
-            <button class="lead-link-btn hidden" id="lead-select-all-results" type="button"></button>
+            <button class="lead-link-btn hidden" id="lead-select-all-results" type="button" aria-label="Selecionar todos os leads filtrados"></button>
             <div class="lead-bulk-spacer"></div>
             <label class="lead-bulk-move-label" for="lead-bulk-stage">Mover para</label>
             <select id="lead-bulk-stage" class="form-input form-input-sm">
@@ -1417,7 +1465,7 @@
             <span>S&oacute; aparecem no painel</span>
           </div>
           <div class="lead-note-composer">
-            <textarea id="modal-lead-note-input" class="form-input" rows="2" maxlength="1200" placeholder="Registrar informa&ccedil;&atilde;o para o pr&oacute;ximo atendimento"></textarea>
+            <textarea id="modal-lead-note-input" class="form-input" rows="2" maxlength="1200" aria-label="Nota interna do lead" placeholder="Registrar informa&ccedil;&atilde;o para o pr&oacute;ximo atendimento"></textarea>
             <button class="btn btn-outline btn-sm" id="lead-note-save" type="button"><i data-lucide="plus" aria-hidden="true"></i><span>Adicionar</span></button>
           </div>
           <div class="lead-note-list" id="modal-lead-notes"></div>
@@ -1479,5 +1527,6 @@
   <script src="app.js?v=4.0.0-ai-console"></script>
   <script src="leads-workspace.js?v=3.2.0-leads"></script>
   <script src="ad-research.js"></script>
+  <script src="redesign.js?v=5.0.0-workspace"></script>
 </body>
 </html>

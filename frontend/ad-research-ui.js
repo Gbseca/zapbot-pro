@@ -114,8 +114,8 @@
           <div class="ad-section-heading">
             <div><h2>Resultados</h2><p id="ad-search-results-summary">Inicie uma busca para listar anuncios ativos.</p></div>
             <div class="ad-result-toolbar">
-              <input id="ad-result-filter" class="form-input" type="search" placeholder="Filtrar resultados" oninput="renderAdResearchResults()">
-              <select id="ad-result-format-filter" class="form-input" onchange="renderAdResearchResults()">
+              <input id="ad-result-filter" class="form-input" type="search" aria-label="Filtrar resultados da pesquisa" placeholder="Filtrar resultados" oninput="renderAdResearchResults()">
+              <select id="ad-result-format-filter" class="form-input" aria-label="Filtrar resultados por formato" onchange="renderAdResearchResults()">
                 <option value="all">Todos os formatos</option>
                 <option value="image">Imagem</option>
                 <option value="video">Video</option>
