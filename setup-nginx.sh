@@ -8,6 +8,8 @@ server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name mooverjadm.duckdns.org;
+    client_max_body_size 40m;
+    client_body_timeout 120s;
 
     location / {
         proxy_pass http://localhost:3001;

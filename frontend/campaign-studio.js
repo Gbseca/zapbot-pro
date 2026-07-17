@@ -44,6 +44,7 @@
     aiReview: [],
     activeTab: 'contacts',
     activeCampaignId: null,
+    uploadingBlocks: new Set(),
   };
 
   function id(prefix = 'item') {
@@ -134,9 +135,17 @@
       await ensureSession();
       return api(path, options, false);
     }
-    const data = await response.json().catch(() => ({}));
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    let data = {};
+    if (contentType.includes('application/json')) data = await response.json().catch(() => ({}));
+    else await response.text().catch(() => '');
     if (!response.ok) {
-      const error = new Error(data.error || 'A operacao nao foi concluida.');
+      const fallbackMessage = response.status === 413
+        ? 'O arquivo e maior que o limite aceito pelo servidor.'
+        : response.status === 415
+          ? 'O formato deste arquivo nao e aceito.'
+          : 'A operacao nao foi concluida.';
+      const error = new Error(data.error || fallbackMessage);
       error.status = response.status;
       error.data = data;
       throw error;
@@ -487,8 +496,9 @@
         return `<article class="cs-content-block" data-block="${block.id}">${header}<label class="cs-field"><span>Pergunta</span><input class="form-input" data-block-field="question" data-block-id="${block.id}" maxlength="255" value="${escapeHtml(block.question || '')}"></label><div class="cs-poll-options">${options.map((option, optionIndex) => `<label><span>${optionIndex + 1}</span><input class="form-input" data-poll-option="${optionIndex}" data-block-id="${block.id}" value="${escapeHtml(option)}"><button class="cs-icon-btn danger" type="button" data-remove-poll-option="${optionIndex}" data-block-id="${block.id}" aria-label="Remover opcao"><i data-lucide="x"></i></button></label>`).join('')}</div><button class="btn btn-outline btn-sm" type="button" data-add-poll-option="${block.id}"><i data-lucide="plus"></i>Adicionar opcao</button></article>`;
       }
       const name = mediaName(block);
+      const uploading = studio.uploadingBlocks.has(block.id);
       const caption = block.type === 'audio' ? '' : `<label class="cs-field"><span>Legenda</span><textarea class="form-textarea" rows="3" data-block-field="caption" data-block-id="${block.id}">${escapeHtml(block.caption || '')}</textarea></label>`;
-      return `<article class="cs-content-block" data-block="${block.id}">${header}<div class="cs-media-row"><div class="cs-media-file ${name ? 'ready' : ''}"><i data-lucide="${name ? 'file-check-2' : 'upload-cloud'}"></i><div><strong>${escapeHtml(name || 'Nenhum arquivo')}</strong><span>${escapeHtml(mediaHint(block))}</span></div></div><label class="btn btn-outline btn-sm" for="cs-file-${block.id}"><i data-lucide="paperclip"></i>${name ? 'Trocar' : 'Anexar'}</label>${name ? `<button class="cs-icon-btn danger" type="button" data-remove-media="${block.id}" title="Remover anexo" aria-label="Remover anexo"><i data-lucide="x"></i></button>` : ''}<input id="cs-file-${block.id}" type="file" hidden data-media-input="${block.id}" data-media-kind="${block.type}" accept="${mediaAccept(block.type)}"></div>${caption}${block.type === 'audio' ? `<label class="cs-check-row compact"><input type="checkbox" data-block-field="ptt" data-block-id="${block.id}" ${block.ptt ? 'checked' : ''}><span><strong>Enviar como audio de voz</strong></span></label>` : ''}</article>`;
+      return `<article class="cs-content-block" data-block="${block.id}">${header}<div class="cs-media-row"><div class="cs-media-file ${name ? 'ready' : ''} ${uploading ? 'uploading' : ''}" aria-live="polite"><i data-lucide="${uploading ? 'loader-circle' : name ? 'file-check-2' : 'upload-cloud'}"></i><div><strong>${escapeHtml(uploading ? 'Enviando arquivo...' : name || 'Nenhum arquivo')}</strong><span>${escapeHtml(uploading ? 'Aguarde a confirmacao' : mediaHint(block))}</span></div></div><button class="btn btn-outline btn-sm" type="button" data-open-media-picker="${block.id}" ${uploading ? 'disabled' : ''}><i data-lucide="paperclip"></i>${uploading ? 'Enviando' : name ? 'Trocar' : 'Anexar'}</button>${name && !uploading ? `<button class="cs-icon-btn danger" type="button" data-remove-media="${block.id}" title="Remover anexo" aria-label="Remover anexo"><i data-lucide="x"></i></button>` : ''}<input id="cs-file-${block.id}" type="file" hidden data-media-input="${block.id}" data-media-kind="${block.type}" accept="${mediaAccept(block.type)}" ${uploading ? 'disabled' : ''}></div>${caption}${block.type === 'audio' ? `<label class="cs-check-row compact"><input type="checkbox" data-block-field="ptt" data-block-id="${block.id}" ${block.ptt ? 'checked' : ''}><span><strong>Enviar como audio de voz</strong></span></label>` : ''}</article>`;
     }).join('');
     if (!blocks.some(block => block.type === 'text')) {
       const hidden = document.createElement('textarea');
@@ -971,6 +981,7 @@
 
   async function uploadMedia(blockId, kind, file) {
     if (!file) return;
+    if (studio.uploadingBlocks.has(blockId)) return;
     const rule = studio.limits?.media?.[kind];
     const extension = `.${String(file.name || '').split('.').pop().toLowerCase()}`;
     if (rule?.extensions?.length && !rule.extensions.includes(extension)) {
@@ -981,16 +992,21 @@
       toast(`O arquivo excede o limite de ${Math.round(rule.maxBytes / (1024 * 1024))} MB.`, 'warning');
       return;
     }
-    await saveDraft(true);
-    const form = new FormData();
-    form.append('kind', kind);
-    form.append('file', file);
+    studio.uploadingBlocks.add(blockId);
+    renderBlocks();
     try {
+      await saveDraft(true);
+      const form = new FormData();
+      form.append('kind', kind);
+      form.append('file', file);
       const block = studio.draft.content.blocks.find(item => item.id === blockId);
+      if (!block) throw new Error('Este bloco nao existe mais na campanha.');
       const previousMediaId = block?.mediaId;
       const media = await api(`/api/campaign/drafts/${encodeURIComponent(studio.draft.id)}/media`, { method: 'POST', body: form });
       studio.draft.media = { ...(studio.draft.media || {}), [media.id]: media };
-      if (block) block.mediaId = media.id;
+      block.mediaId = media.id;
+      markDirty();
+      await saveDraft(true);
       if (previousMediaId && previousMediaId !== media.id) {
         try {
           await api(`/api/campaign/drafts/${encodeURIComponent(studio.draft.id)}/media/${encodeURIComponent(previousMediaId)}`, { method: 'DELETE' });
@@ -999,12 +1015,13 @@
           toast('O novo anexo foi salvo, mas o arquivo anterior nao pode ser limpo.', 'warning');
         }
       }
-      renderBlocks();
-      renderPreview();
-      markDirty();
       toast('Anexo adicionado.', 'success');
     } catch (error) {
       toast(error.message, 'error');
+    } finally {
+      studio.uploadingBlocks.delete(blockId);
+      renderBlocks();
+      renderPreview();
     }
   }
 
@@ -1201,6 +1218,8 @@
       if (button.dataset.importView) {
         document.querySelectorAll('[data-import-view]').forEach(item => item.classList.toggle('active', item === button));
         document.querySelectorAll('[data-import-panel]').forEach(item => item.classList.toggle('hidden', item.dataset.importPanel !== button.dataset.importView));
+      } else if (button.dataset.openMediaPicker) {
+        document.getElementById(`cs-file-${button.dataset.openMediaPicker}`)?.click();
       } else if (button.dataset.addBlock) addBlock(button.dataset.addBlock);
       else if (button.dataset.csAi) runAI(button.dataset.csAi);
       else if (button.dataset.insertVariable) {
