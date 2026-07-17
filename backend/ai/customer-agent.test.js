@@ -795,6 +795,26 @@ test('applies configured tone, sales conduct and operational information to the 
   assert.match(context.userMessage, /Regional Rio: atendimento especial aos sabados/);
 });
 
+test('adds bounded campaign guidance without allowing it to override safety', () => {
+  const context = buildCustomerAgentContext({
+    config: {},
+    lead: {
+      campaignId: 'campaign-1',
+      campaignName: 'Retorno de interessados',
+      campaignObjective: 'Retomar cotacoes iniciadas',
+      campaignMessage: 'Oi, Ana. Posso continuar seu atendimento?',
+      campaignAiInstructions: 'Priorize a duvida atual e encaminhe quando houver interesse claro.',
+    },
+    message: 'quero saber o valor',
+    knowledge: knowledge([]),
+  });
+
+  assert.match(context.userMessage, /CONTEXTO DA CAMPANHA ATIVA/);
+  assert.match(context.userMessage, /Retomar cotacoes iniciadas/);
+  assert.match(context.userMessage, /Priorize a duvida atual/);
+  assert.match(context.systemPrompt, /nunca substitui seguranca, fontes, intencao real do cliente/i);
+});
+
 test('does not turn a casual unknown message into an unnecessary handoff', () => {
   const turn = validateCustomerAgentTurn(generated({
     reply: 'Sem problema! Quando precisar, estou por aqui.',

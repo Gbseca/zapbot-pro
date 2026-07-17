@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('click', (e) => {
     const picker = document.getElementById('emoji-picker');
     const btn = document.getElementById('emoji-btn');
-    if (!picker.classList.contains('hidden') && !picker.contains(e.target) && e.target !== btn) {
+    if (picker && !picker.classList.contains('hidden') && !picker.contains(e.target) && e.target !== btn) {
       picker.classList.add('hidden');
     }
   });
@@ -898,6 +898,9 @@ function handleCampaignStatus(status) {
 
   const map = {
     idle:      { text: 'Aguardando', cls: 'status-idle' },
+    draft:     { text: 'Rascunho', cls: 'status-idle' },
+    scheduled: { text: 'Agendada', cls: 'status-paused' },
+    recovering:{ text: 'Revisao necessaria', cls: 'status-paused' },
     running:   { text: 'Enviando', cls: 'status-running' },
     paused:    { text: 'Pausada', cls: 'status-paused' },
     stopped:   { text: 'Interrompida', cls: 'status-stopped' },
@@ -914,19 +917,20 @@ function handleCampaignStatus(status) {
   btnResume.classList.add('hidden');
   btnStop.classList.add('hidden');
 
-  if (status === 'idle' || status === 'completed' || status === 'stopped') {
+  if (status === 'idle' || status === 'draft' || status === 'completed' || status === 'stopped') {
     btnStart.classList.remove('hidden');
   }
   if (status === 'running') {
     btnPause.classList.remove('hidden');
     btnStop.classList.remove('hidden');
   }
-  if (status === 'paused') {
+  if (status === 'paused' || status === 'recovering') {
     btnResume.classList.remove('hidden');
     btnStop.classList.remove('hidden');
   }
 
   updateBadge('campaign', status === 'running' ? 'ON' : null);
+  window.onCampaignStudioStatus?.(status);
 }
 
 function waitReasonLabel(reason) {
@@ -934,6 +938,10 @@ function waitReasonLabel(reason) {
     flow_control: 'Aguardando fluxo de contatos',
     daily_limit: 'Limite diario atingido',
     time_window: 'Fora da janela de horario',
+    scheduled_start: 'Aguardando data agendada',
+    whatsapp_connection: 'Aguardando conexao do WhatsApp',
+    restart_recovery: 'Revisao necessaria apos reinicio',
+    manual_pause: 'Campanha pausada',
   };
   return labels[reason] || 'Sem espera ativa';
 }
@@ -1013,6 +1021,10 @@ function queueStatusMeta(status) {
       return { label: 'Sem confirmacao', className: 'timeout' };
     case 'failed':
       return { label: 'Falha', className: 'failed' };
+    case 'partial_failed':
+      return { label: 'Parcial', className: 'failed' };
+    case 'skipped':
+      return { label: 'Ignorado', className: 'timeout' };
     default:
       return { label: 'Pendente', className: 'pending' };
   }
@@ -1051,9 +1063,13 @@ function updateQueueItem(index, status, sentAt, error, messageId, resolvedTarget
     statusEl.textContent = 'Enviado';
     statusEl.className = 'queue-item-status sent';
     item.classList.remove('active-item');
-  } else if (status === 'failed') {
-    statusEl.textContent = 'Falha';
+  } else if (status === 'failed' || status === 'partial_failed') {
+    statusEl.textContent = status === 'partial_failed' ? 'Parcial' : 'Falha';
     statusEl.className = 'queue-item-status failed';
+    item.classList.remove('active-item');
+  } else if (status === 'skipped') {
+    statusEl.textContent = 'Ignorado';
+    statusEl.className = 'queue-item-status timeout';
     item.classList.remove('active-item');
   } else if (status === 'sending') {
     statusEl.textContent = 'Enviando...';

@@ -183,6 +183,9 @@
       const label = document.getElementById('campaign-status-label');
       const labels = {
         idle: 'Aguardando',
+        draft: 'Rascunho',
+        scheduled: 'Agendada',
+        recovering: 'Revisao necessaria',
         running: 'Enviando',
         paused: 'Pausada',
         stopped: 'Interrompida',
