@@ -457,6 +457,8 @@
 .cs-media-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px; }
 .cs-media-file { min-height: 54px; display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px dashed var(--cs-line-strong); border-radius: 6px; }
 .cs-media-file.ready { border-style: solid; border-color: rgba(67, 211, 158, .25); background: var(--cs-green-dim); }
+.cs-media-file.uploading { border-style: solid; border-color: rgba(75, 202, 221, .35); background: rgba(75, 202, 221, .06); }
+.cs-media-file.uploading svg { animation: cs-spin .8s linear infinite; }
 .cs-media-file svg { width: 20px; color: var(--cs-cyan); }
 .cs-media-file div { display: flex; flex-direction: column; min-width: 0; }
 .cs-media-file strong { overflow: hidden; color: var(--cs-text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
