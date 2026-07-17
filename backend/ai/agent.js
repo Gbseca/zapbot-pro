@@ -13,6 +13,8 @@ import { sendHumanized, sendTextWithConfirmation } from './humanizer.js';
 import { detectAndExtract } from './lead-detector.js';
 import { executeFinancialHandoff, executeHandoff } from './handoff.js';
 import { getCollectionsContextForPhone } from '../campaign-state.js';
+import { campaignStore } from '../campaigns/campaign-store.js';
+import { hasRecentCampaignContact, isCampaignOptOutMessage } from '../campaigns/campaign-opt-out.js';
 import { handleConsultantMessage, isConsultantLinkCommand, resolveConsultantForRoute } from './consultant-agent.js';
 import {
   extractIncomingContent,
@@ -1641,6 +1643,87 @@ export async function handleIncomingMessage(wa, rawMsg) {
       inboundRoute,
       fullJid,
     });
+    return;
+  }
+
+  const campaignOptOutPhone = conversationPhone || (leadFromStore ? getLeadRealPhone(leadFromStore) : null);
+  if (campaignOptOutPhone && isCampaignOptOutMessage(incomingContent.historyText) && hasRecentCampaignContact({
+    lead: leadFromStore,
+    phone: campaignOptOutPhone,
+    store: campaignStore,
+  })) {
+    const lead = leadFromStore || createNewLead(leadId, displayNum, pushName, conversationPhone);
+    touchLeadForIncoming(lead, {
+      leadId,
+      fullJid,
+      replyRoute,
+      conversationPhone,
+      displayNum,
+      inboundRoute,
+      pushName,
+      text: incomingContent.historyText,
+    });
+    lead.history = lead.history || [];
+    lead.history.push({ role: 'user', content: incomingContent.historyText, ts: Date.now() });
+    lead.campaignSuppressed = true;
+    lead.campaignOptOutAt = new Date().toISOString();
+    campaignStore.addSuppression(campaignOptOutPhone, {
+      reason: 'Pedido de saida recebido no WhatsApp',
+      source: 'whatsapp_opt_out',
+      campaignId: lead.campaignId || null,
+    });
+    await persistSimpleReply(
+      wa,
+      leadId,
+      lead,
+      replyRoute.target,
+      'Certo. Seu numero foi retirado das novas campanhas da Moove. Se voce falar com a gente, continuamos por aqui.',
+      () => ({}),
+      replyRoute.options,
+    );
+    return;
+  }
+
+  if (leadFromStore?.campaignSentAt
+    && !leadFromStore.campaignLoopHandled
+    && leadFromStore.campaignAiRepliesEnabled === false) {
+    const lead = touchLeadForIncoming(leadFromStore, {
+      leadId,
+      fullJid,
+      replyRoute,
+      conversationPhone,
+      displayNum,
+      inboundRoute,
+      pushName,
+      text: incomingContent.historyText,
+    });
+    lead.campaignLoopHandled = true;
+    lead.lastIntent = 'human_requested';
+    lead.lastDetectedIntent = 'human_requested';
+    saveLead(leadId, lead);
+    await handleOperationalEventAction(
+      wa,
+      leadId,
+      lead,
+      replyRoute,
+      config,
+      {
+        type: 'human_requested',
+        intent: 'human_requested',
+        status: 'human_requested',
+        stage: 'human_requested',
+        conversationMode: 'operational',
+        shouldNotifyHuman: true,
+        shouldHandoff: true,
+        shouldStopAutomation: true,
+        reason: `Resposta recebida na campanha ${lead.campaignName || lead.campaignId || ''}`.trim(),
+      },
+      {
+        text: incomingContent.historyText,
+        historyText: incomingContent.historyText,
+        clientConfirmationReply: 'Recebi sua resposta e encaminhei para um consultor continuar por aqui.',
+      },
+    );
     return;
   }
 

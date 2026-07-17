@@ -76,6 +76,16 @@ import {
 } from './data/reminders-repository.js';
 import { isLidIdentifier, normalizeLidJid, normalizeRealWhatsAppPhone } from './phone-utils.js';
 import { createLeadsAccessGuard } from './security/leads-access-guard.js';
+import { createCampaignAccessGuard } from './security/campaign-access-guard.js';
+import { campaignStore } from './campaigns/campaign-store.js';
+import {
+  buildCampaignPreflight,
+  CAMPAIGN_LIMITS,
+  isCampaignEditLockedStatus,
+  sanitizeCampaignDraft,
+  validateCampaignMedia,
+} from './campaigns/campaign-validation.js';
+import { CAMPAIGN_AI_ACTIONS, runCampaignAI } from './campaigns/campaign-ai.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -168,6 +178,34 @@ function prepareCampaignNumbers(numbers = []) {
   };
 }
 
+function campaignPreflight(campaign, { testRecipient = null } = {}) {
+  const input = testRecipient
+    ? {
+      ...campaign,
+      audience: {
+        ...(campaign.audience || {}),
+        recipients: [testRecipient],
+        consentConfirmed: true,
+        consentSource: 'Envio de teste solicitado pelo operador',
+      },
+    }
+    : campaign;
+  return buildCampaignPreflight({
+    campaign: input,
+    waStatus: wa.getStatus().status,
+    isSuppressed: phone => campaignStore.isSuppressed(phone),
+    mediaResolver: mediaId => campaignStore.getMedia(campaign.id, mediaId, { includeBuffer: true }),
+    recentSendCount: (phone, days) => campaignStore.getRecentRecipientSends(
+      phone,
+      new Date(Date.now() - ((Number(days) || 7) * 24 * 60 * 60 * 1000)).toISOString(),
+    ).length,
+  });
+}
+
+function campaignMediaError(file, kind = '') {
+  return validateCampaignMedia(file, kind);
+}
+
 function normalizeDebugRoute(route) {
   const value = String(route || 'auto').toLowerCase();
   return ['phone', 'lid', 'auto'].includes(value) ? value : 'auto';
@@ -180,10 +218,11 @@ function assertDebugToken(req) {
 }
 
 const wa = new WhatsAppManager(wss);
-const queue = new MessageQueue(wa, wss, { loadConfig });
+const queue = new MessageQueue(wa, wss, { loadConfig, campaignStore });
 const adResearch = createAdResearchService({ loadConfig, broadcast });
 const adResearchAccess = createAdResearchAccessGuard();
 const leadsAccess = createLeadsAccessGuard();
+const campaignAccess = createCampaignAccessGuard();
 const systemStatus = createSystemStatusService({ wa, queue, adResearch, loadConfig, broadcast });
 
 subscribeLeadEvents((event) => broadcast(event));
@@ -345,64 +384,233 @@ app.post('/api/disconnect', async (req, res) => {
   }
 });
 
-app.post('/api/campaign/start', upload.single('image'), (req, res) => {
+app.get('/api/campaign/session', (req, res) => {
+  const session = campaignAccess.issue(req);
+  if (!session) return res.status(403).json({ error: 'Origem da requisicao nao permitida.' });
+  res.cookie('zapbot_campaign_session', session.token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    path: '/api/campaign',
+    maxAge: session.maxAgeMs,
+  });
+  return res.json({ expiresAt: session.expiresAt, maxAgeMs: session.maxAgeMs });
+});
+
+app.get('/api/campaign/limits', campaignAccess.read, (req, res) => {
+  res.json({ ...CAMPAIGN_LIMITS, aiActions: CAMPAIGN_AI_ACTIONS });
+});
+
+app.get('/api/campaign/history', campaignAccess.read, (req, res) => {
+  res.json(campaignStore.listCampaigns({ limit: req.query.limit, status: req.query.status }));
+});
+
+app.post('/api/campaign/drafts', campaignAccess.mutation, (req, res) => {
   try {
-    const data = JSON.parse(req.body.data);
-    const { numbers, message, pollEnabled, pollOptions, pollQuestion, scheduleConfig, antiRestriction } = data;
-
-    const precheck = prepareCampaignNumbers(numbers);
-    if (!precheck.validNumbers.length) return res.status(400).json({ error: 'Lista de contatos vazia ou sem numeros validos' });
-    if (!message?.trim()) return res.status(400).json({ error: 'A mensagem nao pode ser vazia' });
-    if (wa.getStatus().status !== 'connected') return res.status(400).json({ error: 'WhatsApp nao esta conectado.' });
-
-    const imageBuffer = req.file ? req.file.buffer : null;
-    queue.initCampaign({
-      numbers: precheck.validNumbers,
-      message,
-      imageBuffer,
-      pollEnabled,
-      pollOptions,
-      pollQuestion,
-      scheduleConfig,
-      antiRestriction,
-      precheck,
-    });
-    queue.start();
-    systemStatus.emitSnapshot();
-    res.json({
-      success: true,
-      message: `Campanha iniciada com ${precheck.validNumbers.length} contato(s)`,
-      precheck,
-    });
+    const draft = campaignStore.createCampaign(sanitizeCampaignDraft(req.body || {}));
+    res.status(201).json(draft);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(400).json({ error: error.message });
   }
 });
 
-app.post('/api/campaign/pause', (req, res) => {
-  queue.pause();
-  systemStatus.emitSnapshot();
-  res.json({ success: true });
+app.get('/api/campaign/drafts/:id', campaignAccess.read, (req, res) => {
+  const campaign = campaignStore.getCampaign(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campanha nao encontrada.' });
+  return res.json(campaign);
 });
 
-app.post('/api/campaign/resume', (req, res) => {
-  queue.resume();
-  systemStatus.emitSnapshot();
-  res.json({ success: true });
+app.patch('/api/campaign/drafts/:id', campaignAccess.mutation, (req, res) => {
+  try {
+    const current = campaignStore.getCampaign(req.params.id);
+    if (!current) return res.status(404).json({ error: 'Campanha nao encontrada.' });
+    if (isCampaignEditLockedStatus(current.status)) {
+      return res.status(409).json({ error: 'Pare a campanha antes de editar o conteudo.' });
+    }
+    const patch = sanitizeCampaignDraft(req.body || {});
+    const campaign = campaignStore.updateCampaign(req.params.id, patch, {
+      event: { type: 'draft_saved', message: 'Rascunho salvo.' },
+    });
+    return res.json(campaign);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
 });
 
-app.post('/api/campaign/stop', (req, res) => {
-  queue.stop();
-  systemStatus.emitSnapshot();
-  res.json({ success: true });
+app.delete('/api/campaign/drafts/:id', campaignAccess.mutation, (req, res) => {
+  try {
+    campaignStore.deleteCampaign(req.params.id);
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
 });
 
-app.get('/api/campaign/progress', (req, res) => res.json(queue.getProgress()));
+app.post('/api/campaign/drafts/:id/media', campaignAccess.mutation, upload.single('file'), (req, res) => {
+  try {
+    const campaign = campaignStore.getCampaign(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha nao encontrada.' });
+    if (isCampaignEditLockedStatus(campaign.status)) return res.status(409).json({ error: 'Pare a campanha antes de alterar anexos.' });
+    const validationError = campaignMediaError(req.file, req.body?.kind);
+    if (validationError) return res.status(400).json({ error: validationError });
+    const media = campaignStore.saveMedia(req.params.id, { ...req.file, kind: String(req.body?.kind || '').toLowerCase() });
+    return res.status(201).json(media);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
 
-app.post('/api/campaign/clear', (req, res) => {
+app.get('/api/campaign/drafts/:id/media/:mediaId', campaignAccess.read, (req, res) => {
+  try {
+    const media = campaignStore.getMedia(req.params.id, req.params.mediaId);
+    if (!media) return res.status(404).json({ error: 'Anexo nao encontrado.' });
+    res.setHeader('Content-Type', media.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${String(media.fileName || 'arquivo').replace(/["\r\n]/g, '')}"`);
+    return res.sendFile(media.absolutePath);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/campaign/drafts/:id/media/:mediaId', campaignAccess.mutation, (req, res) => {
+  try {
+    const campaign = campaignStore.getCampaign(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha nao encontrada.' });
+    if (isCampaignEditLockedStatus(campaign.status)) return res.status(409).json({ error: 'Pare a campanha antes de alterar anexos.' });
+    const removed = campaignStore.removeMedia(req.params.id, req.params.mediaId);
+    return removed ? res.json({ success: true }) : res.status(404).json({ error: 'Anexo nao encontrado.' });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/campaign/drafts/:id/preflight', campaignAccess.mutation, (req, res) => {
+  try {
+    const campaign = campaignStore.getCampaign(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha nao encontrada.' });
+    const preflight = campaignPreflight(campaign);
+    campaignStore.updateCampaign(campaign.id, { audience: { precheck: preflight } }, {
+      event: { type: 'preflight', message: preflight.ok ? 'Preflight aprovado.' : 'Preflight encontrou bloqueios.', details: { blockers: preflight.blockers.length, warnings: preflight.warnings.length } },
+    });
+    return res.status(preflight.ok ? 200 : 422).json(preflight);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/campaign/drafts/:id/test', campaignAccess.mutation, async (req, res) => {
+  try {
+    const campaign = campaignStore.getCampaign(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha nao encontrada.' });
+    const testRecipient = { phone: req.body?.phone, name: req.body?.name || 'Contato de teste', fields: req.body?.fields || {} };
+    const preflight = campaignPreflight(campaign, { testRecipient });
+    if (!preflight.ok) return res.status(422).json({ error: 'Corrija os bloqueios antes do teste.', preflight });
+    const result = await queue.sendTest(campaign.id, testRecipient);
+    systemStatus.emitSnapshot();
+    return res.json(result);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/campaign/drafts/:id/launch', campaignAccess.mutation, async (req, res) => {
+  try {
+    const campaign = campaignStore.getCampaign(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha nao encontrada.' });
+    const preflight = campaignPreflight(campaign);
+    if (!preflight.ok) return res.status(422).json({ error: 'A campanha ainda tem bloqueios.', preflight });
+    queue.loadCampaign(campaign.id, { precheck: preflight });
+    const progress = await queue.start();
+    systemStatus.emitSnapshot();
+    return res.json({ success: true, progress, preflight });
+  } catch (error) {
+    const status = /campanha atual|antes de carregar/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ error: error.message });
+  }
+});
+
+app.post('/api/campaign/ai', campaignAccess.ai, async (req, res) => {
+  try {
+    const result = await runCampaignAI({
+      config: loadConfig(),
+      action: req.body?.action,
+      input: req.body?.input || {},
+    });
+    return res.json(result);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.get('/api/campaign/suppressions', campaignAccess.read, (req, res) => {
+  res.json(campaignStore.listSuppressions());
+});
+
+app.post('/api/campaign/suppressions', campaignAccess.mutation, (req, res) => {
+  try {
+    const suppression = campaignStore.addSuppression(req.body?.phone, req.body || {});
+    return res.status(201).json(suppression);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/campaign/suppressions/:phone', campaignAccess.mutation, (req, res) => {
+  const removed = campaignStore.removeSuppression(req.params.phone);
+  return removed ? res.json({ success: true }) : res.status(404).json({ error: 'Contato nao encontrado na supressao.' });
+});
+
+app.post('/api/campaign/start', campaignAccess.mutation, upload.single('image'), async (req, res) => {
+  try {
+    if (req.file) {
+      const validationError = campaignMediaError(req.file, 'image');
+      if (validationError) return res.status(400).json({ error: validationError });
+    }
+    const data = typeof req.body?.data === 'string' ? JSON.parse(req.body.data) : (req.body || {});
+    const precheck = prepareCampaignNumbers(data.numbers);
+    const progress = queue.initCampaign({
+      ...data,
+      numbers: precheck.validNumbers,
+      imageBuffer: req.file?.buffer || null,
+      imageName: req.file?.originalname,
+      imageMimeType: req.file?.mimetype,
+      precheck,
+    });
+    const campaign = campaignStore.getCampaign(progress.campaignId);
+    const fullPreflight = campaignPreflight(campaign);
+    if (!fullPreflight.ok) return res.status(422).json({ error: 'A campanha ainda tem bloqueios.', preflight: fullPreflight, campaignId: campaign.id });
+    queue.loadCampaign(campaign.id, { precheck: fullPreflight });
+    await queue.start();
+    systemStatus.emitSnapshot();
+    return res.json({ success: true, campaignId: campaign.id, precheck: fullPreflight });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/campaign/pause', campaignAccess.mutation, (req, res) => {
+  const success = queue.pause();
+  systemStatus.emitSnapshot();
+  return success ? res.json({ success: true }) : res.status(409).json({ error: 'A campanha nao esta em execucao.' });
+});
+
+app.post('/api/campaign/resume', campaignAccess.mutation, (req, res) => {
+  const success = queue.resume();
+  systemStatus.emitSnapshot();
+  return success ? res.json({ success: true }) : res.status(409).json({ error: 'A campanha nao esta pausada.' });
+});
+
+app.post('/api/campaign/stop', campaignAccess.mutation, (req, res) => {
+  const success = queue.stop();
+  systemStatus.emitSnapshot();
+  return success ? res.json({ success: true }) : res.status(409).json({ error: 'Nenhuma campanha carregada.' });
+});
+
+app.get('/api/campaign/progress', campaignAccess.read, (req, res) => res.json(queue.getProgress()));
+
+app.post('/api/campaign/clear', campaignAccess.mutation, (req, res) => {
   const success = queue.clear();
   systemStatus.emitSnapshot();
-  success ? res.json({ success: true }) : res.status(400).json({ error: 'Pare a campanha antes de limpar.' });
+  return success ? res.json({ success: true }) : res.status(400).json({ error: 'Pare a campanha antes de limpar.' });
 });
 
 app.get('/api/consultants', async (req, res) => {
@@ -1106,6 +1314,16 @@ app.delete('/api/leads/:number', leadsAccess.mutation, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+app.use((error, req, res, next) => {
+  if (!(error instanceof multer.MulterError)) return next(error);
+  const fileTooLarge = error.code === 'LIMIT_FILE_SIZE';
+  return res.status(fileTooLarge ? 413 : 400).json({
+    error: fileTooLarge
+      ? 'O arquivo excede o limite de 32 MB.'
+      : `Nao foi possivel receber o arquivo: ${error.message}`,
+  });
 });
 
 const PORT = process.env.PORT || 3001;

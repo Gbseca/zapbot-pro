@@ -6,6 +6,7 @@ backend/auth_info/
 backend/data/*.json
 backend/data/*.jsonl
 backend/data/ad-research-diagnostics/
+backend/data/campaign-media/
 backend/knowledge/docs/
 *.log
 .env

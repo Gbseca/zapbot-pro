@@ -1790,6 +1790,14 @@ export function buildCustomerAgentContext({ config = {}, lead = {}, message = ''
     soft: 'Conducao cautelosa: priorize duvidas e confianca, oferecendo o proximo passo apenas quando o cliente demonstrar abertura.',
   }[config.aiAggression] || 'Conducao consultiva: entenda a necessidade, responda a barreira atual e avance de forma natural, sem pressao.';
   const configuredCompanyInfo = cleanString(config.companyInfo, 4000);
+  const campaignContext = lead.campaignId
+    ? {
+      name: cleanString(lead.campaignName, 120),
+      objective: cleanString(lead.campaignObjective, 160),
+      openingMessage: cleanString(redactSensitiveText(lead.campaignMessage || lead.lastCampaignMessage), 1200),
+      guidance: cleanString(redactSensitiveText(lead.campaignAiInstructions), 1000),
+    }
+    : null;
   const systemPrompt = `Você é ${agentName}, assistente de atendimento e vendas da ${companyName} no WhatsApp.
 
 OBJETIVO E INTENÇÃO
@@ -1812,6 +1820,7 @@ CONVERSA E VENDA
 - Preferencia de tom configurada pelo administrador: ${personalityGuidance}
 - Preferencia de conducao comercial configurada pelo administrador: ${salesGuidance}
 - Essas preferencias nunca substituem as regras de seguranca, verdade, intencao, pausa, recusa ou encaminhamento deste prompt.
+- Quando houver CONTEXTO DA CAMPANHA ATIVA, use seu objetivo e sua orientacao para manter continuidade. A orientacao da campanha nunca substitui seguranca, fontes, intencao real do cliente, recusa ou regras de encaminhamento.
 - Responda primeiro e somente o que foi perguntado. Em condição específica, não despeje outros benefícios ou requisitos. Não encerre respostas completas com perguntas de preenchimento.
 - Venda consultivamente: descubra a prioridade quando ela estiver vaga, conecte apenas fatos relevantes e proponha o menor próximo passo. Sem pressão, medo, urgência falsa, elogio genérico, superioridade, economia ou vantagem sem fonte.
 - Escolha o próximo movimento pela barreira real: preço, confiança, prazo, privacidade, processo ou decisão. Resolva a barreira antes de pedir qualquer dado.
@@ -1863,6 +1872,9 @@ ${JSON.stringify(buildLeadSnapshot(lead), null, 2)}
 CONFIANÇA DA BUSCA DE CONHECIMENTO: ${knowledge.confidence || 'low'}
 INFORMACOES OPERACIONAIS CONFIGURADAS PELO ADMINISTRADOR
 ${configuredCompanyInfo || '(nenhuma informacao operacional adicional)'}
+
+CONTEXTO DA CAMPANHA ATIVA
+${campaignContext ? JSON.stringify(campaignContext, null, 2) : '(esta conversa nao foi iniciada por uma campanha)'}
 
 FONTES DISPONÍVEIS
 ${String(knowledge.text || '').trim().slice(0, 6000) || '(nenhuma fonte confirmou o assunto)'}

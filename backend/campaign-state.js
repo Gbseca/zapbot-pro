@@ -337,10 +337,24 @@ async function maybeRefineIntentWithAI(campaignId, message, config) {
   });
 }
 
-export function registerActiveCampaign({ message = '', numbers = [], config = {} } = {}) {
-  const classification = classifyCampaignIntentHeuristically(message);
+export function registerActiveCampaign({ id = '', message = '', numbers = [], config = {}, intent = '', subIntent = '' } = {}) {
+  const inferred = classifyCampaignIntentHeuristically(message);
+  const explicitIntent = ['sales', 'collections'].includes(String(intent || '').toLowerCase())
+    ? String(intent).toLowerCase()
+    : '';
+  const classification = explicitIntent
+    ? {
+      ...inferred,
+      intent: explicitIntent,
+      subIntent: String(subIntent || (explicitIntent === 'collections' ? inferred.subIntent : 'sales_quote')),
+      intentConfidence: 'alta',
+      intentReason: 'Intencao definida no Estudio de Campanhas.',
+      intentSource: 'campaign_studio',
+      uncertain: false,
+    }
+    : inferred;
   const snapshot = setActiveCampaignState({
-    campaignId: randomUUID(),
+    campaignId: String(id || randomUUID()),
     status: 'idle',
     message: String(message || '').trim(),
     normalizedRecipients: normalizeRecipients(numbers),

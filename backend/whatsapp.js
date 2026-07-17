@@ -16,7 +16,7 @@ const DEFAULT_CONFIRMATION_TIMEOUT_MS = 25_000;
 const OUTBOUND_RECORD_TTL_MS = 5 * 60 * 1000;
 const KNOWN_QR_FALLBACK_VERSION = [2, 3000, 1035194821];
 const WA_DEBUG_ACKS = readEnvFlag('WA_DEBUG_ACKS', true);
-const WA_RETRY_PHONE_ON_LID_TIMEOUT = readEnvFlag('WA_RETRY_PHONE_ON_LID_TIMEOUT', true);
+const WA_RETRY_PHONE_ON_LID_TIMEOUT = readEnvFlag('WA_RETRY_PHONE_ON_LID_TIMEOUT', false);
 
 function readEnvFlag(name, fallback = false) {
     const raw = process.env[name];
@@ -58,10 +58,6 @@ function toBaseId(value) {
 function isLidJid(value) {
     const text = String(value || '');
     return text.includes('@lid') || text.includes('@hosted.lid');
-}
-
-function isLidRouteKind(value) {
-    return /lid/i.test(String(value || ''));
 }
 
 function normalizePhoneCandidate(value) {
@@ -776,9 +772,7 @@ class WhatsAppManager extends EventEmitter {
         if (snapshot.status === 'delivery_timeout') {
             this._outboundDiagnostics.lastTimeoutAt = snapshot.timedOutAt || snapshot.updatedAt || new Date().toISOString();
             this._outboundDiagnostics.lastTimeout = snapshot;
-            this._outboundDiagnostics.recommendation = isLidRouteKind(snapshot.targetKind)
-                ? 'Rota LID ficou sem confirmacao. Force WA_CAMPAIGN_ROUTE_MODE=phone e reenvie; se phone tambem falhar, reconecte/limpe a sessao.'
-                : 'Envio por phone ficou sem confirmacao. Recomendado reconectar o WhatsApp; se persistir, limpar auth_info/volume e escanear QR novamente.';
+            this._outboundDiagnostics.recommendation = 'O WhatsApp aceitou o envio sem confirmar a entrega. Nao reenvie automaticamente; revise o diagnostico antes de qualquer nova tentativa.';
         }
     }
 
@@ -1358,6 +1352,59 @@ class WhatsAppManager extends EventEmitter {
         }, { ...options, contentForDiagnostics });
     }
 
+    async sendCampaignBlock(number, block = {}, media = null, options = {}) {
+        const type = String(block.type || 'text').toLowerCase();
+        if (type === 'poll') {
+            return this.sendPoll(
+                number,
+                String(block.question || '').slice(0, 255),
+                Array.isArray(block.options) ? block.options : [],
+                { ...options, selectableCount: block.selectableCount },
+            );
+        }
+
+        if (type === 'text') {
+            return this.sendMessage(number, String(block.text || ''), null, options);
+        }
+
+        if (!['image', 'video', 'audio', 'document'].includes(type)) {
+            throw new Error(`Tipo de bloco de campanha nao suportado: ${type}`);
+        }
+
+        const buffer = Buffer.isBuffer(media?.buffer)
+            ? media.buffer
+            : (media?.absolutePath ? { url: media.absolutePath } : null);
+        if (!buffer) throw new Error('Arquivo da campanha nao encontrado.');
+
+        const caption = String(block.caption || '').slice(0, 1024);
+        const mimeType = String(media?.mimeType || 'application/octet-stream').slice(0, 120);
+        const fileName = String(media?.fileName || 'arquivo').slice(0, 180);
+        const diagnostics = {
+            mediaType: type,
+            fileName,
+            mimeType,
+            caption,
+        };
+
+        return this._sendTrackedPayload(`campaign_${type}`, number, async (jid) => {
+            if (type === 'image') return this.sock.sendMessage(jid, { image: buffer, caption });
+            if (type === 'video') return this.sock.sendMessage(jid, { video: buffer, caption, mimetype: mimeType });
+            if (type === 'audio') {
+                return this.sock.sendMessage(jid, {
+                    audio: buffer,
+                    mimetype: mimeType === 'application/octet-stream' ? 'audio/mpeg' : mimeType,
+                    ptt: block.ptt === true,
+                });
+            }
+            return this.sock.sendMessage(jid, {
+                document: buffer,
+                mimetype: mimeType,
+                fileName,
+                caption,
+            });
+        }, { ...options, contentForDiagnostics: diagnostics });
+    }
+
     async sendPoll(number, question, options, sendOptions = {}) {
         const cleanOptions = options.filter(o => o && o.trim()).slice(0, 12);
         if (cleanOptions.length < 2) throw new Error('Enquete precisa de pelo menos 2 opcoes');
@@ -1368,7 +1415,7 @@ class WhatsAppManager extends EventEmitter {
                     poll: {
                         name: question.substring(0, 255),
                         values: cleanOptions,
-                        selectableCount: 1,
+                        selectableCount: Math.max(1, Math.min(cleanOptions.length, Number(sendOptions.selectableCount) || 1)),
                     },
                 });
             }
@@ -1378,7 +1425,7 @@ class WhatsAppManager extends EventEmitter {
                     poll: {
                         name: question.substring(0, 255),
                         values: cleanOptions,
-                        selectableCount: 1,
+                        selectableCount: Math.max(1, Math.min(cleanOptions.length, Number(sendOptions.selectableCount) || 1)),
                     },
                 }, { useUserDevicesCache: false });
             }
@@ -1387,7 +1434,7 @@ class WhatsAppManager extends EventEmitter {
                 poll: {
                     name: question.substring(0, 255),
                     values: cleanOptions,
-                    selectableCount: 1,
+                    selectableCount: Math.max(1, Math.min(cleanOptions.length, Number(sendOptions.selectableCount) || 1)),
                 },
             });
         }, {

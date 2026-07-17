@@ -22,3 +22,5 @@ export const DOCS_DIR = STORAGE_ROOT
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const LEADS_FILE = path.join(DATA_DIR, 'leads.json');
 export const PDF_CACHE_FILE = path.join(DATA_DIR, 'pdf-cache.json');
+export const CAMPAIGNS_FILE = path.join(DATA_DIR, 'campaigns.json');
+export const CAMPAIGN_MEDIA_DIR = path.join(DATA_DIR, 'campaign-media');

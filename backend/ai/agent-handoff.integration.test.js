@@ -136,6 +136,41 @@ test('persists the lead and notifies the consultant before confirming a critical
   assert.equal(lead.handoffClientConfirmed, true);
 });
 
+test('routes the first campaign reply directly to the consultant when campaign AI replies are disabled', async () => {
+  writeConfig();
+  const wa = new MockWhatsApp();
+  const phone = '5511987654018';
+  saveLead(phone, {
+    number: phone,
+    displayNumber: phone,
+    phone,
+    phoneResolved: true,
+    name: 'Cliente Campanha',
+    status: 'new',
+    stage: 'new',
+    history: [{ role: 'assistant', content: 'Oi! Posso te explicar a protecao veicular?', ts: Date.now() - 1000 }],
+    campaignId: 'campaign-direct-human',
+    campaignName: 'Retorno direto',
+    campaignSentAt: new Date().toISOString(),
+    campaignLoopHandled: false,
+    campaignAiRepliesEnabled: false,
+  });
+
+  await handleIncomingMessage(wa, textMessage(phone, 'sim, pode me explicar'));
+
+  assert.equal(wa.messages.length, 2);
+  assert.equal(wa.messages[0].target, consultant.phone);
+  assert.match(wa.messages[0].message, /ATENDIMENTO HUMANO SOLICITADO/i);
+  assert.match(wa.messages[0].message, /sim, pode me explicar/i);
+  assert.equal(wa.messages[1].target, phone);
+  assert.match(wa.messages[1].message, /encaminhei para um consultor/i);
+
+  const lead = getLead(phone);
+  assert.equal(lead.campaignLoopHandled, true);
+  assert.equal(lead.status, 'human_requested');
+  assert.equal(lead.lastIntent, 'human_requested');
+});
+
 test('asks only for WhatsApp on unresolved LID and then completes the same handoff', async () => {
   writeConfig();
   const wa = new MockWhatsApp();
